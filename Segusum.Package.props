@@ -1,0 +1,10 @@
+<Project>
+  <!-- Versione condivisa dei package pubblici correlati. -->
+  <PropertyGroup>
+    <Version>0.1.0</Version>
+    <Authors>Seguso</Authors>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <!-- RepositoryUrl verrà impostato quando nascerà il repository pubblico. -->
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+</Project>

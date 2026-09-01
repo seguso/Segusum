@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Seg</RootNamespace>
+    <AssemblyName>Segusum</AssemblyName>
+    <PackageId>Segusum</PackageId>
+    <Title>Segusum</Title>
+    <Description>Engine per avventure testuali interattive.</Description>
+    <PackageTags>interactive-fiction;text-adventure;game-engine</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <IsPackable>true</IsPackable>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+  </PropertyGroup>
+
+  <Import Project="../Segusum.Package.props" />
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="db.Designer.cs" />
+    <Compile Remove="walk.cs" />
+    <Compile Remove="ucVerb.xaml.cs" />
+    <Compile Remove="go.cs" />
+    <Compile Remove="unary_action_handler.cs" />
+    <Compile Remove="UnaryVerb.cs" />
+    <Compile Remove="pickUp.cs" />
+    <Compile Remove="containerMultiple.cs" />
+    <Compile Remove="roomRepresentsContainer.cs" />
+    <Compile Remove="lookAt.cs" />
+    <Compile Remove="talkTo.cs" />
+    <Compile Remove="CutSceneWhenTheySeeYouCarrying.cs" />
+    <Compile Remove="CutSceneAndPriority.cs" />
+    <Compile Remove="npcSchedule.cs" />
+    <Compile Remove="npsScheduleSimple.cs" />
+    <Compile Remove="UnaryActionInput.cs" />
+    <Compile Remove="parHtmlServer.cs" />
+    <Compile Remove="OutlinedText.cs" />
+    <Compile Remove="par.cs" />
+    <Page Remove="ucVerb.xaml" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="Segusum.AspNetCore/Segusum.AspNetCore.csproj" />
+  <Project Path="Segusum.Persistence.Tests/Segusum.Persistence.Tests.csproj" />
+  <Project Path="Segusum.Persistence/Segusum.Persistence.csproj" />
+  <Project Path="Segusum.Tests/Segusum.Tests.csproj" />
+  <Project Path="Segusum/Segusum.csproj" />
+</Solution>
