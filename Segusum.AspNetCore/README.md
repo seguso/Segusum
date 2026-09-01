@@ -1,5 +1,7 @@
 # Segusum.AspNetCore
 
+Il package è distribuito con licenza MIT.
+
 Integrazione ASP.NET Core del motore Segusum. Il package contiene il
 controller HTTP condiviso e l'infrastruttura comune: un nuovo gioco non deve
 duplicare controller o action `/api`.

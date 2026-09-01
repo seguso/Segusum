@@ -4,7 +4,8 @@
     <Version>0.1.0</Version>
     <Authors>Seguso</Authors>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
-    <!-- RepositoryUrl verrà impostato quando nascerà il repository pubblico. -->
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/seguso/Segusum</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
   </PropertyGroup>
 </Project>
