@@ -5,18 +5,16 @@
     <Nullable>enable</Nullable>
     <IsPackable>true</IsPackable>
     <PackageId>Segusum.Analyzers</PackageId>
-    <IncludeBuildOutput>false</IncludeBuildOutput>
-    <DevelopmentDependency>true</DevelopmentDependency>
+    <BuildOutputTargetFolder>analyzers/dotnet/cs</BuildOutputTargetFolder>
   </PropertyGroup>
   <Import Project="../Segusum.Package.props" />
+  <PropertyGroup>
+    <Version>0.1.1</Version>
+  </PropertyGroup>
   <ItemGroup>
+    <None Include="Segusum.Analyzers.targets" Pack="true" PackagePath="buildTransitive" />
     <PackageReference Include="Microsoft.CodeAnalysis.Common" Version="4.14.0" PrivateAssets="all" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" PrivateAssets="all" />
     <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" PrivateAssets="all" />
   </ItemGroup>
-  <Target Name="PackAnalyzer" BeforeTargets="Pack">
-    <ItemGroup>
-      <None Include="$(TargetPath)" Pack="true" PackagePath="analyzers/dotnet/cs" />
-    </ItemGroup>
-  </Target>
 </Project>

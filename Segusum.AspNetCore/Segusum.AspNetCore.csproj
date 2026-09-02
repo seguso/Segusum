@@ -7,7 +7,6 @@
     <RootNamespace>Segusum.AspNetCore</RootNamespace>
     <AssemblyName>Segusum.AspNetCore</AssemblyName>
     <PackageId>Segusum.AspNetCore</PackageId>
-    <Version>0.1.0</Version>
     <Title>Segusum ASP.NET Core integration</Title>
     <Description>Integrazione ASP.NET Core per giochi creati con Segusum.</Description>
     <Authors>Seguso</Authors>
@@ -18,6 +17,9 @@
   </PropertyGroup>
 
   <Import Project="../Segusum.Package.props" />
+  <PropertyGroup>
+    <Version>0.1.1</Version>
+  </PropertyGroup>
 
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="\" />
@@ -26,6 +28,7 @@
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.NewtonsoftJson" Version="10.0.0" />
+    <PackageReference Include="Segusum.Analyzers" Version="0.1.1" PrivateAssets="none" IncludeAssets="runtime; build; native; contentfiles; analyzers; buildtransitive" />
     <ProjectReference Include="../Segusum/Segusum.csproj" />
     <ProjectReference Include="../Segusum.Persistence/Segusum.Persistence.csproj" />
   </ItemGroup>
