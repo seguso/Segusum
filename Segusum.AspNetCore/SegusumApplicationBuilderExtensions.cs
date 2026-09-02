@@ -17,17 +17,16 @@ namespace Segusum.AspNetCore;
 public static class SegusumApplicationBuilderExtensions
 {
     public static IServiceCollection AddSegusumStorage(this IServiceCollection services,
-        Action<SegusumStorageOptions>? configure = null)
+        Action<SegusumStorageOptions> configure)
     {
-        var storageOptions = configure is null
-            ? SegusumStorageOptions.FromEnvironment()
-            : new SegusumStorageOptions();
-        if (configure is not null)
-            configure(storageOptions);
+        ArgumentNullException.ThrowIfNull(configure);
+        var storageOptions = new SegusumStorageOptions();
+        configure(storageOptions);
 
         if (storageOptions.Provider == SegusumStorageProvider.SqlServer &&
             string.IsNullOrWhiteSpace(storageOptions.ConnectionString))
-            throw new InvalidOperationException("Configurare una connection string SQL Server valida.");
+            throw new InvalidOperationException(
+                "SQL Server storage requires a non-empty connection string supplied by the host via UseSqlServer.");
 
         StorageOptions.Configure(storageOptions);
         services.AddSingleton(storageOptions);

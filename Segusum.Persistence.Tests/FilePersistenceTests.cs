@@ -7,27 +7,19 @@ namespace Segusum.Persistence.Tests;
 public class FilePersistenceTests
 {
     [Fact]
-    public void EnvironmentSqlModeRequiresStandardConnectionString()
+    public void ExplicitSqlConnectionStringIsRetained()
     {
-        var oldStorage = Environment.GetEnvironmentVariable("SEGUSUM_STORAGE");
-        var oldConnection = Environment.GetEnvironmentVariable("ConnectionStrings__Segusum");
-        var oldLegacyConnection = Environment.GetEnvironmentVariable("SEGUSUM_CONNECTION_STRING");
-        try
-        {
-            Environment.SetEnvironmentVariable("SEGUSUM_STORAGE", null);
-            Environment.SetEnvironmentVariable("ConnectionStrings__Segusum", null);
-            Environment.SetEnvironmentVariable("SEGUSUM_CONNECTION_STRING", null);
+        const string connectionString = "Server=example;Database=game;Trusted_Connection=True";
+        var options = new SegusumStorageOptions().UseSqlServer(connectionString);
 
-            var error = Assert.Throws<InvalidOperationException>(SegusumStorageOptions.FromEnvironment);
+        Assert.Equal(SegusumStorageProvider.SqlServer, options.Provider);
+        Assert.Equal(connectionString, options.ConnectionString);
+    }
 
-            Assert.Contains("ConnectionStrings:Segusum", error.Message, StringComparison.Ordinal);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("SEGUSUM_STORAGE", oldStorage);
-            Environment.SetEnvironmentVariable("ConnectionStrings__Segusum", oldConnection);
-            Environment.SetEnvironmentVariable("SEGUSUM_CONNECTION_STRING", oldLegacyConnection);
-        }
+    [Fact]
+    public void EmptySqlConnectionStringIsRejected()
+    {
+        Assert.Throws<ArgumentException>(() => new SegusumStorageOptions().UseSqlServer(" "));
     }
 
     [Fact]

@@ -34,9 +34,9 @@ app.Run();
 
 Non servono controller custom né la registrazione manuale degli application
 part: gli endpoint standard sono forniti dall'integrazione `Segusum.AspNetCore`.
-`UseFile` è la modalità semplice e cross-platform per sviluppo locale e
-installazioni semplici. SQL Server è supportato, ma provisioning e migrazioni
-automatiche saranno rifiniti e verificati in una fase successiva su Windows.
-
-Per configurare la modalità file senza hardcodare il percorso si possono usare
-`SEGUSUM_STORAGE=file` e `SEGUSUM_FILE_PATH`.
+L'host decide autonomamente come ottenere il percorso, il nome del database o
+la connection string e li passa esplicitamente a `UseFile`, `UseInMemory` o
+`UseSqlServer`. Segusum non legge direttamente file di configurazione,
+environment variables o `IConfiguration`. SQL Server è supportato, ma
+provisioning e migrazioni automatiche saranno rifiniti e verificati in una
+fase successiva su Windows.

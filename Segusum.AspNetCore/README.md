@@ -41,10 +41,12 @@ Il package è `net10.0`, quindi è compatibile con host .NET 10
 cross-platform, inclusi Linux e Termux. Il gioco deve fornire i propri file
 statici e le proprie route di presentazione quando desidera una UI diversa.
 
-Per configurazione senza codice si possono usare `SEGUSUM_STORAGE=file` e
-`SEGUSUM_FILE_PATH`; `AddSegusumStorage()` interpreta queste variabili. Per SQL
-Server l'host deve leggere `builder.Configuration.GetConnectionString("Segusum")`
-e passare il valore a `UseSqlServer`. Se manca
-`ConnectionStrings:Segusum`, l'avvio fallisce esplicitamente: non esiste un
-fallback a una macchina SQL locale. Il provisioning e le migrazioni
-automatiche saranno documentati in una fase successiva.
+`AddSegusumStorage` richiede una lambda esplicita. L'host può leggere la
+configurazione con il meccanismo che preferisce e passare il valore a
+`UseSqlServer`, oppure passare direttamente `UseFile` o `UseInMemory`. Per
+esempio, in un host ASP.NET Core è possibile usare
+`builder.Configuration.GetConnectionString("Segusum")`; questa è una scelta
+dell'host, non una convenzione richiesta da Segusum. Se la stringa SQL viene
+passata vuota, l'avvio fallisce esplicitamente e non esiste un fallback a una
+macchina SQL locale. Il provisioning e le migrazioni automatiche saranno
+documentati in una fase successiva.

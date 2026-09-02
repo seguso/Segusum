@@ -32,13 +32,18 @@ app.Run();
 ```
 
 L'integrazione ASP.NET Core registra automaticamente i controller standard;
-la persistenza standard e l'integrazione web sono package separati.
+la persistenza standard e l'integrazione web sono package separati. L'host
+decide autonomamente come ottenere i valori di configurazione e li passa alle
+options: Segusum non legge file di configurazione, environment variables o
+`IConfiguration`.
 
 `UseFile` è il percorso consigliato per sviluppo locale e installazioni
 semplici: mantiene il formato JSON storico (con la migrazione shardata già
 supportata) usando internamente la cache EF InMemory. Il percorso può essere
 assoluto o relativo e le directory mancanti vengono create quando occorre.
-In alternativa `SEGUSUM_STORAGE=file` e `SEGUSUM_FILE_PATH` consentono di
-configurarlo senza hardcodare il percorso nel programma. SQL Server resta
-supportato, ma provisioning del database e migrazioni automatiche sono
-rimandati a una fase dedicata e non sono promessi da questo quick start.
+SQL Server resta supportato, ma provisioning del database e migrazioni
+automatiche sono rimandati a una fase dedicata e non sono promessi da questo
+quick start. Per SQL Server l'host passa una stringa già risolta con
+`options.UseSqlServer(connectionString)`. La sorgente può essere scelta
+liberamente dall'applicazione (JSON, environment variables, User Secrets o
+un provider personalizzato).

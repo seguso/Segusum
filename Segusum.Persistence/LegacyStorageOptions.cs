@@ -16,10 +16,11 @@ internal static class StorageOptions
 
     public static bool IsFile => current.FilePersistenceEnabled;
     public static string FilePath => current.FilePath
-        ?? Path.Combine(AppContext.BaseDirectory, "data", "segusum.json");
+        ?? throw new InvalidOperationException(
+            "File storage requires a path supplied by the host via UseFile.");
     public static string ConnectionString => current.ConnectionString
         ?? throw new InvalidOperationException(
-            "SQL Server storage requires ConnectionStrings:Segusum. " +
-            "Configure it in the host and call UseSqlServer explicitly.");
+            "SQL Server storage requires a non-empty connection string supplied " +
+            "by the host via UseSqlServer.");
     public static string InMemoryDatabaseName => current.InMemoryDatabaseName;
 }

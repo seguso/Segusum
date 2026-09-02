@@ -60,37 +60,4 @@ public sealed class SegusumStorageOptions
         return this;
     }
 
-    /// <summary>
-    /// Builds options for the file and in-memory modes from the generic
-    /// SEGUSUM_* environment variables. SQL configuration belongs to the
-    /// host application, which should read ConnectionStrings:Segusum through
-    /// its normal configuration and call UseSqlServer explicitly.
-    /// </summary>
-    public static SegusumStorageOptions FromEnvironment()
-    {
-        var options = new SegusumStorageOptions();
-        var mode = Environment.GetEnvironmentVariable("SEGUSUM_STORAGE");
-        if (string.Equals(mode, "file", StringComparison.OrdinalIgnoreCase))
-        {
-            var path = Environment.GetEnvironmentVariable("SEGUSUM_FILE_PATH")
-                ?? Path.Combine(AppContext.BaseDirectory, "data", "segusum.json");
-            options.UseFile(path);
-        }
-        else if (string.Equals(mode, "memory", StringComparison.OrdinalIgnoreCase))
-        {
-            options.UseInMemory(Environment.GetEnvironmentVariable("SEGUSUM_MEMORY_DATABASE") ?? "segusum-memory");
-        }
-        else
-        {
-            var connectionString = Environment.GetEnvironmentVariable("ConnectionStrings__Segusum");
-            if (string.IsNullOrWhiteSpace(connectionString))
-                throw new InvalidOperationException(
-                    "SQL Server storage requires ConnectionStrings:Segusum. " +
-                    "Configure it in the host and call UseSqlServer explicitly.");
-
-            options.UseSqlServer(connectionString);
-        }
-
-        return options;
-    }
 }
