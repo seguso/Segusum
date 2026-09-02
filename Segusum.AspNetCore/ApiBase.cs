@@ -9,6 +9,7 @@ using System.Text;
 using System.Threading;
 using System.Transactions;
 using Microsoft.AspNetCore.Mvc;
+using System.Xml;
 using System.Xml.Linq;
 #pragma warning disable 219
 
@@ -3249,7 +3250,23 @@ namespace Seg
 
             if (savegame != null)
             {
-                var xdoc = XDocument.Parse(savegame);
+                XDocument xdoc;
+                try
+                {
+                    xdoc = XDocument.Parse(savegame);
+                }
+                catch (XmlException e)
+                {
+                    // Savegames are currently XML. A savegame written by the
+                    // incompatible JSON serializer (or otherwise malformed)
+                    // must be treated as corrupted so the client can start a
+                    // new game instead of exposing an internal exception.
+                    savegameInvalid = true;
+                    SegusumProfiler.Log($"restore user={idUser} title={savegameTitle} phase=invalid-format " +
+                        $"elapsed_ms={restoreStopwatch.Elapsed.TotalMilliseconds:F1} xml_chars={savegame.Length} " +
+                        $"exception={e.GetType().Name}");
+                    return null;
+                }
 
                 var w = buildEmptyWorld(lang, currentTutorialMode.Value); // l'engine non conosce il tipo world
 
