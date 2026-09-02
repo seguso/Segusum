@@ -2,7 +2,8 @@
 
 Licenza: MIT.
 
-Segusum è il motore .NET per avventure testuali interattive. Il package contiene
+Segusum è un motore .NET per giochi di avventura. Può essere usato con un
+frontend testuale, grafico o con un'altra interfaccia. Il package contiene
 le API del motore e i tipi base per definire il proprio `World`; non contiene il
 contenuti narrativi o dati di un gioco specifico.
 

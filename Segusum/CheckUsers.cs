@@ -1,8 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Runtime.Serialization;
-//using WebApi2;
-//using WebApi2.Models;
 #pragma warning disable 219
 
 namespace Seg

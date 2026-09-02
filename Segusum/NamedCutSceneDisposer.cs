@@ -19,7 +19,7 @@ namespace Seg
             {
                 if (wo.cur_named_cs != null)
                 {
-                    wo.cur_named_cs.FirstSeenAt ??= wo.EngineNow;
+                    wo.cur_named_cs.FirstSeenAt ??= wo.EngineNowForInfrastructure;
                     if (!wo.namedCutScenesSeen.Contains(wo.cur_named_cs))
                     {
                         wo.namedCutScenesSeen.Insert(0, wo.cur_named_cs);

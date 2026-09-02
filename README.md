@@ -1,6 +1,6 @@
 # Segusum
 
-Segusum è un engine .NET per avventure testuali interattive. Questo repository
+Segusum è un engine .NET per giochi di avventura con interazioni e logica di mondo. Il frontend può essere testuale, grafico o un'altra interfaccia. Questo repository
 contiene soltanto il motore generico e la sua integrazione web: non contiene un
 gioco, contenuti narrativi o asset di un progetto specifico.
 

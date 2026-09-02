@@ -11,7 +11,7 @@
     <Title>Segusum ASP.NET Core integration</Title>
     <Description>Integrazione ASP.NET Core per giochi creati con Segusum.</Description>
     <Authors>Seguso</Authors>
-    <PackageTags>segusum;aspnetcore;interactive-fiction;text-adventure</PackageTags>
+    <PackageTags>segusum;aspnetcore;adventure-game;interactive-fiction;text-adventure</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <IsPackable>true</IsPackable>

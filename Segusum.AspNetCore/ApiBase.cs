@@ -10,8 +10,6 @@ using System.Threading;
 using System.Transactions;
 using Microsoft.AspNetCore.Mvc;
 using System.Xml.Linq;
-//using WebApi2;
-//using WebApi2.Models;
 #pragma warning disable 219
 
 namespace Seg

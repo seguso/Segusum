@@ -56,10 +56,10 @@ namespace Seg
         /// <summary>
         /// normalmente questo non sarebbe una proprietà del mondo ma dell'utente, così come i savegame names. Ma lo copio nel mondo perche' l'engine lo deve sapere ma l'utente dell'engine non lo può passare sempre all'engine.
         /// </summary>
-        public bool IsTextMode { get; internal set; }
+        public bool IsTextMode { get; protected internal set; }
 
-        public bool IsCasualMode { get; internal set; }
-        public bool IsTutorialMode { get; internal set; }
+        public bool IsCasualMode { get; protected internal set; }
+        public bool IsTutorialMode { get; protected internal set; }
         public bool IsCasual() => IsCasualMode;
         public virtual bool CasualModeKeepsExplanation(LogicObj first, LogicObj second) => false;
         public virtual Cycle CasualGenericFailureCycle() => null;
@@ -126,7 +126,7 @@ namespace Seg
 
         private readonly HashSet<Objective> allSeenObjectives = new HashSet<Objective>();
 
-        internal List<PastAction> pastActions = new List<PastAction>();
+        protected internal List<PastAction> pastActions = new List<PastAction>();
 
 
         internal List<NamedCutScene> namedCutScenesSeen = new List<NamedCutScene>();
@@ -134,7 +134,11 @@ namespace Seg
         // Central clock used by semantic timestamps.  Games may override it
         // with a deterministic test clock without changing the engine's other
         // DateTime.Now uses.
-        protected internal virtual DateTime EngineNow => DateTime.Now;
+        protected virtual DateTime EngineNow => DateTime.Now;
+
+        // Internal infrastructure access keeps the clock overridable by a
+        // derived World without widening the public API surface.
+        internal DateTime EngineNowForInfrastructure => EngineNow;
 
         internal ObjectiveAndHints[] hints = new ObjectiveAndHints[] { };
         public void setHints(ObjectiveAndHints[] hints)
@@ -282,6 +286,44 @@ namespace Seg
             return namedCutScenesSeen.Any(ncs => ncs.id.serId == ncsId.serId);
         }
 
+        // Derived games sometimes need the timestamp of a named scene to
+        // maintain their own legacy timing rules. Keep the serialized scene
+        // collection encapsulated while exposing the narrow operation they
+        // actually need.
+        protected internal DateTime? namedCutSceneFirstSeenAt(NamedCutSceneId id)
+            => namedCutScenesSeen.SingleOrDefault(ncs => ncs.id.serId == id.serId)?.FirstSeenAt;
+
+        protected internal void setNamedCutSceneFirstSeenAtIfMissing(
+            NamedCutSceneId id,
+            DateTime firstSeenAt)
+        {
+            var scene = namedCutScenesSeen.SingleOrDefault(ncs => ncs.id.serId == id.serId);
+            if (scene is not null) scene.FirstSeenAt ??= firstSeenAt;
+        }
+
+        // These protected seams support derived game test fixtures without
+        // exposing the serialized named-cutscene implementation publicly.
+        protected internal void clearNamedCutScenesForTesting() => namedCutScenesSeen.Clear();
+
+        protected internal DateTime? namedCutSceneFirstSeenAtForTesting(NamedCutSceneId id)
+            => namedCutSceneFirstSeenAt(id);
+
+        protected internal void markNamedCutSceneSeenForTesting(
+            NamedCutSceneId id,
+            Room room,
+            DateTime? firstSeenAt = null)
+        {
+            // Keep this fixture operation equivalent to the historical test
+            // seam: callers decide whether an entry already exists.
+            namedCutScenesSeen.Add(new NamedCutScene(id)
+            {
+                cs = new CutScene(canBeSkipped: true),
+                oggettiMenzionati = new(),
+                roomDoveEri = room,
+                FirstSeenAt = firstSeenAt
+            });
+        }
+
         //public virtual bool verbIsHighlightedNow(Verb v)
         //{
         //        return false;
@@ -291,7 +333,7 @@ namespace Seg
         /// lo stato del gioco. il gioco può trovarsi in uno di questi 3 stati: sto leggendo una cutscene (che può essere una cutscene dentro un dialogo o no), 
         /// sto visualizzando le domande di dialogo da chiedere, oppure sto guardando la stanza.
         /// </summary>
-        internal GameState gs;
+        protected internal GameState gs;
 
         /// <summary>
         /// il tempo attuale. il gioco è a turni. ad ogni azione che compi (diversa da look e talk e poche altre), il tempo avanza di uno.
@@ -1473,7 +1515,7 @@ namespace Seg
                 : null;
         }
 
-        internal string getExplanationGroupIntro(Explanation explanation)
+        protected internal string getExplanationGroupIntro(Explanation explanation)
         {
             if (explanation == null)
             {
@@ -5565,7 +5607,32 @@ namespace Seg
         //        return xdocObj;
         //}
 
-        internal XDocIndexed getXdocObjIndexedCached()
+        // Regression fixtures in a derived game assembly use the same engine
+        // execution pipeline as the web integration. Keep these seams
+        // protected instead of making the low-level static engine methods
+        // public API.
+        protected internal SegActionRes executeUseWithForTesting(
+            LogicObj first,
+            LogicObj target,
+            Explanation explanation,
+            bool youAlreadyKnowItWillFail,
+            string[] saveNames,
+            XDocIndexed xdi,
+            bool isTextMode)
+            => eng.executeActionUseWith(first, target, explanation,
+                youAlreadyKnowItWillFail, this, saveNames, xdi, isTextMode);
+
+        protected internal SegActionRes executeUseForForTesting(
+            LogicObj tool,
+            Objective objective,
+            Explanation explanation,
+            string[] saveNames,
+            XDocIndexed xdi,
+            bool isTextMode)
+            => eng.executeActionUseFor(tool, objective, explanation,
+                this, saveNames, xdi, isTextMode);
+
+        protected internal XDocIndexed getXdocObjIndexedCached()
         {
 
 

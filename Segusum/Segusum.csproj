@@ -8,8 +8,8 @@
     <AssemblyName>Segusum</AssemblyName>
     <PackageId>Segusum</PackageId>
     <Title>Segusum</Title>
-    <Description>Engine per avventure testuali interattive.</Description>
-    <PackageTags>interactive-fiction;text-adventure;game-engine</PackageTags>
+    <Description>Engine .NET per giochi di avventura, con logica di mondo e interazioni indipendenti dal frontend.</Description>
+    <PackageTags>adventure-game;interactive-fiction;text-adventure;game-engine</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <IsPackable>true</IsPackable>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
