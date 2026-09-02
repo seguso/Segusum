@@ -17,10 +17,6 @@
   </PropertyGroup>
 
   <Import Project="../Segusum.Package.props" />
-  <PropertyGroup>
-    <Version>0.1.1</Version>
-  </PropertyGroup>
-
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
@@ -28,7 +24,7 @@
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.NewtonsoftJson" Version="10.0.0" />
-    <PackageReference Include="Segusum.Analyzers" Version="0.1.1" PrivateAssets="none" IncludeAssets="runtime; build; native; contentfiles; analyzers; buildtransitive" />
+    <PackageReference Include="Segusum.Analyzers" Version="$(Version)" PrivateAssets="none" />
     <ProjectReference Include="../Segusum/Segusum.csproj" />
     <ProjectReference Include="../Segusum.Persistence/Segusum.Persistence.csproj" />
   </ItemGroup>

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -31,14 +32,25 @@ public sealed class CycleIdAnalyzer : DiagnosticAnalyzer
     private static void AnalyzeInvocation(SyntaxNodeAnalysisContext context, Dictionary<string, Location> ids)
     {
         var invocation = (InvocationExpressionSyntax)context.Node;
-        var method = context.SemanticModel.GetSymbolInfo(invocation).Symbol as IMethodSymbol;
-        if (method == null || (method.Name != "startCycle" && method.Name != "addToCycle") ||
-            method.Parameters.Length == 0 || method.Parameters[0].Type.SpecialType != SpecialType.System_String)
+        if (context.SemanticModel.GetSymbolInfo(invocation).Symbol is not IMethodSymbol method ||
+            !IsSegusumCycleApi(method))
             return;
 
-        if (invocation.ArgumentList.Arguments.Count == 0)
+        var stringParameter = method.Parameters.FirstOrDefault(p =>
+            p.Type.SpecialType == SpecialType.System_String);
+        if (stringParameter == null)
             return;
-        var argument = invocation.ArgumentList.Arguments[0].Expression;
+
+        // Extension-method invocations omit the receiver from ArgumentList.
+        var argumentIndex = method.IsExtensionMethod
+            ? (method.Parameters[0].Type.SpecialType == SpecialType.System_String
+                ? stringParameter.Ordinal
+                : stringParameter.Ordinal - 1)
+            : stringParameter.Ordinal;
+        if (argumentIndex < 0 || argumentIndex >= invocation.ArgumentList.Arguments.Count)
+            return;
+
+        var argument = invocation.ArgumentList.Arguments[argumentIndex].Expression;
         if (argument is not LiteralExpressionSyntax literal || !literal.IsKind(SyntaxKind.StringLiteralExpression))
         {
             context.ReportDiagnostic(Diagnostic.Create(NonLiteral, argument.GetLocation(), method.Name));
@@ -64,5 +76,18 @@ public sealed class CycleIdAnalyzer : DiagnosticAnalyzer
                 ids.Add(id, argument.GetLocation());
             }
         }
+    }
+
+    private static bool IsSegusumCycleApi(IMethodSymbol method)
+    {
+        if (method.Name != "startCycle" && method.Name != "addToCycle")
+            return false;
+
+        var containingType = method.ContainingType;
+        return containingType != null &&
+               containingType.ContainingNamespace?.ToDisplayString() == "Seg" &&
+               ((method.Name == "startCycle" && containingType.Name == "WorldBase") ||
+                (method.Name == "addToCycle" && containingType.Name == "Utils")) &&
+               method.Parameters.Any(p => p.Type.SpecialType == SpecialType.System_String);
     }
 }

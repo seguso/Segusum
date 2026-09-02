@@ -5,4 +5,5 @@
   <Project Path="Segusum.Tests/Segusum.Tests.csproj" />
   <Project Path="Segusum/Segusum.csproj" />
   <Project Path="Segusum.Analyzers/Segusum.Analyzers.csproj" />
+  <Project Path="Segusum.Analyzers.Tests/Segusum.Analyzers.Tests.csproj" />
 </Solution>

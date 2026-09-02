@@ -8,9 +8,6 @@
     <BuildOutputTargetFolder>analyzers/dotnet/cs</BuildOutputTargetFolder>
   </PropertyGroup>
   <Import Project="../Segusum.Package.props" />
-  <PropertyGroup>
-    <Version>0.1.1</Version>
-  </PropertyGroup>
   <ItemGroup>
     <None Include="Segusum.Analyzers.targets" Pack="true" PackagePath="buildTransitive" />
     <PackageReference Include="Microsoft.CodeAnalysis.Common" Version="4.14.0" PrivateAssets="all" />
