@@ -809,6 +809,9 @@ namespace Seg
 
                 }
 
+                public static Cycle addToCycle(this Cycle cyc, string Id, Action<DateTime?> a) => cyc.addToCycle(new CycleElemId(Id), a);
+                public static Cycle addToCycle(this Cycle cyc, string Id, params Action<DateTime?>[] actions) => cyc.addToCycle(new CycleElemId(Id), actions);
+
                 public static Cycle addToCycle(this Cycle cyc, CycleElemId Id, params Action<DateTime?>[] actions)
                 {
                         return cyc.addToCycle(Id, x =>
@@ -826,6 +829,7 @@ namespace Seg
                         return cyc;
 
                 }
+                public static Cycle addToCycle(this Cycle cyc, string Id, Importance importance, Action<DateTime?> a) => cyc.addToCycle(new CycleElemId(Id), importance, a);
 
                 //public void addToCycle(Cycle cyc, string Id, Action<DateTime?> a)
                 //{
@@ -841,6 +845,7 @@ namespace Seg
                         return cyc;
 
                 }
+                public static Cycle addToCycle(this Cycle cyc, string Id, Importance importance, Func<DateTime?, bool> cond, Action<DateTime?> a) => cyc.addToCycle(new CycleElemId(Id), importance, cond, a);
 
                 public static Cycle addToCycle(this Cycle cyc, CycleElemId Id, Func<DateTime?, bool> cond, Action<DateTime?> a)
                 {
@@ -848,6 +853,8 @@ namespace Seg
                         return cyc;
 
                 }
+                public static Cycle addToCycle(this Cycle cyc, string Id, Func<DateTime?, bool> cond, Action<DateTime?> a) => cyc.addToCycle(new CycleElemId(Id), cond, a);
+                public static Cycle addToCycle(this Cycle cyc, string Id, Func<DateTime?, bool> cond, params Action<DateTime?>[] actions) => cyc.addToCycle(new CycleElemId(Id), cond, actions);
 
                 public static Cycle addToCycle(this Cycle cyc, CycleElemId Id, Func<DateTime?, bool> cond, params Action<DateTime?>[] actions)
                 {
@@ -874,6 +881,8 @@ namespace Seg
                         return cyc;
 
                 }
+                public static Cycle addToCycle(this Cycle cyc, string Id, Repeat repeat, Action<DateTime?> a) => cyc.addToCycle(new CycleElemId(Id), repeat, a);
+                public static Cycle addToCycle(this Cycle cyc, string Id, Repeat repeat, params Action<DateTime?>[] actions) => cyc.addToCycle(new CycleElemId(Id), repeat, actions);
 
                 public static Cycle addToCycle(this Cycle cyc, CycleElemId Id, Repeat repeat, params Action<DateTime?>[] actions)
                 {
@@ -890,12 +899,15 @@ namespace Seg
                         return cyc;
 
                 }
+                public static Cycle addToCycle(this Cycle cyc, string Id, Importance i, Repeat repeat, Action<DateTime?> a) => cyc.addToCycle(new CycleElemId(Id), i, repeat, a);
                 public static Cycle addToCycle(this Cycle cyc, CycleElemId Id, Repeat repeat, Func<DateTime?, bool> cond, Action<DateTime?> a)
                 {
                         cyc.Add(new CycleElement(Id) { repeat = repeat, cond = cond, action = a });
                         return cyc;
 
                 }
+                public static Cycle addToCycle(this Cycle cyc, string Id, Repeat repeat, Func<DateTime?, bool> cond, Action<DateTime?> a) => cyc.addToCycle(new CycleElemId(Id), repeat, cond, a);
+                public static Cycle addToCycle(this Cycle cyc, string Id, Repeat repeat, Func<DateTime?, bool> cond, params Action<DateTime?>[] actions) => cyc.addToCycle(new CycleElemId(Id), repeat, cond, actions);
 
                 public static Cycle addToCycle(this Cycle cyc, CycleElemId Id, Repeat repeat, Func<DateTime?, bool> cond, params Action<DateTime?>[] actions)
                 {
@@ -912,6 +924,7 @@ namespace Seg
                         return cyc;
 
                 }
+                public static Cycle addToCycle(this Cycle cyc, string Id, Importance importance, Repeat repeat, Func<DateTime?, bool> cond, Action<DateTime?> a) => cyc.addToCycle(new CycleElemId(Id), importance, repeat, cond, a);
 
 
 

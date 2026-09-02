@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Tasks;
 using System.Xml.Linq;
@@ -13,16 +14,38 @@ namespace Seg
 
 
 
-        public class CycleElemId 
+        public class CycleElemId : IEquatable<CycleElemId>
         {
-                //public CycleElemId(string id)
-                //{
-                //        //wb.DeclaredCycleIds.Add(Id);
+                public CycleElemId()
+                {
+                }
 
-                //        Id = id;
-                //}
+                public CycleElemId(string id)
+                {
+                        if (string.IsNullOrWhiteSpace(id))
+                                throw new ArgumentException("L'ID del ciclo non può essere vuoto.", nameof(id));
 
-                //public string Id { get; set; }
+                        StableId = id;
+                }
+
+                public string? StableId { get; }
+
+                public bool Equals(CycleElemId? other)
+                {
+                        if (ReferenceEquals(this, other))
+                                return true;
+                        if (other is null)
+                                return false;
+                        return StableId != null &&
+                               other.StableId != null &&
+                               StringComparer.Ordinal.Equals(StableId, other.StableId);
+                }
+
+                public override bool Equals(object? obj) => Equals(obj as CycleElemId);
+
+                public override int GetHashCode() => StableId != null
+                        ? StringComparer.Ordinal.GetHashCode(StableId)
+                        : RuntimeHelpers.GetHashCode(this);
         }
 
         public static class CycleMemory

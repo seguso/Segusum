@@ -2039,6 +2039,21 @@ namespace Seg
                 }
             }
 
+            foreach (var cyc in howManyTimesElementExecuted.Keys
+                         .Concat(lastTimeElementExecuted.Keys)
+                         .Where(c => c?.StableId != null)
+                         .GroupBy(c => c.StableId, StringComparer.Ordinal)
+                         .Select(g => g.First()))
+            {
+                var xel = new XElement("cycleElem");
+                xelRoot.Add(xel);
+                xel.Add(new XAttribute("id", cyc.StableId!));
+                if (howManyTimesElementExecuted.ContainsKey(cyc))
+                    xel.Add(new XAttribute("howMany", howManyTimesElementExecuted[cyc]));
+                if (lastTimeElementExecuted.ContainsKey(cyc))
+                    xel.Add(new XAttribute("lastTime", lastTimeElementExecuted[cyc].ToString(CultureInfo.InvariantCulture)));
+            }
+
 
 
 
@@ -3525,13 +3540,15 @@ namespace Seg
 
             foreach (var xelCycleEl in xelRoot.Elements("cycleElem"))
             {
-                var name = xelCycleEl.Attribute("name").Value;
-                System.Reflection.PropertyInfo cycleElType = GetType().GetProperty(name, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+                var explicitId = xelCycleEl.Attribute("id")?.Value;
+                var name = xelCycleEl.Attribute("name")?.Value;
+                var ce = explicitId == null ? null : new CycleElemId(explicitId);
+                System.Reflection.PropertyInfo? cycleElType = name == null ? null : GetType().GetProperty(name, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
 
-                if (cycleElType != null)
+                if (ce != null || cycleElType != null)
                 {
 
-                    var ce = (CycleElemId)cycleElType.GetValue(this);
+                    ce ??= (CycleElemId)cycleElType!.GetValue(this)!;
 
                     var atHowMany = xelCycleEl.Attribute("howMany");
                     if (atHowMany != null)
@@ -6302,6 +6319,12 @@ namespace Seg
 
         }
 
+        public static Cycle startCycle(string Id, Importance isImportant, Repeat repeat, Func<DateTime?, bool> cond, Action<DateTime?> a)
+            => startCycle(new CycleElemId(Id), isImportant, repeat, cond, a);
+
+        public static Cycle startCycle(string Id, Repeat repeat, Func<DateTime?, bool> cond, Action<DateTime?> a)
+            => startCycle(new CycleElemId(Id), repeat, cond, a);
+
         public static Cycle startCycle(CycleElemId Id, Repeat repeat, Func<DateTime?, bool> cond, Action<DateTime?> a)
         {
             var li = new Cycle { new CycleElement(Id) { repeat = repeat, cond = cond, action = a, IsImportant = false } };
@@ -6317,6 +6340,9 @@ namespace Seg
             return li;
 
         }
+
+        public Cycle startCycle(string Id, Action<DateTime?> a) => startCycle(new CycleElemId(Id), a);
+        public Cycle startCycle(string Id, params Action<DateTime?>[] actions) => startCycle(new CycleElemId(Id), actions);
 
         public Cycle startCycle(CycleElemId Id, params Action<DateTime?>[] actions)
         {
@@ -6349,6 +6375,11 @@ namespace Seg
 
         }
 
+        public Cycle startCycle(string Id, Func<DateTime?, bool> cond, Action<DateTime?> a)
+            => startCycle(new CycleElemId(Id), cond, a);
+        public Cycle startCycle(string Id, Func<DateTime?, bool> cond, params Action<DateTime?>[] actions)
+            => startCycle(new CycleElemId(Id), cond, actions);
+
         public Cycle startCycle(CycleElemId Id, Func<DateTime?, bool> cond, params Action<DateTime?>[] actions)
         {
             return startCycle(Id, cond, x =>
@@ -6367,6 +6398,8 @@ namespace Seg
             return li;
 
         }
+        public Cycle startCycle(string Id, Importance i, Func<DateTime?, bool> cond, Action<DateTime?> a)
+            => startCycle(new CycleElemId(Id), i, cond, a);
         //public Cycle startCycle(string Id, Func<DateTime?, bool> cond, Action<DateTime?> a)
         //{
         //        var id2 = new CycleElemId(Id, this);
@@ -6384,6 +6417,10 @@ namespace Seg
             return li;
 
         }
+        public Cycle startCycle(string Id, Repeat repeat, Action<DateTime?> a)
+            => startCycle(new CycleElemId(Id), repeat, a);
+        public Cycle startCycle(string Id, Repeat repeat, params Action<DateTime?>[] actions)
+            => startCycle(new CycleElemId(Id), repeat, actions);
 
         public Cycle startCycle(CycleElemId Id, Repeat repeat, params Action<DateTime?>[] actions)
         {
@@ -6403,6 +6440,8 @@ namespace Seg
             return li;
 
         }
+        public Cycle startCycle(string Id, Importance importance, Repeat repeat, Action<DateTime?> a)
+            => startCycle(new CycleElemId(Id), importance, repeat, a);
         //public void named_cut_scene(string title, IEnumerable<logic_obj> oggetti_menzionati,  Action a)
         //{
         //    begin_named_cut_scene(title, oggetti_menzionati);
