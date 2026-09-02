@@ -24,12 +24,13 @@ public sealed class CycleIdAnalyzer : DiagnosticAnalyzer
         context.EnableConcurrentExecution();
         context.RegisterCompilationStartAction(start =>
         {
-            var ids = new Dictionary<string, Location>(StringComparer.Ordinal);
+            var ids = new List<(string Id, Location Location)>();
             start.RegisterSyntaxNodeAction(c => AnalyzeInvocation(c, ids), SyntaxKind.InvocationExpression);
+            start.RegisterCompilationEndAction(c => ReportDuplicateIds(c, ids));
         });
     }
 
-    private static void AnalyzeInvocation(SyntaxNodeAnalysisContext context, Dictionary<string, Location> ids)
+    private static void AnalyzeInvocation(SyntaxNodeAnalysisContext context, List<(string Id, Location Location)> ids)
     {
         var invocation = (InvocationExpressionSyntax)context.Node;
         if (context.SemanticModel.GetSymbolInfo(invocation).Symbol is not IMethodSymbol method ||
@@ -66,14 +67,32 @@ public sealed class CycleIdAnalyzer : DiagnosticAnalyzer
 
         lock (ids)
         {
-            if (ids.TryGetValue(id, out var first))
+            ids.Add((id, argument.GetLocation()));
+        }
+    }
+
+    private static void ReportDuplicateIds(CompilationAnalysisContext context, List<(string Id, Location Location)> ids)
+    {
+        var treeOrder = context.Compilation.SyntaxTrees
+            .Select((tree, index) => (tree, index))
+            .ToDictionary(item => item.tree, item => item.index);
+
+        var occurrences = ids
+            .OrderBy(item => treeOrder[item.Location.SourceTree!])
+            .ThenBy(item => item.Location.SourceSpan.Start)
+            .ToList();
+
+        foreach (var group in occurrences.GroupBy(item => item.Id, StringComparer.Ordinal))
+        {
+            var first = group.First();
+            var firstLine = first.Location.GetLineSpan().StartLinePosition.Line + 1;
+            foreach (var duplicate in group.Skip(1))
             {
-                var firstLine = first.GetLineSpan().StartLinePosition.Line + 1;
-                context.ReportDiagnostic(Diagnostic.Create(Duplicate, argument.GetLocation(), id, firstLine));
-            }
-            else
-            {
-                ids.Add(id, argument.GetLocation());
+                context.ReportDiagnostic(Diagnostic.Create(
+                    Duplicate,
+                    duplicate.Location,
+                    duplicate.Id,
+                    firstLine));
             }
         }
     }
