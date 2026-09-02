@@ -1817,6 +1817,8 @@ namespace Seg
 
 
 
+            ValidateAlternatePositionDefinitions();
+
             maybeRebuildXmlForTranslation();
 
             initializeGame();
@@ -6317,6 +6319,25 @@ namespace Seg
 
             return li;
 
+        }
+
+        private void ValidateAlternatePositionDefinitions()
+        {
+            var invalid = allAlternatePositions
+                .FirstOrDefault(position => string.IsNullOrWhiteSpace(position.serId));
+            if (invalid != null)
+            {
+                throw new InvalidOperationException("Ogni AlternatePosition deve avere un ID non vuoto.");
+            }
+
+            var duplicate = allAlternatePositions
+                .GroupBy(position => position.serId, StringComparer.Ordinal)
+                .FirstOrDefault(group => group.Count() > 1);
+            if (duplicate != null)
+            {
+                throw new InvalidOperationException(
+                    $"Esistono più AlternatePosition con l'ID '{duplicate.Key}'. Gli ID devono essere univoci.");
+            }
         }
 
         public static Cycle startCycle(string Id, Importance isImportant, Repeat repeat, Func<DateTime?, bool> cond, Action<DateTime?> a)
