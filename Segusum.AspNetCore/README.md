@@ -42,7 +42,9 @@ cross-platform, inclusi Linux e Termux. Il gioco deve fornire i propri file
 statici e le proprie route di presentazione quando desidera una UI diversa.
 
 Per configurazione senza codice si possono usare `SEGUSUM_STORAGE=file` e
-`SEGUSUM_FILE_PATH`; `AddSegusumStorage()` interpreta queste variabili. SQL
-Server resta disponibile, ma il provisioning e le migrazioni automatiche non
-fanno parte della verifica file-mode descritta qui e saranno documentati in
-una fase successiva.
+`SEGUSUM_FILE_PATH`; `AddSegusumStorage()` interpreta queste variabili. Per SQL
+Server l'host deve leggere `builder.Configuration.GetConnectionString("Segusum")`
+e passare il valore a `UseSqlServer`. Se manca
+`ConnectionStrings:Segusum`, l'avvio fallisce esplicitamente: non esiste un
+fallback a una macchina SQL locale. Il provisioning e le migrazioni
+automatiche saranno documentati in una fase successiva.

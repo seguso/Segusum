@@ -10,7 +10,7 @@ namespace Seg;
 /// </summary>
 internal static class StorageOptions
 {
-    private static SegusumStorageOptions current = SegusumStorageOptions.FromEnvironment();
+    private static SegusumStorageOptions current = new();
 
     internal static void Configure(SegusumStorageOptions options) => current = options;
 
@@ -18,6 +18,8 @@ internal static class StorageOptions
     public static string FilePath => current.FilePath
         ?? Path.Combine(AppContext.BaseDirectory, "data", "segusum.json");
     public static string ConnectionString => current.ConnectionString
-        ?? "Server=.\\SQLEXPRESS;Database=segusum;Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=True";
+        ?? throw new InvalidOperationException(
+            "SQL Server storage requires ConnectionStrings:Segusum. " +
+            "Configure it in the host and call UseSqlServer explicitly.");
     public static string InMemoryDatabaseName => current.InMemoryDatabaseName;
 }

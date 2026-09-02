@@ -61,8 +61,10 @@ public sealed class SegusumStorageOptions
     }
 
     /// <summary>
-    /// Builds the default options from the generic SEGUSUM_* environment
-    /// variables. SQL remains the legacy default when no mode is specified.
+    /// Builds options for the file and in-memory modes from the generic
+    /// SEGUSUM_* environment variables. SQL configuration belongs to the
+    /// host application, which should read ConnectionStrings:Segusum through
+    /// its normal configuration and call UseSqlServer explicitly.
     /// </summary>
     public static SegusumStorageOptions FromEnvironment()
     {
@@ -80,8 +82,13 @@ public sealed class SegusumStorageOptions
         }
         else
         {
-            options.UseSqlServer(Environment.GetEnvironmentVariable("SEGUSUM_CONNECTION_STRING")
-                ?? "Server=.\\SQLEXPRESS;Database=segusum;Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=True");
+            var connectionString = Environment.GetEnvironmentVariable("ConnectionStrings__Segusum");
+            if (string.IsNullOrWhiteSpace(connectionString))
+                throw new InvalidOperationException(
+                    "SQL Server storage requires ConnectionStrings:Segusum. " +
+                    "Configure it in the host and call UseSqlServer explicitly.");
+
+            options.UseSqlServer(connectionString);
         }
 
         return options;

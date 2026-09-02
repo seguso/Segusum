@@ -7,6 +7,30 @@ namespace Segusum.Persistence.Tests;
 public class FilePersistenceTests
 {
     [Fact]
+    public void EnvironmentSqlModeRequiresStandardConnectionString()
+    {
+        var oldStorage = Environment.GetEnvironmentVariable("SEGUSUM_STORAGE");
+        var oldConnection = Environment.GetEnvironmentVariable("ConnectionStrings__Segusum");
+        var oldLegacyConnection = Environment.GetEnvironmentVariable("SEGUSUM_CONNECTION_STRING");
+        try
+        {
+            Environment.SetEnvironmentVariable("SEGUSUM_STORAGE", null);
+            Environment.SetEnvironmentVariable("ConnectionStrings__Segusum", null);
+            Environment.SetEnvironmentVariable("SEGUSUM_CONNECTION_STRING", null);
+
+            var error = Assert.Throws<InvalidOperationException>(SegusumStorageOptions.FromEnvironment);
+
+            Assert.Contains("ConnectionStrings:Segusum", error.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("SEGUSUM_STORAGE", oldStorage);
+            Environment.SetEnvironmentVariable("ConnectionStrings__Segusum", oldConnection);
+            Environment.SetEnvironmentVariable("SEGUSUM_CONNECTION_STRING", oldLegacyConnection);
+        }
+    }
+
+    [Fact]
     public void FileModePersistsAndReloadsUserIpAndSave()
     {
         var root = Path.Combine(Path.GetTempPath(), "segusum-public-tests", Guid.NewGuid().ToString("N"));
