@@ -5,7 +5,7 @@ using Seg;
 namespace Segusum.Admin;
 
 public sealed record AuditQuery(int? GameId, string Search, string Category, bool ShowIgnored, int MinSeenCount, string Sort, bool Desc);
-public sealed record PastQuery(int? GameId, string Search, string UserName, int? UserId, string Type, int MinAttempts, bool SeparateExplanations);
+public sealed record PastQuery(int? GameId, string Search, string UserName, int? UserId, string Type, int MinAttempts, bool SeparateExplanations, bool OnlyUnhandled = true);
 public sealed record PastAttempt(int UserId, string UserName, int GameId, DateTime Time, string Type, string FirstId, string SecondId, string? Explanation, bool? HandlerCalled, string Details);
 public sealed record PastSummary(int GameId, string Type, string FirstId, string SecondId, string? Explanation, int Attempts, int Users, DateTime LastAttempt, bool AnyUnhandled);
 public sealed record AdminUser(int Id, string Name, int? GameId, DateTime? LastAccess, DateTime? LastSave);
@@ -79,6 +79,7 @@ public sealed class AdminDataService
         var saves = await db.savegame.AsNoTracking().Where(x => x.savegameTitle == "").ToListAsync();
         var attempts = users.SelectMany(u => saves.Where(s => s.idUser == u.id).OrderByDescending(s => s.dateModified).Take(1).SelectMany(s => ParseActions(s.savegameXml, u)))
             .Where(x => string.IsNullOrWhiteSpace(filter.Type) || x.Type == filter.Type)
+            .Where(x => !filter.OnlyUnhandled || x.HandlerCalled == false)
             .Where(x => string.IsNullOrWhiteSpace(filter.Search) || x.Details.Contains(filter.Search, StringComparison.OrdinalIgnoreCase) || x.FirstId.Contains(filter.Search, StringComparison.OrdinalIgnoreCase) || x.SecondId.Contains(filter.Search, StringComparison.OrdinalIgnoreCase)).ToList();
         var grouped = attempts.GroupBy(x => new { x.GameId, x.Type, x.FirstId, x.SecondId, Explanation = filter.SeparateExplanations ? x.Explanation : null });
         return grouped.Select(g => new PastSummary(g.Key.GameId, g.Key.Type, g.Key.FirstId, g.Key.SecondId, g.Key.Explanation, g.Count(), g.Select(x => x.UserId).Distinct().Count(), g.Max(x => x.Time), g.Any(x => x.HandlerCalled == false)))

@@ -37,6 +37,24 @@ public sealed class AdminDataServiceTests
         Assert.Equal(2, AdminDataService.ParseCycles("<world><cycleElem id=\"ciao\" howMany=\"3\" lastTime=\"2026-01-01T00:00:00Z\" /><cycleElem name=\"old\" howMany=\"1\" /></world>").Count);
     }
 
+    [Fact]
+    public async Task PastActionsCanHideHandledAttempts()
+    {
+        var options = new DbContextOptionsBuilder<segusumDb>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
+        await using (var seed = new segusumDb(options))
+        {
+            seed.user.Add(new user { id = 1, uname = "m", gameId = 2 });
+            seed.savegame.Add(new savegame { idUser = 1, savegameTitle = "", dateModified = DateTime.UtcNow, savegameXml = "<world><past_action_use_with lo1Id=\"a\" lo2Id=\"b\" handler_called=\"Y\" time=\"2026-01-01T00:00:00Z\" /><past_action_use_with lo1Id=\"c\" lo2Id=\"d\" handler_called=\"N\" time=\"2026-01-01T00:00:00Z\" /></world>" });
+            await seed.SaveChangesAsync();
+        }
+        var service = new AdminDataService(new Factory(options));
+        var onlyUnhandled = await service.FindPastActionsAsync(new(2, "", "", null, "", 1, true, true));
+        Assert.Single(onlyUnhandled);
+        Assert.Equal("c", onlyUnhandled[0].FirstId);
+        var all = await service.FindPastActionsAsync(new(2, "", "", null, "", 1, true, false));
+        Assert.Equal(2, all.Count);
+    }
+
     private sealed class Factory(DbContextOptions<segusumDb> options) : IDbContextFactory<segusumDb>
     {
         public segusumDb CreateDbContext() => new(options);
