@@ -2870,7 +2870,10 @@ namespace Seg
                 var debugTime = w.cur_time;
                 // devo salvare il nuovo mondo in memoria, se no al prossimo actionres c'è una discordanza di curtime tra client e server
                 autosave(db, user, w);
+                var sessionCreateStopwatch = Stopwatch.StartNew();
                 var sessionToken = sessionStore.Create(user.id, user.uname, true, false, user.gameId);
+                sessionCreateStopwatch.Stop();
+                SegusumProfiler.Log($"phase=session-create elapsed_ms={sessionCreateStopwatch.Elapsed.TotalMilliseconds:F1}");
                 Response.Headers["X-Segusum-Session-Token"] = sessionToken;
 
 
@@ -3839,8 +3842,11 @@ namespace Seg
                             if (gameId.GetValueOrDefault() == credGameId.GetValueOrDefault() & gameId.HasValue == credGameId.HasValue)
                             {
                                 isTextMode = !user.canPlayGraphicsMode.Value;
+                                var sessionCreateStopwatch = Stopwatch.StartNew();
                                 var sessionToken = sessionStore.Create(user.id, user.uname, isTextMode,
                                     user.isCasualMode == true, user.gameId);
+                                sessionCreateStopwatch.Stop();
+                                SegusumProfiler.Log($"phase=session-create elapsed_ms={sessionCreateStopwatch.Elapsed.TotalMilliseconds:F1}");
                                 Response.Headers["X-Segusum-Session-Token"] = sessionToken;
                                 var accessWriteStopwatch = Stopwatch.StartNew();
                                 var now = DateTimeOffset.UtcNow;
