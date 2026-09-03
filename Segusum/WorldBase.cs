@@ -2430,6 +2430,11 @@ namespace Seg
                         el.Add(new XAttribute("expl", pauf.exp.expId));
                     }
 
+                    if (pauf.handlerCalled != null)
+                    {
+                        el.Add(new XAttribute("handler_called", pauf.handlerCalled.Value ? "Y" : "N"));
+                    }
+
 
 
 
@@ -3197,9 +3202,11 @@ namespace Seg
                         exp = null;
                     }
 
+                    var handlerCalledAt = xelPa.Attribute("handler_called");
+                    bool? handlerCalled = handlerCalledAt == null ? null : handlerCalledAt.Value == "Y";
                     var time = DateTime.Parse(xelPa.Attribute("time").Value, CultureInfo.InvariantCulture);
 
-                    var pa = new PastActionUseFor(lo, obj, exp, time);
+                    var pa = new PastActionUseFor(lo, obj, exp, time, handlerCalled);
                     pastActions.Add(pa);
                 }
             }

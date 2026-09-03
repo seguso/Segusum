@@ -1,0 +1,6 @@
+@page "/users"
+@rendermode InteractiveServer
+@inject AdminDataService Data
+@inject NavigationManager Nav
+<h1>Utenti</h1><div class="toolbar"><label>Cerca username<input @bind="search" /></label><button @onclick="Reload">Cerca</button></div><table><thead><tr><th>ID</th><th>Username</th><th>Game</th><th>Ultimo accesso</th><th>Ultimo save</th><th></th></tr></thead><tbody>@foreach(var x in rows){<tr><td>@x.Id</td><td>@x.Name</td><td>@x.GameId</td><td>@x.LastAccess</td><td>@x.LastSave</td><td><button @onclick="() => Open(x.Id)">Dettagli</button></td></tr>}</tbody></table>
+@code {private string search="";private List<AdminUser> rows=new();protected override Task OnInitializedAsync()=>Reload();private async Task Reload()=>rows=await Data.FindUsersAsync(search);private void Open(int id)=>Nav.NavigateTo($"/users/{id}");}

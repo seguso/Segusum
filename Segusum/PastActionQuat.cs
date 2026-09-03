@@ -66,12 +66,14 @@ namespace Seg
                 public LogicObj lo;
                 public Objective ob;
                 public Explanation exp;
+                public bool? handlerCalled;
 
-                public PastActionUseFor(LogicObj lo, Objective ob, Explanation exp, DateTime date)
+                public PastActionUseFor(LogicObj lo, Objective ob, Explanation exp, DateTime date, bool? handlerCalled = null)
                 {
                         this.lo = lo ?? throw new ArgumentNullException(nameof(lo));
                         this.ob = ob ?? throw new ArgumentNullException(nameof(ob));
                         this.exp = exp ;
+                        this.handlerCalled = handlerCalled;
                         this.dateTime = date;
                 }
 

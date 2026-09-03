@@ -1902,7 +1902,7 @@ namespace Seg
                     if (ha1 != null)
                     {
 
-                        w.pastActions.Add(new PastActionUseFor(lo, ob, explanation, DateTime.Now));
+                        w.pastActions.Add(new PastActionUseFor(lo, ob, explanation, DateTime.Now, true));
 
 
                         {
@@ -1934,7 +1934,7 @@ namespace Seg
                     {
 
 
-                        w.pastActions.Add(new PastActionUseFor(lo, ob, explanation, DateTime.Now));
+                        w.pastActions.Add(new PastActionUseFor(lo, ob, explanation, DateTime.Now, false));
 
 
 
