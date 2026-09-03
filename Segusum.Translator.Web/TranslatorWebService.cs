@@ -22,16 +22,24 @@ public sealed class TranslatorWebService
     {
         if (string.IsNullOrWhiteSpace(RepositoryRoot)) throw new InvalidOperationException("Indica prima la root del progetto gioco.");
         var workspace = new TranslationWorkspace { RepositoryRoot = RepositoryRoot, CatalogPath = catalogPath };
-        workspace.Load();
-        workspace.Save();
+        workspace.Load(false);
         Workspace = workspace;
+    }
+
+    public CatalogSynchronizationResult Synchronize(string catalogPath) =>
+        new TranslationCatalogOperations().Synchronize(RepositoryRoot, catalogPath);
+
+    public CatalogSynchronizationResult Create(string language)
+    {
+        var result = new TranslationCatalogOperations().Create(RepositoryRoot, language);
+        Catalogs = TranslationCatalogFile.Discover(RepositoryRoot);
+        return result;
     }
 
     public void Refresh()
     {
         if (Workspace is null) return;
-        Workspace.Load();
-        Workspace.Save();
+        Workspace.Synchronize();
     }
     public void Save() => Workspace?.Save();
 }

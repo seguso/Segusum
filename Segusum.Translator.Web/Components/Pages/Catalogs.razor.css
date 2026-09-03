@@ -1,0 +1,7 @@
+.catalogs-page { max-width: 1200px; padding: 1rem 1.5rem; }
+.root-line, .new-catalog { display: flex; gap: .75rem; align-items: end; margin: 1rem 0; }
+.root-line label, .new-catalog label { display: grid; gap: .25rem; flex: 1; }
+.root-line input { width: 100%; }
+.catalog-list { width: 100%; border-collapse: collapse; }
+.catalog-list th, .catalog-list td { border-bottom: 1px solid #ddd; padding: .45rem .6rem; text-align: left; }
+.catalog-list button { margin-right: .4rem; }

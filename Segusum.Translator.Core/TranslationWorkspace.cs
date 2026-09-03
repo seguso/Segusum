@@ -23,7 +23,7 @@ public sealed class TranslationWorkspace
     public IReadOnlyList<TranslationWorkItem> Items { get; private set; } = Array.Empty<TranslationWorkItem>();
     public bool IsDirty { get; private set; }
 
-    public void Load(bool synchronize = true)
+    public void Load(bool synchronize = false)
     {
         var sources = extractor.Extract(RepositoryRoot, options: SourceDiscoveryOptions.Load(RepositoryRoot));
         var current = XDocument.Load(CatalogPath, LoadOptions.PreserveWhitespace);
@@ -41,6 +41,12 @@ public sealed class TranslationWorkspace
                 pair is not null, pair?.Similarity, pair?.OldValue, pair is null ? null : FindTranslation(document, pair.OldValue), source?.RelativePath, source?.LineNumber);
         }).ToArray() ?? Array.Empty<TranslationWorkItem>();
         IsDirty = synchronize && result.Changed;
+    }
+
+    public void Synchronize()
+    {
+        new TranslationCatalogOperations().Synchronize(RepositoryRoot, CatalogPath);
+        Load(false);
     }
 
     public void SetTranslation(int sequenceIndex, string translation)
@@ -82,6 +88,19 @@ public static class CatalogFileStore
             var settings = new XmlWriterSettings { Indent = true, OmitXmlDeclaration = false, Encoding = new UTF8Encoding(false), NewLineChars = "\n", NewLineHandling = NewLineHandling.Entitize };
             using (var writer = XmlWriter.Create(temp, settings)) document.Save(writer);
             File.Move(temp, path, true);
+        }
+        finally { if (File.Exists(temp)) File.Delete(temp); }
+    }
+
+    public static void SaveAtomicNew(string path, XDocument document)
+    {
+        if (File.Exists(path)) throw new IOException($"Catalog already exists: {path}");
+        var temp = path + ".tmp-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            var settings = new XmlWriterSettings { Indent = true, OmitXmlDeclaration = false, Encoding = new UTF8Encoding(false), NewLineChars = "\n", NewLineHandling = NewLineHandling.Entitize };
+            using (var writer = XmlWriter.Create(temp, settings)) document.Save(writer);
+            File.Move(temp, path);
         }
         finally { if (File.Exists(temp)) File.Delete(temp); }
     }

@@ -1,0 +1,41 @@
+@page "/catalogs"
+@rendermode InteractiveServer
+@inject TranslatorWebService Translator
+@inject NavigationManager Navigation
+
+<PageTitle>Catalogs - Segusum Translator</PageTitle>
+<div class="catalogs-page">
+    <h1>Catalogs</h1>
+    <div class="root-line">
+        <label>Root progetto <input @bind="root" placeholder="C:\progetti\gioco" /></label>
+        <button @onclick="LoadRoot">Apri root</button>
+    </div>
+    @if (!string.IsNullOrWhiteSpace(error)) { <div class="alert alert-danger">@error</div> }
+    @if (!string.IsNullOrWhiteSpace(Translator.RepositoryRoot))
+    {
+        <h2>Cataloghi esistenti</h2>
+        <table class="catalog-list">
+            <thead><tr><th>Lingua</th><th>File</th><th>Azioni</th></tr></thead>
+            <tbody>
+            @foreach (var catalog in Translator.Catalogs)
+            {
+                <tr><td>@catalog.Language</td><td>@catalog.Path</td><td>
+                    <button @onclick="() => Synchronize(catalog.Path)">Synchronize</button>
+                    <button @onclick="() => Open(catalog.Path)">Open editor</button>
+                </td></tr>
+            }
+            </tbody>
+        </table>
+        <h2>Nuovo catalogo</h2>
+        <div class="new-catalog"><label>Language <input @bind="language" placeholder="fr" maxlength="20" /></label><button @onclick="Create">Create</button></div>
+    }
+    else { <p>Indica la root di un progetto per vedere o creare i cataloghi.</p> }
+</div>
+
+@code {
+    private string root = "", language = "", error = "";
+    private void LoadRoot() { try { Translator.ConfigureRoot(root); error = ""; } catch (Exception ex) { error = ex.Message; } }
+    private void Synchronize(string path) { try { Translator.Synchronize(path); error = "Catalogo sincronizzato."; } catch (Exception ex) { error = ex.Message; } }
+    private void Create() { try { Translator.Create(language); language = ""; error = "Catalogo creato."; } catch (Exception ex) { error = ex.Message; } }
+    private void Open(string path) { try { Translator.Open(path); Navigation.NavigateTo("/"); } catch (Exception ex) { error = ex.Message; } }
+}

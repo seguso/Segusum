@@ -28,7 +28,7 @@ public sealed class TranslatorWorkspaceTests
         File.WriteAllText(path, "<root><str orig=\"Vecchia frase\" transl=\"Old translation\" obsolete=\"true\" /></root>");
         var workspace = new TranslationWorkspace { RepositoryRoot = root, CatalogPath = path };
 
-        workspace.Load();
+        workspace.Synchronize();
         Assert.Equal(new[] { "Nuova frase", "Vecchia frase" }, workspace.Items.Select(x => x.SourceText));
         Assert.Equal("+", workspace.Items[0].TargetTranslation);
         Assert.True(workspace.Items[1].IsObsolete);
@@ -52,6 +52,48 @@ public sealed class TranslatorWorkspaceTests
         workspace.SetTranslation(0, "Uno");
         File.AppendAllText(path, "\n");
         Assert.Throws<IOException>(() => workspace.Save());
+    }
+
+    [Fact]
+    public void LoadDoesNotSynchronizeOrWriteCatalog()
+    {
+        using var project = NewProject("World.cs", "dial(\"New source\");\n");
+        var path = Path.Combine(project.Path, "transl_en.xml");
+        File.WriteAllText(path, "<root><str orig=\"Old source\" transl=\"Old\" /></root>");
+        var before = File.ReadAllText(path);
+        var workspace = new TranslationWorkspace { RepositoryRoot = project.Path, CatalogPath = path };
+
+        workspace.Load();
+
+        Assert.Equal(before, File.ReadAllText(path));
+        Assert.Equal("Old source", Assert.Single(workspace.Items).SourceText);
+    }
+
+    [Fact]
+    public void CreateCatalogUsesCurrentSourcesAndPlus()
+    {
+        using var project = NewProject("World.cs", "dial(\"One\");\ndial(\"Two\");\n");
+        var result = new TranslationCatalogOperations().Create(project.Path, "fr");
+        var path = Path.Combine(project.Path, "transl_fr.xml");
+
+        Assert.True(result.Created);
+        Assert.True(File.Exists(path));
+        var entries = XDocument.Load(path).Root!.Elements("str").ToArray();
+        Assert.Equal(new[] { "One", "Two" }, entries.Select(x => (string)x.Attribute("orig")!));
+        Assert.All(entries, x => Assert.Equal("+", (string)x.Attribute("transl")!));
+        Assert.Throws<IOException>(() => new TranslationCatalogOperations().Create(project.Path, "fr"));
+    }
+
+    [Fact]
+    public void SynchronizeIsIdempotentAndPersistsChangesExplicitly()
+    {
+        using var project = NewProject("World.cs", "dial(\"One\");\n");
+        var path = Path.Combine(project.Path, "transl_en.xml");
+        File.WriteAllText(path, "<root><str orig=\"One\" transl=\"+\" /></root>");
+        var operations = new TranslationCatalogOperations();
+
+        Assert.False(operations.Synchronize(project.Path, path).Result.Changed);
+        Assert.False(operations.Synchronize(project.Path, path).Result.Changed);
     }
 
     private static TempProject NewProject(string relativeFile, string contents)
