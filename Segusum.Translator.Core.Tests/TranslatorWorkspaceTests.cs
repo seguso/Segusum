@@ -6,12 +6,61 @@ namespace Segusum.Translator.Core.Tests;
 public sealed class TranslatorWorkspaceTests
 {
     [Fact]
+    public void RoslynExtractsMarkerArgumentsAndTranslatableLiteralOnly()
+    {
+        using var project = NewProject("World.cs", """
+            dial(character, "Dialogo");
+            dial
+            (
+                character, "Dialogo multilinea"
+            );
+            nar("Narrazione");
+            narText("Testo narrativo");
+            narImg("Didascalia", "image.png");
+            narRoom("Stanza", room);
+            addHandlerCombine(first, second, "Usa oggetto");
+            addHandlerLook(first, "Guarda oggetto");
+            fatinaDiceQui(cs, room, "La fatina parla");
+            "Nome stanza".translatable();
+            using (namedCutScene(scene, room)) { narText("Nel corpo"); }
+            """
+        );
+
+        var values = new SourceStringExtractor().Extract(project.Path).Select(x => x.Value).ToArray();
+        Assert.Equal(new[] { "Dialogo", "Dialogo multilinea", "Narrazione", "Testo narrativo", "Didascalia", "Stanza", "Usa oggetto", "Guarda oggetto", "La fatina parla", "Nome stanza", "Nel corpo" }, values);
+    }
+
+    [Fact]
+    public void RoslynIgnoresCommentsAndStringsContainingCode()
+    {
+        using var project = NewProject("World.cs", """
+            var a = "dial(";
+            var b = "narText(\\"ciao\\")";
+            var c = "{\\"codeSnapshot\\":\\"dial();\\"}";
+            var d = "if (x)\\n{\\n dial(...);\\n}";
+            // dial("commento")
+            /* nar("commento") */
+            """
+        );
+
+        Assert.Empty(new SourceStringExtractor().Extract(project.Path));
+    }
+
+    [Fact]
+    public void RoslynSupportsVerbatimRawAndMultilineInvocationFormatting()
+    {
+        using var project = NewProject("World.cs", "dial\n(character, @\"Verbatim\");\nnarText(\"\"\"Raw text\"\"\");\n");
+
+        Assert.Equal(new[] { "Verbatim", "Raw text" }, new SourceStringExtractor().Extract(project.Path).Select(x => x.Value));
+    }
+
+    [Fact]
     public void DiscoveryScansCsAndHonorsIncludeExcludeConfiguration()
     {
-        using var project = NewProject("Game/World.cs", "// test\ndial(\"Ciao\");\n");
+        using var project = NewProject("Game/World.cs", "// test\ndial(character, \"Ciao\");\n");
         var root = project.Path;
         Directory.CreateDirectory(Path.Combine(root, "Tests"));
-        File.WriteAllText(Path.Combine(root, "Tests", "Ignored.cs"), "dial(\"Da ignorare\");");
+        File.WriteAllText(Path.Combine(root, "Tests", "Ignored.cs"), "dial(character, \"Da ignorare\");");
         var extractor = new SourceStringExtractor();
 
         Assert.Equal(2, extractor.Extract(root).Count);
@@ -22,7 +71,7 @@ public sealed class TranslatorWorkspaceTests
     [Fact]
     public void WorkspaceKeepsSequenceObsoleteAndPlusAndSavesOnlyTargetCatalog()
     {
-        using var project = NewProject("World.cs", "dial(\"Nuova frase\");\n");
+        using var project = NewProject("World.cs", "dial(character, \"Nuova frase\");\n");
         var root = project.Path;
         var path = Path.Combine(root, "transl_en.xml");
         File.WriteAllText(path, "<root><str orig=\"Vecchia frase\" transl=\"Old translation\" obsolete=\"true\" /></root>");
@@ -43,7 +92,7 @@ public sealed class TranslatorWorkspaceTests
     [Fact]
     public void SaveRejectsExternalCatalogChange()
     {
-        using var project = NewProject("World.cs", "dial(\"One\");\n");
+        using var project = NewProject("World.cs", "dial(character, \"One\");\n");
         var root = project.Path;
         var path = Path.Combine(root, "transl_en.xml");
         File.WriteAllText(path, "<root><str orig=\"One\" transl=\"+\" /></root>");
@@ -57,7 +106,7 @@ public sealed class TranslatorWorkspaceTests
     [Fact]
     public void LoadDoesNotSynchronizeOrWriteCatalog()
     {
-        using var project = NewProject("World.cs", "dial(\"New source\");\n");
+        using var project = NewProject("World.cs", "dial(character, \"New source\");\n");
         var path = Path.Combine(project.Path, "transl_en.xml");
         File.WriteAllText(path, "<root><str orig=\"Old source\" transl=\"Old\" /></root>");
         var before = File.ReadAllText(path);
@@ -72,7 +121,7 @@ public sealed class TranslatorWorkspaceTests
     [Fact]
     public void CreateCatalogUsesCurrentSourcesAndPlus()
     {
-        using var project = NewProject("World.cs", "dial(\"One\");\ndial(\"Two\");\n");
+        using var project = NewProject("World.cs", "dial(character, \"One\");\ndial(character, \"Two\");\n");
         var result = new TranslationCatalogOperations().Create(project.Path, "fr");
         var path = Path.Combine(project.Path, "transl_fr.xml");
 
@@ -87,7 +136,7 @@ public sealed class TranslatorWorkspaceTests
     [Fact]
     public void SynchronizeIsIdempotentAndPersistsChangesExplicitly()
     {
-        using var project = NewProject("World.cs", "dial(\"One\");\n");
+        using var project = NewProject("World.cs", "dial(character, \"One\");\n");
         var path = Path.Combine(project.Path, "transl_en.xml");
         File.WriteAllText(path, "<root><str orig=\"One\" transl=\"+\" /></root>");
         var operations = new TranslationCatalogOperations();

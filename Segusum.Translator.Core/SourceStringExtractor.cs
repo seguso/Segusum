@@ -1,5 +1,8 @@
-using System.Text.RegularExpressions;
 using System.Text.Json;
+using System.Text.RegularExpressions;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace Segusum.Translator.Core;
 
@@ -26,56 +29,31 @@ public sealed class SourceDiscoveryOptions
 
 public sealed class SourceStringExtractor
 {
-    private static readonly string[] Markers =
-    {
-        "dial(", "dial (", "nar(", "nar (", "narImg(", "narImg (",
-        "narText(", "narText (", "narRoom(", "narRoom (",
-        "using (namedCutScene", "using(namedCutScene", ".translatable()",
-        "fatinaDiceQui(", "addHandlerCombine(", "addHandlerLook("
-    };
-
     public IReadOnlyList<SourceString> Extract(string repositoryRoot,
         IEnumerable<string>? relativeFiles = null, SourceDiscoveryOptions? options = null)
     {
-        var result = new List<SourceString>();
         options ??= new SourceDiscoveryOptions();
+        var result = new List<SourceString>();
         var files = relativeFiles?.ToArray() ?? DiscoverFiles(repositoryRoot, options);
         foreach (var relativePath in files)
         {
             var fullPath = Path.Combine(repositoryRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
-            if (!File.Exists(fullPath))
-                continue;
-
-            var lines = File.ReadAllLines(fullPath);
-            for (var index = 0; index < lines.Length; index++)
-            {
-                var line = lines[index].Trim();
-                if (line.StartsWith("//", StringComparison.Ordinal) ||
-                    !Markers.Any(marker => line.StartsWith(marker, StringComparison.Ordinal) ||
-                                           line.Contains(marker, StringComparison.Ordinal)))
-                    continue;
-
-                var literal = ExtractLongestLiteral(line);
-                if (literal is not null)
-                    result.Add(new SourceString(ReplaceQuotes(literal), relativePath, index + 1));
-            }
+            if (!File.Exists(fullPath)) continue;
+            var tree = CSharpSyntaxTree.ParseText(File.ReadAllText(fullPath), path: relativePath);
+            var visitor = new TranslatingInvocationVisitor(relativePath);
+            visitor.Visit(tree.GetRoot());
+            result.AddRange(visitor.Results);
         }
-
-        // The source sequence is canonical, but repeated use of one phrase is not
-        // a second translation entry. Keep the first occurrence deterministically.
-        return result.GroupBy(x => x.Value, StringComparer.Ordinal).Select(g => g.First()).ToList();
+        return result.GroupBy(x => x.Value, StringComparer.Ordinal).Select(x => x.First()).ToList();
     }
 
     private static IReadOnlyList<string> DiscoverFiles(string root, SourceDiscoveryOptions options)
     {
         var all = Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories);
         var candidates = options.Include.Count == 0 ? all : all.Where(path => options.Include.Any(pattern => Matches(root, path, pattern)));
-        return candidates
-            .Where(path => !options.Exclude.Any(exclude => IsExcluded(root, path, exclude)))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Select(path => Path.GetRelativePath(root, path))
-            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
+        return candidates.Where(path => !options.Exclude.Any(exclude => IsExcluded(root, path, exclude)))
+            .Distinct(StringComparer.OrdinalIgnoreCase).Select(path => Path.GetRelativePath(root, path))
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
     private static bool IsExcluded(string root, string path, string exclude)
@@ -89,18 +67,57 @@ public sealed class SourceStringExtractor
     {
         var relative = Path.GetRelativePath(root, path).Replace('\\', '/');
         var normalized = pattern.Replace('\\', '/').Trim('/');
-        var regex = "^" + Regex.Escape(normalized).Replace("\\*", ".*").Replace("\\?", ".") + "$";
+        var regex = "^" + Regex.Escape(normalized).Replace("\\\\*", ".*").Replace("\\\\?", ".") + "$";
         return Regex.IsMatch(relative, regex, RegexOptions.IgnoreCase) || Regex.IsMatch(relative, regex.TrimEnd('$') + "/.*$", RegexOptions.IgnoreCase);
     }
 
-    internal static string ReplaceQuotes(string value) => value.Replace("\"", "''", StringComparison.Ordinal);
-
-    private static string? ExtractLongestLiteral(string line)
+    private sealed class TranslatingInvocationVisitor(string relativePath) : CSharpSyntaxWalker
     {
-        var matches = Regex.Matches(line, "\\\"(?:\\\\.|[^\\\"\\\\])*\\\"");
-        var match = matches.Cast<Match>().OrderByDescending(x => x.Length).FirstOrDefault();
-        if (match is null) return null;
-        var value = match.Value[1..^1];
-        return value.Replace("\\\"", "\"", StringComparison.Ordinal);
+        public List<SourceString> Results { get; } = new();
+
+        public override void VisitInvocationExpression(InvocationExpressionSyntax node)
+        {
+            if (node.Expression is MemberAccessExpressionSyntax member && member.Name.Identifier.ValueText == "translatable")
+                Add(member.Expression);
+            else if (node.Expression is IdentifierNameSyntax identifier)
+            {
+                var argument = identifier.Identifier.ValueText switch
+                {
+                    "dial" => TextArgument(node, 1, "testo"),
+                    "nar" or "narText" or "narImg" or "narRoom" => TextArgument(node, 0, "s"),
+                    "addHandlerCombine" => TextArgument(node, 2, "fullSentenceUntransl", "dynamicSentenceUntransl"),
+                    "addHandlerLook" => FirstTextArgumentAfter(node, 0, "dynamicSentence", "sentence"),
+                    "fatinaDiceQui" => TextArgument(node, 2, "frase"),
+                    _ => null
+                };
+                if (argument is not null) Add(argument);
+            }
+            base.VisitInvocationExpression(node);
+        }
+
+        private static ExpressionSyntax? TextArgument(InvocationExpressionSyntax node, int ordinal, params string[] names)
+        {
+            var named = node.ArgumentList.Arguments.FirstOrDefault(x => x.NameColon is not null && names.Contains(x.NameColon.Name.Identifier.ValueText, StringComparer.Ordinal));
+            return named?.Expression ?? node.ArgumentList.Arguments.ElementAtOrDefault(ordinal)?.Expression;
+        }
+
+        private static ExpressionSyntax? FirstTextArgumentAfter(InvocationExpressionSyntax node, int firstIndex, params string[] names)
+        {
+            var named = node.ArgumentList.Arguments.FirstOrDefault(x => x.NameColon is not null && names.Contains(x.NameColon.Name.Identifier.ValueText, StringComparer.Ordinal));
+            return named?.Expression ?? node.ArgumentList.Arguments.Skip(firstIndex + 1).Select(x => x.Expression).FirstOrDefault(IsStringLiteral);
+        }
+
+        private void Add(ExpressionSyntax? expression)
+        {
+            expression = Unwrap(expression);
+            if (expression is not LiteralExpressionSyntax literal || !literal.IsKind(SyntaxKind.StringLiteralExpression)) return;
+            var line = literal.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
+            Results.Add(new SourceString(ReplaceQuotes(literal.Token.ValueText), relativePath, line));
+        }
+
+        private static string ReplaceQuotes(string value) => value.Replace("\"", "''", StringComparison.Ordinal);
+
+        private static bool IsStringLiteral(ExpressionSyntax expression) => Unwrap(expression) is LiteralExpressionSyntax x && x.IsKind(SyntaxKind.StringLiteralExpression);
+        private static ExpressionSyntax? Unwrap(ExpressionSyntax? expression) => expression is ParenthesizedExpressionSyntax p ? Unwrap(p.Expression) : expression;
     }
 }
