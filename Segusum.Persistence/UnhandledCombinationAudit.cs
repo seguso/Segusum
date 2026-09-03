@@ -23,7 +23,10 @@ public static class UnhandledCombinationAudit
     {
         try
         {
-            var candidates = world.GetUnhandledCombinationCandidates();
+            var candidates = world.GetUnhandledCombinationCandidates()
+                .GroupBy(Key, StringComparer.Ordinal)
+                .Select(group => group.First())
+                .ToList();
             // A new engine turn is a new observation even when it happens to
             // expose the same candidate set again. Repeated rendering within
             // one turn is the case we suppress.
