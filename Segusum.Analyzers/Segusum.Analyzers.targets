@@ -1,5 +1,0 @@
-<Project>
-  <ItemGroup>
-    <Analyzer Include="$(MSBuildThisFileDirectory)..\analyzers\dotnet\cs\netstandard2.0\Segusum.Analyzers.dll" />
-  </ItemGroup>
-</Project>
