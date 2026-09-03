@@ -16,16 +16,6 @@ internal static class AdminNarrativeQueue
             var messages = db.adminNarrativeMessage.AsNoTracking()
                 .Where(x => x.userId == userId && !x.cancelled && !x.seenAtUtc.HasValue)
                 .OrderBy(x => x.id).ToList();
-            var now = DateTime.UtcNow;
-            foreach (var message in messages)
-            {
-                if (!message.deliveredAtUtc.HasValue)
-                {
-                    var tracked = db.adminNarrativeMessage.Single(x => x.id == message.id);
-                    tracked.deliveredAtUtc = now;
-                }
-            }
-            db.SaveChanges();
             world.adminNarrativeMessagesPending = messages.Where(x => !activeIds.Contains(x.id)).Select(x => new AdminNarrativeMessageClient(x.id, ParseTexts(x.narTextsJson))).ToList();
         }
         catch (Exception e)
@@ -34,6 +24,21 @@ internal static class AdminNarrativeQueue
             SegusumProfiler.Log($"admin narrative refresh failed: {e.GetType().Name}: {e.Message}");
             world.adminNarrativeMessagesPending.Clear();
         }
+    }
+
+    public static bool MarkDelivered(segusumDb db, int userId, IEnumerable<long> ids)
+    {
+        try
+        {
+            var wanted = ids.Distinct().ToArray();
+            if (wanted.Length == 0) return true;
+            var now = DateTime.UtcNow;
+            var rows = db.adminNarrativeMessage.Where(x => x.userId == userId && wanted.Contains(x.id) && !x.cancelled).ToList();
+            foreach (var row in rows) row.deliveredAtUtc ??= now;
+            db.SaveChanges();
+            return true;
+        }
+        catch (Exception e) { SegusumProfiler.Log($"admin narrative delivery update failed: {e.GetType().Name}: {e.Message}"); return false; }
     }
 
     public static void MarkSeen(segusumDb db, int userId, IEnumerable<long> ids)

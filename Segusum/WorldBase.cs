@@ -338,6 +338,9 @@ namespace Seg
         /// <summary>Transient admin narration loaded by the web/persistence integration.</summary>
         public List<AdminNarrativeMessageClient> adminNarrativeMessagesPending = new();
 
+        /// <summary>Message IDs whose tokens were appended to a natural cutscene in this world.</summary>
+        public List<long> adminNarrativeMessagesDelivered = new();
+
         public void AppendAdminNarrativeMessages(CutScene cutScene, GameStateShowingQuestions? afterDialog,
                 GameStateWaitingForText? afterText, GameStateFinished? afterFinished)
         {
@@ -350,6 +353,8 @@ namespace Seg
                                         Array.Empty<LayerForClient>(), false, NarSize.Small)
                                 { adminNarrativeMessageId = message.Id };
                                 cutScene.Add(token);
+                                if (!adminNarrativeMessagesDelivered.Contains(message.Id))
+                                        adminNarrativeMessagesDelivered.Add(message.Id);
                         }
                 adminNarrativeMessagesPending.Clear();
         }

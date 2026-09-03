@@ -3082,6 +3082,12 @@ namespace Seg
 
         protected static void autosave(segusumDb db, user user, WorldBase w, string savegameName = "")
         {
+            if (w.adminNarrativeMessagesDelivered.Count > 0 &&
+                AdminNarrativeQueue.MarkDelivered(db, user.id, w.adminNarrativeMessagesDelivered))
+            {
+                w.adminNarrativeMessagesDelivered.Clear();
+            }
+
             var serializeStopwatch = Stopwatch.StartNew();
             var xdoc = w.serialize();
             var xmlStr = xdoc.ToString();

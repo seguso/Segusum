@@ -859,9 +859,6 @@ namespace Seg
 
         internal static SegActionRes calcolaActionResTalkORoom(WorldBase w, GameStateShowingQuestions gstqDaAttivareDopoLaCutScene, GameStateWaitingForText gstDaAttivareDopo, GameStateFinished gameStateFinished, string[] savenames, bool isTextMode)
         {
-            if (w.gs is GameStateCutScene pendingState)
-                w.AppendAdminNarrativeMessages(pendingState.cs, gstqDaAttivareDopoLaCutScene, gstDaAttivareDopo, gameStateFinished);
-
             SegActionRes ret;
 
             if (gstqDaAttivareDopoLaCutScene != null)
@@ -1739,6 +1736,8 @@ namespace Seg
             if (cs.Any())
             {
 
+                w.AppendAdminNarrativeMessages(cs, gameStateTalkDopoLaCutScene, gameStateWaitingTextDopoCutScene, gameStateFin);
+
 
 
 
@@ -1987,6 +1986,8 @@ namespace Seg
             if (cs.Any())
             {
 
+                w.AppendAdminNarrativeMessages(cs, gameStateTalkDopoLaCutScene, gameStateWaitingTextDopoCutScene, gameStateFin);
+
 
 
 
@@ -2202,6 +2203,8 @@ namespace Seg
 
             if (cs.Any())
             {
+
+                w.AppendAdminNarrativeMessages(cs, gameStateTalkDopoLaCutScene, gameStateWaitingTextDopoCutScene, gameStateFin);
 
 
 
@@ -2429,6 +2432,8 @@ namespace Seg
 
             if (cs.Any())
             {
+
+                w.AppendAdminNarrativeMessages(cs, gameStateTalkDopoLaCutScene, gameStateWaitingTextDopoCutScene, gameStateFin);
 
 
 
@@ -2710,6 +2715,9 @@ namespace Seg
             if (cs.Any())
             {
 
+                w.AppendAdminNarrativeMessages(cs, gameStateTalkDopoLaCutScene, gameStateWaitingTextDopoCutScene, gameStateFin);
+
+
 
 
 
@@ -2861,6 +2869,8 @@ namespace Seg
 
 
 
+                w.AppendAdminNarrativeMessages(cs, gameStateTalkDopoLaCutScene, gameStateWaitingTextDopoCutScene, gameStateFin);
+
                 w.gs = new GameStateCutScene(
 
                         cs: cs,
@@ -2973,6 +2983,8 @@ namespace Seg
 
             if (cs.Any())
             {
+
+                w.AppendAdminNarrativeMessages(cs, gameStateTalkDopoLaCutScene, gameStateWaitingTextDopoCutScene, gameStateFin);
 
                 w.gs = new GameStateCutScene(
 
@@ -3097,6 +3109,8 @@ namespace Seg
 
             if (cs.Any())
             {
+
+                w.AppendAdminNarrativeMessages(cs, gameStateTalkDopoLaCutScene, gameStateWaitingTextDopoCutScene, gameStateFin);
 
                 w.gs = new GameStateCutScene(
 
@@ -4132,6 +4146,8 @@ namespace Seg
             if (cs.Any())
             {
 
+                w.AppendAdminNarrativeMessages(cs, null, gameStateWaitingTextDopoCutScene, null);
+
                 w.gs = new GameStateCutScene(
 
                         cs: cs,
@@ -4403,6 +4419,8 @@ namespace Seg
 
 
 
+
+                w.AppendAdminNarrativeMessages(cs, gameStateTalkDopoLaCutScene, gameStateWaitingTextDopoCutScene, gameStateFin);
 
                 w.gs = new GameStateCutScene
                 (
