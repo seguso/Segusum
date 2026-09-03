@@ -68,7 +68,7 @@ public sealed class AdminDataService
         if (user == null) return null;
         var save = await db.savegame.AsNoTracking().Where(x => x.idUser == id && x.savegameTitle == "").OrderByDescending(x => x.dateModified).FirstOrDefaultAsync();
         var adminUser = new AdminUser(user.id, user.uname, user.gameId, user.dateLastAccess, save?.dateModified);
-        return new AdminUserDetails(adminUser, save == null ? Array.Empty<PastAttempt>() : ParseActions(save.savegameXml, user), save == null ? Array.Empty<CycleInfo>() : ParseCycles(save.savegameXml));
+        return new AdminUserDetails(adminUser, save == null ? Array.Empty<PastAttempt>() : ParseTimelineActions(save.savegameXml, user), save == null ? Array.Empty<CycleInfo>() : ParseCycles(save.savegameXml));
     }
 
     public async Task<List<PastSummary>> FindPastActionsAsync(PastQuery filter)
@@ -102,6 +102,30 @@ public sealed class AdminDataService
                 var time = DateTime.TryParse(x.Attribute("time")?.Value, null, System.Globalization.DateTimeStyles.RoundtripKind, out var dt) ? dt.ToUniversalTime() : DateTime.MinValue;
                 return new PastAttempt(user.id, user.uname, user.gameId ?? 0, time, with ? "useWith" : "useFor", first, second, x.Attribute("expl")?.Value, called, $"{first} { (with ? "+" : "per") } {second}");
             }).Where(x => x.FirstId != "" && x.SecondId != "").ToList();
+        }
+        catch { return new(); }
+    }
+
+    public static List<PastAttempt> ParseTimelineActions(string xml, user user)
+    {
+        if (string.IsNullOrWhiteSpace(xml)) return new();
+        try
+        {
+            var root = XDocument.Parse(xml).Root;
+            if (root == null) return new();
+            return root.Elements().Where(x => x.Name.LocalName.StartsWith("past_action_", StringComparison.Ordinal))
+                .Select(x =>
+                {
+                    var name = x.Name.LocalName[12..];
+                    var with = name == "use_with";
+                    var useFor = name == "use_for";
+                    var first = x.Attribute(with ? "lo1Id" : useFor ? "loId" : "loId")?.Value ?? "";
+                    var second = x.Attribute(with ? "lo2Id" : useFor ? "objId" : "roomId")?.Value ?? "";
+                    var called = x.Attribute("handler_called")?.Value switch { "Y" => true, "N" => false, _ => (bool?)null };
+                    var time = DateTime.TryParse(x.Attribute("time")?.Value, null, System.Globalization.DateTimeStyles.RoundtripKind, out var dt) ? dt.ToUniversalTime() : DateTime.MinValue;
+                    var details = string.Join(", ", x.Attributes().Where(a => a.Name.LocalName != "time").Select(a => $"{a.Name.LocalName}={a.Value}"));
+                    return new PastAttempt(user.id, user.uname, user.gameId ?? 0, time, name, first, second, x.Attribute("expl")?.Value, called, details);
+                }).OrderBy(x => x.Time).ToList();
         }
         catch { return new(); }
     }

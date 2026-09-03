@@ -18,3 +18,6 @@ th,td{padding:10px 12px;border-bottom:1px solid #e8edf1;text-align:left;vertical
 th{background:#e9eff4;color:#344453;font-size:.85rem;white-space:nowrap}
 tr:hover td{background:#f7fafc}
 .ignored{opacity:.65}
+.tabs{display:flex;gap:6px;margin:22px 0 12px;border-bottom:1px solid #dbe2e8}.tabs button{border-radius:6px 6px 0 0;border-bottom:0}.tabs button.selected{background:#2b3c50;color:#fff}
+/* The legacy page text remains in the compact historical markup; the renamed heading above is canonical. */
+main>h1:nth-of-type(2),main>h1:nth-of-type(2)+p{display:none}
