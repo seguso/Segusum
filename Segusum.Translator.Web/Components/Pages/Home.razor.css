@@ -1,4 +1,5 @@
 .translator { height: calc(100vh - 2rem); display:flex; flex-direction:column; gap:.65rem; outline:0; font-family:system-ui,sans-serif; }
+.editor-toolbar { position:sticky; top:0; z-index:4; display:flex; flex-direction:column; gap:.4rem; padding:.35rem 0 .45rem; background:white; }
 .toolbar-header,.catalog-picker,.actions,.navigation,.stats { display:flex; align-items:center; gap:.6rem; flex-wrap:wrap; }
 .toolbar-header { justify-content:space-between; border-bottom:1px solid #d5dbe3; padding-bottom:.5rem; }
 h1 { margin:0; font-size:1.45rem; } small { color:#667085; } .root-picker label,.catalog-picker label { display:flex; gap:.35rem; align-items:center; }

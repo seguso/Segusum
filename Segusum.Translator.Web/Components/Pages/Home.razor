@@ -24,9 +24,11 @@
     else
     {
         <button @onclick="RefreshCatalog">Refresh / Synchronize from source</button>
+        <div class="editor-toolbar">
         <div class="stats"><span>@translated / @activeTotal tradotte</span><span>@percent.ToString("0.0")%</span><span>@untranslated non tradotte</span><span>@obsolete obsolete</span>@if (IsDirty) { <strong>● modifiche non salvate</strong> }</div>
         <div class="actions"><input placeholder="Cerca..." @bind="search" @bind:event="oninput" /><button @onclick="() => filter = Filter.All">Tutte</button><button @onclick="() => filter = Filter.Untranslated">Non tradotte</button><button @onclick="() => filter = Filter.Translated">Tradotte</button><button @onclick="() => filter = Filter.Changed">Cambiate</button><button @onclick="() => filter = Filter.Obsolete">Obsolete</button><span>@Filtered.Count righe</span></div>
         <div class="navigation"><button @onclick="() => Move(-1)">Previous</button><button @onclick="() => Move(1)">Next</button><button @onclick="() => MoveToUntranslated(-1)">Previous untranslated</button><button @onclick="() => MoveToUntranslated(1)">Next untranslated</button><button @onclick="SaveAndNext" disabled="@(!IsDirty)">Save + Next untranslated</button><button @onclick="Save" disabled="@(!IsDirty)">Save</button></div>
+        </div>
         <div class="catalog-header"><span>Status</span><span>Italiano (orig)</span><span>@Path.GetFileName(catalogPath)</span></div>
         <Virtualize Items="Filtered" Context="item" OverscanCount="16">
             <div id="row-@item.SequenceIndex" class="catalog-row @(item.IsObsolete ? "obsolete" : "") @(item.SequenceIndex == currentIndex ? "current" : "")">
