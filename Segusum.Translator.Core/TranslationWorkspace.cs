@@ -32,17 +32,20 @@ public sealed class TranslationWorkspace
         fingerprint = CatalogFileStore.Fingerprint(CatalogPath);
         var pairs = result.Statistics.ChangedPairs.ToDictionary(x => x.NewValue, StringComparer.Ordinal);
         var sourceMap = sources.ToDictionary(x => x.Value, StringComparer.Ordinal);
-        Items = document.Root?.Elements("str").Select((element, index) =>
+        var documentEntries = document.Root?.Elements("str").Select(TranslationEntry.FromXml).ToList() ?? new();
+        var translatedByOriginal = documentEntries.Where(x => x.IsTranslated)
+            .GroupBy(x => x.Original, StringComparer.Ordinal)
+            .ToDictionary(x => x.Key, x => x.First(), StringComparer.Ordinal);
+        Items = documentEntries.Select((entry, index) =>
         {
-            var entry = TranslationEntry.FromXml(element);
             pairs.TryGetValue(entry.Original, out var pair);
             sourceMap.TryGetValue(entry.Original, out var source);
             var previous = !entry.IsObsolete
-                ? TranslationCatalogSynchronizer.PreviousTranslated(entry, document.Root?.Elements("str").Select(TranslationEntry.FromXml).ToList() ?? new())
+                ? TranslationCatalogSynchronizer.PreviousTranslated(entry, translatedByOriginal)
                 : null;
             return new TranslationWorkItem(index, entry.Original, entry.Translation, entry.IsTranslated, entry.IsObsolete,
                 pair is not null, pair?.Similarity, previous?.Original ?? pair?.OldValue,
-                previous?.Translation ?? (pair is null ? null : FindTranslation(document, pair.OldValue)), source?.RelativePath, source?.LineNumber);
+                previous?.Translation ?? (pair is null ? null : translatedByOriginal.GetValueOrDefault(pair.OldValue)?.Translation), source?.RelativePath, source?.LineNumber);
         }).ToArray() ?? Array.Empty<TranslationWorkItem>();
         IsDirty = synchronize && result.Changed;
     }
@@ -71,7 +74,6 @@ public sealed class TranslationWorkspace
         IsDirty = false;
     }
 
-    private static string? FindTranslation(XDocument doc, string original) => doc.Root?.Elements("str").Select(TranslationEntry.FromXml).FirstOrDefault(x => x.Original == original)?.Translation;
 }
 
 public static class CatalogFileStore

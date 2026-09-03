@@ -169,6 +169,14 @@ public sealed class TranslationCatalogSynchronizer
         return all.FirstOrDefault(x => x.Original == previousOriginal && x.IsTranslated);
     }
 
+    internal static TranslationEntry? PreviousTranslated(TranslationEntry entry,
+        IReadOnlyDictionary<string, TranslationEntry> translatedByOriginal)
+    {
+        if (entry.IsTranslated) return entry;
+        if (!entry.Attributes.TryGetValue(PreviousTranslatedAttribute, out var previousOriginal)) return null;
+        return translatedByOriginal.GetValueOrDefault(previousOriginal);
+    }
+
     private static Dictionary<string, string> EnsureLineage(TranslationEntry entry, TranslationEntry? previous)
     {
         var attributes = new Dictionary<string, string>(entry.Attributes, StringComparer.Ordinal);
