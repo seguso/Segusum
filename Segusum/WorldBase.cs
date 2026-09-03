@@ -2310,7 +2310,10 @@ namespace Seg
 
 
 
-            foreach (var pa in pastActions.OrderBy(pa => pa.dateTime).ToList()) // le devo ordinare, perché quando le carico perdo l'ordine
+            // XML persistence does not assign meaning to the physical order of
+            // past actions. Administrative consumers sort by dateTime when
+            // presenting a timeline, so avoid allocating an ordered copy here.
+            foreach (var pa in pastActions)
             {
                 if (pa is PastActionTerBin pat)
                 {

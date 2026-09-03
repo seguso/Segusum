@@ -47,9 +47,14 @@ public static class SegusumApplicationBuilderExtensions
         app.Use(async (context, next) =>
         {
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            var requestId = Guid.NewGuid().ToString("N");
+            context.Response.Headers["X-Segusum-Request-Id"] = requestId;
+            using var profilingScope = SegusumProfiler.BeginRequest(requestId);
+            SegusumProfiler.Log($"phase=request-start method={context.Request.Method} path={context.Request.Path}");
             var isApiRequest = context.Request.Path.StartsWithSegments("/api");
             SemaphoreSlim? gate = null;
             var gateWaitMs = 0.0;
+            var gateHoldStopwatch = (System.Diagnostics.Stopwatch?)null;
 
             if (isApiRequest && !HttpMethods.IsGet(context.Request.Method))
             {
@@ -80,6 +85,8 @@ public static class SegusumApplicationBuilderExtensions
                 await gate.WaitAsync();
                 gateStopwatch.Stop();
                 gateWaitMs = gateStopwatch.Elapsed.TotalMilliseconds;
+                gateHoldStopwatch = System.Diagnostics.Stopwatch.StartNew();
+                SegusumProfiler.Log($"phase=gate-acquired gate_wait_ms={gateWaitMs:F1}");
             }
 
             try
@@ -88,11 +95,12 @@ public static class SegusumApplicationBuilderExtensions
             }
             finally
             {
+                gateHoldStopwatch?.Stop();
                 gate?.Release();
                 stopwatch.Stop();
-                SegusumProfiler.Log($"request method={context.Request.Method} path={context.Request.Path} " +
+                SegusumProfiler.Log($"phase=request-summary method={context.Request.Method} path={context.Request.Path} " +
                     $"status={context.Response.StatusCode} elapsed_ms={stopwatch.Elapsed.TotalMilliseconds:F1} " +
-                    $"gate_wait_ms={gateWaitMs:F1}");
+                    $"gate_wait_ms={gateWaitMs:F1} gate_hold_ms={gateHoldStopwatch?.Elapsed.TotalMilliseconds ?? 0:F1}");
             }
         });
 

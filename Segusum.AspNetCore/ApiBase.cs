@@ -3088,13 +3088,19 @@ namespace Seg
                 w.adminNarrativeMessagesDelivered.Clear();
             }
 
-            var serializeStopwatch = Stopwatch.StartNew();
+            var serializeBuildStopwatch = Stopwatch.StartNew();
             var xdoc = w.serialize();
+            serializeBuildStopwatch.Stop();
+            var serializeStringStopwatch = Stopwatch.StartNew();
             var xmlStr = xdoc.ToString();
-            serializeStopwatch.Stop();
-            SegusumProfiler.Log($"autosave user={user.id} title={savegameName} phase=serialize " +
-                $"elapsed_ms={serializeStopwatch.Elapsed.TotalMilliseconds:F1} xml_chars={xmlStr.Length} " +
+            serializeStringStopwatch.Stop();
+            SegusumProfiler.Log($"autosave user={user.id} title={savegameName} phase=serialize-build " +
+                $"elapsed_ms={serializeBuildStopwatch.Elapsed.TotalMilliseconds:F1} " +
                 $"past_actions={w.pastActions.Count} named_cutscenes={w.namedCutScenesSeen.Count}");
+            SegusumProfiler.Log($"autosave user={user.id} title={savegameName} phase=serialize-string " +
+                $"elapsed_ms={serializeStringStopwatch.Elapsed.TotalMilliseconds:F1} xml_chars={xmlStr.Length} " +
+                $"utf16_approx_bytes={xmlStr.Length * 2} past_actions={w.pastActions.Count} " +
+                $"named_cutscenes={w.namedCutScenesSeen.Count}");
 
             var debugcurtime = w.cur_time;
 
@@ -3207,9 +3213,20 @@ namespace Seg
                 wo.IsTextMode = isTextMode; // lo copio nel mondo perchè serve a narRoom
                 wo.IsCasualMode = userModeIsCasual(idUser, db);
 
+                var invariantStopwatch = Stopwatch.StartNew();
                 wo.invariantConditions();
+                invariantStopwatch.Stop();
+                SegusumProfiler.Log($"phase=invariants elapsed_ms={invariantStopwatch.Elapsed.TotalMilliseconds:F1}");
+
+                var auditStopwatch = Stopwatch.StartNew();
                 SynchronizeUnhandledCombinationAudit(wo, idUser, db);
+                auditStopwatch.Stop();
+                SegusumProfiler.Log($"phase=unhandled-audit elapsed_ms={auditStopwatch.Elapsed.TotalMilliseconds:F1}");
+
+                var adminStopwatch = Stopwatch.StartNew();
                 AdminNarrativeQueue.RefreshPending(wo, db, idUser);
+                adminStopwatch.Stop();
+                SegusumProfiler.Log($"phase=admin-refresh elapsed_ms={adminStopwatch.Elapsed.TotalMilliseconds:F1}");
                 savegameInvalid = false;
 
 
@@ -3230,9 +3247,20 @@ namespace Seg
                     return null;
                 }
 
+                var invariantStopwatch = Stopwatch.StartNew();
                 restored.invariantConditions();
+                invariantStopwatch.Stop();
+                SegusumProfiler.Log($"phase=invariants elapsed_ms={invariantStopwatch.Elapsed.TotalMilliseconds:F1}");
+
+                var auditStopwatch = Stopwatch.StartNew();
                 SynchronizeUnhandledCombinationAudit(restored, idUser, db);
+                auditStopwatch.Stop();
+                SegusumProfiler.Log($"phase=unhandled-audit elapsed_ms={auditStopwatch.Elapsed.TotalMilliseconds:F1}");
+
+                var adminStopwatch = Stopwatch.StartNew();
                 AdminNarrativeQueue.RefreshPending(restored, db, idUser);
+                adminStopwatch.Stop();
+                SegusumProfiler.Log($"phase=admin-refresh elapsed_ms={adminStopwatch.Elapsed.TotalMilliseconds:F1}");
 
                 return restored; // notare che carico il savegame di default, quello che ha nome stringa vuota.
 
