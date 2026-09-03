@@ -8,4 +8,7 @@
   <Project Path="Segusum.Analyzers.Tests/Segusum.Analyzers.Tests.csproj" />
   <Project Path="Segusum.Admin/Segusum.Admin.csproj" />
   <Project Path="Segusum.Admin.Tests/Segusum.Admin.Tests.csproj" />
+  <Project Path="Segusum.Translator.Core/Segusum.Translator.Core.csproj" />
+  <Project Path="Segusum.Translator.Cli/Segusum.Translator.Cli.csproj" />
+  <Project Path="Segusum.Translator.Web/Segusum.Translator.Web.csproj" />
 </Solution>

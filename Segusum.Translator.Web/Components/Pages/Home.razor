@@ -1,0 +1,82 @@
+@page "/"
+@rendermode InteractiveServer
+@using System.Net
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.JSInterop
+@inject TranslatorWebService Translator
+@inject IJSRuntime JS
+
+<PageTitle>Segusum Translator</PageTitle>
+<div class="translator" tabindex="0" @onkeydown="HandleKeyDown">
+    <header class="toolbar-header">
+        <div><h1>Translator</h1><small>@Translator.RepositoryRoot</small></div>
+        <div class="root-picker"><label>Root progetto <input @bind="root" placeholder="C:\progetti\gioco" /></label><button @onclick="LoadRoot">Apri root</button></div>
+    </header>
+    @if (!string.IsNullOrEmpty(error)) { <div class="alert alert-danger">@error</div> }
+    @if (Translator.Catalogs.Count > 0)
+    {
+        <div class="catalog-picker"><label>Catalogo <select @bind="catalogPath"><option value="">Seleziona...</option>@foreach (var c in Translator.Catalogs) { <option value="@c.Path">@c.Language — @c.Path</option> }</select></label><button @onclick="OpenCatalog" disabled="@string.IsNullOrEmpty(catalogPath)">Apri catalogo</button></div>
+    }
+    @if (Workspace is null)
+    {
+        <p class="empty-state">Indica la root del progetto e apri un catalogo transl_*.xml.</p>
+    }
+    else
+    {
+        <button @onclick="RefreshCatalog">Refresh / Synchronize from source</button>
+        <div class="stats"><span>@translated / @activeTotal tradotte</span><span>@percent.ToString("0.0")%</span><span>@untranslated non tradotte</span><span>@obsolete obsolete</span>@if (IsDirty) { <strong>● modifiche non salvate</strong> }</div>
+        <div class="actions"><input placeholder="Cerca..." @bind="search" @bind:event="oninput" /><button @onclick="() => filter = Filter.All">Tutte</button><button @onclick="() => filter = Filter.Untranslated">Non tradotte</button><button @onclick="() => filter = Filter.Translated">Tradotte</button><button @onclick="() => filter = Filter.Changed">Cambiate</button><button @onclick="() => filter = Filter.Obsolete">Obsolete</button><span>@Filtered.Count righe</span></div>
+        <div class="navigation"><button @onclick="() => Move(-1)">Previous</button><button @onclick="() => Move(1)">Next</button><button @onclick="() => MoveToUntranslated(-1)">Previous untranslated</button><button @onclick="() => MoveToUntranslated(1)">Next untranslated</button><button @onclick="SaveAndNext" disabled="@(!IsDirty)">Save + Next untranslated</button><button @onclick="Save" disabled="@(!IsDirty)">Save</button></div>
+        <div class="catalog-header"><span>Status</span><span>Italiano (orig)</span><span>@Path.GetFileName(catalogPath)</span></div>
+        <Virtualize Items="Filtered" Context="item" OverscanCount="16">
+            <div id="row-@item.SequenceIndex" class="catalog-row @(item.IsObsolete ? "obsolete" : "") @(item.SequenceIndex == currentIndex ? "current" : "")">
+                <span class="status">@Status(item)</span>
+                <span class="source">@SourceMarkup(item.SourceText)</span>
+                <span class="translation"><input value="@Display(item.TargetTranslation)" placeholder="Da tradurre" aria-label="Traduzione" @onfocus="() => currentIndex = item.SequenceIndex" @onchange="@(e => Edit(item, e.Value?.ToString() ?? string.Empty))" @onkeydown="@(e => TargetKeyDown(e, item))" />
+                    @if (item.IsObsolete) { <small class="badge">obsolete</small> }
+                    @if (item.IsChanged) { <small class="changed">~ @($"{(item.Similarity ?? 0) * 100:0}%")</small> }
+                    @if (!string.IsNullOrEmpty(item.RelatedOldTranslation)) { <button class="copy" @onclick="() => CopyOld(item)">copia old</button> }
+                </span>
+            </div>
+        </Virtualize>
+    }
+</div>
+
+@code {
+    private TranslationWorkspace? Workspace => Translator.Workspace;
+    private string root = "", catalogPath = "", search = "", error = "";
+    private int currentIndex = -1;
+    private Filter filter = Filter.All;
+    private enum Filter { All, Untranslated, Translated, Changed, Obsolete }
+    private bool IsDirty => Workspace?.IsDirty == true;
+    private List<TranslationWorkItem> Filtered => (Workspace?.Items ?? Array.Empty<TranslationWorkItem>()).Where(Matches).ToList();
+    private int activeTotal => Workspace?.Items.Count(x => !x.IsObsolete) ?? 0;
+    private int translated => Workspace?.Items.Count(x => !x.IsObsolete && x.IsTranslated) ?? 0;
+    private int untranslated => activeTotal - translated;
+    private int obsolete => Workspace?.Items.Count(x => x.IsObsolete) ?? 0;
+    private double percent => activeTotal == 0 ? 100 : translated * 100d / activeTotal;
+    private async Task LoadRoot()
+    {
+        if (IsDirty && !await JS.InvokeAsync<bool>("confirm", "Modifiche non salvate. Cambiare root comunque?")) return;
+        try { Translator.ConfigureRoot(root); catalogPath = ""; error = ""; } catch (Exception ex) { error = ex.Message; }
+    }
+    private async Task OpenCatalog()
+    {
+        if (IsDirty && !await JS.InvokeAsync<bool>("confirm", "Modifiche non salvate. Aprire un altro catalogo comunque?")) return;
+        try { Translator.Open(catalogPath); error = ""; currentIndex = -1; } catch (Exception ex) { error = ex.Message; }
+    }
+    private bool Matches(TranslationWorkItem x) => (string.IsNullOrWhiteSpace(search) || x.SourceText.Contains(search, StringComparison.OrdinalIgnoreCase) || x.TargetTranslation.Contains(search, StringComparison.OrdinalIgnoreCase)) && filter switch { Filter.All => true, Filter.Untranslated => !x.IsTranslated && !x.IsObsolete, Filter.Translated => x.IsTranslated && !x.IsObsolete, Filter.Changed => x.IsChanged, Filter.Obsolete => x.IsObsolete, _ => true };
+    private static string Display(string value) => value == "+" ? "" : value;
+    private static string Status(TranslationWorkItem x) => x.IsObsolete ? "O" : x.IsChanged ? "~" : x.IsTranslated ? "✓" : "+";
+    private static MarkupString SourceMarkup(string value) => new(WebUtility.HtmlEncode(value).Replace("[[", "<mark class=\"hint\">[[").Replace("]]", "]]</mark>"));
+    private void Edit(TranslationWorkItem item, string value) => Workspace?.SetTranslation(item.SequenceIndex, value);
+    private void CopyOld(TranslationWorkItem item) { if (!string.IsNullOrEmpty(item.RelatedOldTranslation)) Edit(item, item.RelatedOldTranslation); }
+    private async Task Save() { try { Translator.Save(); error = ""; } catch (Exception ex) { error = ex.Message; } await InvokeAsync(StateHasChanged); }
+    private async Task RefreshCatalog() { if (IsDirty && !await JS.InvokeAsync<bool>("confirm", "Modifiche non salvate. Sincronizzare comunque?")) return; try { Translator.Refresh(); error = ""; } catch (Exception ex) { error = ex.Message; } }
+    private async Task SaveAndNext() { await Save(); await MoveToUntranslated(1); }
+    private async Task Move(int direction) { if (Workspace is null || Workspace.Items.Count == 0) return; currentIndex = Math.Clamp(currentIndex < 0 ? (direction > 0 ? 0 : Workspace.Items.Count - 1) : currentIndex + direction, 0, Workspace.Items.Count - 1); await Scroll(); }
+    private async Task MoveToUntranslated(int direction) { if (Workspace is null) return; var start = currentIndex < 0 ? (direction > 0 ? -1 : Workspace.Items.Count) : currentIndex; for (var i = start + direction; i >= 0 && i < Workspace.Items.Count; i += direction) if (!Workspace.Items[i].IsObsolete && !Workspace.Items[i].IsTranslated) { currentIndex = i; await Scroll(); return; } }
+    private Task Scroll() => JS.InvokeVoidAsync("segusumTranslatorScrollTo", $"row-{currentIndex}").AsTask();
+    private async Task HandleKeyDown(KeyboardEventArgs e) { if (e.AltKey && e.Key == "ArrowDown") await Move(1); else if (e.AltKey && e.Key == "ArrowUp") await Move(-1); else if (e.CtrlKey && e.Key == "Enter") await SaveAndNext(); }
+    private void TargetKeyDown(KeyboardEventArgs e, TranslationWorkItem item) { if (e.Key == "Enter") currentIndex = item.SequenceIndex; }
+}
