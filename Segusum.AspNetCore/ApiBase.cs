@@ -1481,7 +1481,10 @@ namespace Seg
                     explanation = w.getAllExplanations().Single(ex => ex.expId == i.uwaExplanationId);
                 }
 
+                var gameLogicStopwatch = Stopwatch.StartNew();
                 var actionRes = eng.executeActionUseWith(lo1, lo2, explanation, i.uwaAlreadyKnowItFails, w, saveNames, xdocObj, isTextMode);
+                gameLogicStopwatch.Stop();
+                SegusumProfiler.Log($"phase=game-logic action=useWith elapsed_ms={gameLogicStopwatch.Elapsed.TotalMilliseconds:F1}");
 
 
 
@@ -1563,7 +1566,10 @@ namespace Seg
                     explanation = w.getAllExplanations().Single(ex => ex.expId == i.ufiExpId);
                 }
 
+                var gameLogicStopwatch = Stopwatch.StartNew();
                 var actionRes = eng.executeActionUseFor(lo, obj, explanation, w, saveNames, xdocObj, isTextMode);
+                gameLogicStopwatch.Stop();
+                SegusumProfiler.Log($"phase=game-logic action=useFor elapsed_ms={gameLogicStopwatch.Elapsed.TotalMilliseconds:F1}");
 
 
 
@@ -3276,11 +3282,18 @@ namespace Seg
             UnhandledCombinationAudit.Synchronize(world, db, gameId);
         }
 
-        private static bool userModeIsCasual(int idUser, segusumDb db) =>
-            db.user.Where(u => u.id == idUser).Select(u => u.isCasualMode).SingleOrDefault() == true;
+        private static bool userModeIsCasual(int idUser, segusumDb db)
+        {
+            var sw = Stopwatch.StartNew();
+            var result = db.user.Where(u => u.id == idUser).Select(u => u.isCasualMode).SingleOrDefault() == true;
+            sw.Stop();
+            SegusumProfiler.Log($"phase=user-mode-query elapsed_ms={sw.Elapsed.TotalMilliseconds:F1}");
+            return result;
+        }
 
         private static string[] loadSavegameNamesFromDb(int idUser, segusumDb db)
         {
+            var sw = Stopwatch.StartNew();
             string[] saveNames;
             saveNames =
                     Utils.retry(() =>
@@ -3297,6 +3310,8 @@ namespace Seg
                       .ToArray()
 
                       );
+            sw.Stop();
+            SegusumProfiler.Log($"phase=save-names-query elapsed_ms={sw.Elapsed.TotalMilliseconds:F1} rows={saveNames.Length}");
             return saveNames;
         }
 
@@ -3734,6 +3749,7 @@ namespace Seg
 
         protected static user auth(Credentials cr, segusumDb db, out bool isTextMode)
         {
+            var authStopwatch = Stopwatch.StartNew();
             currentTutorialMode.Value = cr.tutorialMode;
             user user;
             var retryCount = 0;
@@ -3745,10 +3761,13 @@ namespace Seg
 
                     if (cr.uname.is_not_null_or_white() && cr.pwd.is_not_null_or_white())
                     {
+                        var authQueryStopwatch = Stopwatch.StartNew();
                         user = (from u in db.user // non fare Utils.retry qui! c'è già
                                 where u.uname == cr.uname
                                 where u.pwd == cr.pwd
                                 select u).SingleOrDefault();
+                        authQueryStopwatch.Stop();
+                        SegusumProfiler.Log($"phase=auth-query elapsed_ms={authQueryStopwatch.Elapsed.TotalMilliseconds:F1} hit={(user != null ? 1 : 0)}");
 
                         if (user != null)
                         {
@@ -3760,11 +3779,16 @@ namespace Seg
                             {
                                 isTextMode = !user.canPlayGraphicsMode.Value;
                                 user.dateLastAccess = new DateTime?(DateTime.Now);
+                                var authSaveStopwatch = Stopwatch.StartNew();
                                 db.SaveChanges();
+                                authSaveStopwatch.Stop();
+                                SegusumProfiler.Log($"phase=auth-savechanges elapsed_ms={authSaveStopwatch.Elapsed.TotalMilliseconds:F1}");
                             }
                             else
                             {
                                 isTextMode = !user.canPlayGraphicsMode.Value;
+                                authStopwatch.Stop();
+                                SegusumProfiler.Log($"phase=auth-total elapsed_ms={authStopwatch.Elapsed.TotalMilliseconds:F1} authenticated=0");
                                 return (user)null;
                             }
 
@@ -3826,6 +3850,8 @@ namespace Seg
             }
 
 
+            authStopwatch.Stop();
+            SegusumProfiler.Log($"phase=auth-total elapsed_ms={authStopwatch.Elapsed.TotalMilliseconds:F1} authenticated={(user != null ? 1 : 0)}");
             return user;
         }
 
