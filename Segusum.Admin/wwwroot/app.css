@@ -1,1 +1,20 @@
-html,body{margin:0;background:#fafafa}h1{margin-top:0}.toolbar label{display:flex;flex-direction:column;font-size:.85rem}.ignored{opacity:.65}
+*{box-sizing:border-box}
+html,body{margin:0;background:#f4f6f8;color:#20252b;font-family:Segoe UI,Arial,sans-serif}
+.shell{min-height:100vh;display:flex}
+.shell nav{width:250px;flex:0 0 250px;padding:28px 16px;background:#17202b;color:#fff;box-shadow:2px 0 10px #0002}
+.shell nav h2{margin:0 8px 26px;color:#f4c542;font-size:1.25rem;letter-spacing:.02em}
+.shell nav a{display:block;margin:5px 0;padding:12px 14px;border-radius:7px;color:#dce6f0;text-decoration:none;transition:background .15s,color .15s}
+.shell nav a:hover{background:#2b3c50;color:#fff}
+.shell main{width:100%;max-width:1500px;padding:34px}
+h1{margin:0 0 8px;color:#182532;font-size:1.9rem}
+.muted{color:#687684}
+.toolbar{display:flex;flex-wrap:wrap;gap:12px;align-items:end;margin:22px 0;padding:16px;background:#fff;border:1px solid #dbe2e8;border-radius:8px;box-shadow:0 1px 3px #0000000d}
+.toolbar label{display:flex;flex-direction:column;gap:5px;font-size:.85rem;font-weight:600}
+.toolbar input,.toolbar select{min-height:34px;padding:6px 8px;border:1px solid #b8c3cc;border-radius:4px;background:#fff;font:inherit;font-weight:400}
+.toolbar button,button{min-height:34px;padding:6px 12px;border:1px solid #8c9aa6;border-radius:4px;background:#e9eef2;cursor:pointer;font:inherit}
+.toolbar button:hover,button:hover{background:#dce6ed}
+table{width:100%;border-collapse:collapse;background:#fff;border:1px solid #dbe2e8;box-shadow:0 1px 3px #0000000d}
+th,td{padding:10px 12px;border-bottom:1px solid #e8edf1;text-align:left;vertical-align:top}
+th{background:#e9eff4;color:#344453;font-size:.85rem;white-space:nowrap}
+tr:hover td{background:#f7fafc}
+.ignored{opacity:.65}
