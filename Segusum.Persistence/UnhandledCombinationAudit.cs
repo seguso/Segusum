@@ -24,7 +24,11 @@ public static class UnhandledCombinationAudit
         try
         {
             var candidates = world.GetUnhandledCombinationCandidates();
-            var fingerprint = string.Join("\n", candidates.Select(Key).OrderBy(x => x, StringComparer.Ordinal));
+            // A new engine turn is a new observation even when it happens to
+            // expose the same candidate set again. Repeated rendering within
+            // one turn is the case we suppress.
+            var fingerprint = world.cur_time + "\n" +
+                string.Join("\n", candidates.Select(Key).OrderBy(x => x, StringComparer.Ordinal));
             var state = State.GetOrCreateValue(world);
             var now = DateTime.UtcNow;
 
