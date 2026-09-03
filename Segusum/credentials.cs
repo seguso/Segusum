@@ -7,6 +7,9 @@
         {
                 public string uname;
                 public string pwd;
+                // Il gameplay usa il Bearer header; questo campo resta solo
+                // per non rompere eventuali client legacy che lo deserializzano.
+                public string sessionToken;
                 //public string token;
 
                 public string lang;

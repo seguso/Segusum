@@ -62,6 +62,7 @@ public static class SegusumServiceCollectionExtensions
 
         services.AddSingleton<ISegusumWorldFactory>(
             new ConfiguredSegusumWorldFactory(options.WorldFactory));
+        services.AddSingleton<SegusumSessionStore>();
 
         // Il package possiede il controller standard: il gioco non deve
         // conoscere il tipo concreto soltanto per configurare MVC.

@@ -9,5 +9,6 @@ namespace Seg
     {
         public string errore { get; set; }
         public object ret { get; set; }
+        public string sessionToken { get; set; }
     }
 }

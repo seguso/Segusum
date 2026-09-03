@@ -11,7 +11,8 @@ public sealed class SegusumController : ApiBase
 {
     private readonly ISegusumWorldFactory worldFactory;
 
-    public SegusumController(ISegusumWorldFactory worldFactory)
+    public SegusumController(ISegusumWorldFactory worldFactory, SegusumSessionStore sessionStore)
+        : base(sessionStore)
     {
         this.worldFactory = worldFactory;
     }
@@ -25,6 +26,16 @@ public sealed class SegusumController : ApiBase
     [HttpPost, HttpGet]
     [Route("api/test")]
     public IActionResult test() => Ok("ok");
+
+    [HttpPost]
+    [Route("api/logout")]
+    public IActionResult logout()
+    {
+        var authorization = Request.Headers.Authorization.ToString();
+        if (authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+            sessionStore.Remove(authorization.Substring("Bearer ".Length).Trim());
+        return Ok(new ApiReturnVal { ret = "ok" });
+    }
 
     [HttpGet]
     [Route("api/last")]

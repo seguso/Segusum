@@ -50,3 +50,17 @@ dell'host, non una convenzione richiesta da Segusum. Se la stringa SQL viene
 passata vuota, l'avvio fallisce esplicitamente e non esiste un fallback a una
 macchina SQL locale. Il provisioning e le migrazioni automatiche saranno
 documentati in una fase successiva.
+# Sessioni gameplay
+
+`AddSegusum` registra una sessione gameplay in memoria. Il login con username
+e password verifica ancora l'identità nel persistence provider e restituisce
+un Bearer token opaco di 256 bit nell'header `X-Segusum-Session-Token`. Le
+azioni successive devono inviarlo come `Authorization: Bearer <token>`: il
+server risolve user id, modalità e game id dalla RAM senza ripetere la query
+username/password e senza aggiornare `dateLastAccess` a ogni click.
+
+Le sessioni hanno un idle timeout predefinito di un'ora, configurabile con
+`SEGUSUM_SESSION_IDLE_MINUTES`. Un riavvio del processo invalida naturalmente
+tutti i token; il client può rifare il bootstrap con il provider d'identità
+attuale. In produzione il Bearer token richiede HTTPS. L'integrazione Steam è
+un punto futuro del bootstrap, non una responsabilità degli action endpoint.

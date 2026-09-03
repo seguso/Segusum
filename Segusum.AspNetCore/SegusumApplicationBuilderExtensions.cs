@@ -77,6 +77,18 @@ public static class SegusumApplicationBuilderExtensions
                 {
                     // Il controller produrrà normalmente la risposta per il body non valido.
                 }
+
+                if (gate == null)
+                {
+                    var authorization = context.Request.Headers.Authorization.ToString();
+                    if (authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var token = authorization.Substring("Bearer ".Length).Trim();
+                        var sessions = context.RequestServices.GetRequiredService<SegusumSessionStore>();
+                        if (sessions.TryGet(token, out var session))
+                            gate = ApiSerializationGate.ForUser(session.Username);
+                    }
+                }
             }
 
             if (gate != null)

@@ -11,12 +11,21 @@ using System.Transactions;
 using Microsoft.AspNetCore.Mvc;
 using System.Xml;
 using System.Xml.Linq;
+using Segusum.AspNetCore;
 #pragma warning disable 219
 
 namespace Seg
 {
     public abstract class ApiBase : ControllerBase
     {
+        protected readonly SegusumSessionStore sessionStore;
+
+        protected ApiBase(SegusumSessionStore sessionStore)
+        {
+            this.sessionStore = sessionStore;
+        }
+
+        private static readonly AsyncLocal<SegusumSessionStore.SessionData?> currentSession = new();
 
         public IActionResult markAdminNarrativeSeenImpl([FromBody] AdminNarrativeSeenInput i)
         {
@@ -2861,13 +2870,15 @@ namespace Seg
                 var debugTime = w.cur_time;
                 // devo salvare il nuovo mondo in memoria, se no al prossimo actionres c'è una discordanza di curtime tra client e server
                 autosave(db, user, w);
+                var sessionToken = sessionStore.Create(user.id, user.uname, true, false, user.gameId);
+                Response.Headers["X-Segusum-Session-Token"] = sessionToken;
 
 
                 return new ApiReturnVal
                 {
                     ret = new getTokenResult
                     {
-                        //token = token,
+                        token = sessionToken,
                         res = actionRes,
                     }
                 };
@@ -2946,7 +2957,12 @@ namespace Seg
                 var user = auth(i, db, out bool isTextMode);
                 if (user == null) return Ok(new ApiReturnVal { errore = "noauth" });
                 user.isCasualMode = i.casualMode;
+                db.Attach(user);
+                db.Entry(user).Property(x => x.isCasualMode).IsModified = true;
                 db.SaveChanges();
+                var authorization = Request?.Headers.Authorization.ToString();
+                if (authorization?.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) == true)
+                    sessionStore.UpdateCasualMode(authorization.Substring("Bearer ".Length).Trim(), i.casualMode);
                 var w = restoreWorldFromMemoryOrDisk(user.id, db, out var invalid, out var names, i.lang, isTextMode);
                 if (invalid || w == null) return Ok(new ApiReturnVal { errore = "savegame-invalid" });
                 w.IsCasualMode = i.casualMode;
@@ -3278,12 +3294,16 @@ namespace Seg
         private static void SynchronizeUnhandledCombinationAudit(WorldBase world, int idUser, segusumDb db)
         {
             // Run after invariants so the audit observes the playable current state.
-            var gameId = db.user.Where(u => u.id == idUser).Select(u => u.gameId).SingleOrDefault() ?? 0;
+            var gameId = currentSession.Value?.GameId
+                ?? db.user.Where(u => u.id == idUser).Select(u => u.gameId).SingleOrDefault()
+                ?? 0;
             UnhandledCombinationAudit.Synchronize(world, db, gameId);
         }
 
         private static bool userModeIsCasual(int idUser, segusumDb db)
         {
+            if (currentSession.Value is { } session && session.UserId == idUser)
+                return session.IsCasualMode;
             var sw = Stopwatch.StartNew();
             var result = db.user.Where(u => u.id == idUser).Select(u => u.isCasualMode).SingleOrDefault() == true;
             sw.Stop();
@@ -3747,10 +3767,51 @@ namespace Seg
 
         }
 
-        protected static user auth(Credentials cr, segusumDb db, out bool isTextMode)
+        protected user auth(Credentials cr, segusumDb db, out bool isTextMode)
         {
             var authStopwatch = Stopwatch.StartNew();
             currentTutorialMode.Value = cr.tutorialMode;
+            var bearer = Request?.Headers.Authorization.ToString();
+            if (bearer?.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                var token = bearer.Substring("Bearer ".Length).Trim();
+                var lookupStopwatch = Stopwatch.StartNew();
+                if (sessionStore.TryGet(token, out var session))
+                {
+                    if (cr.cred_gameId.HasValue && cr.cred_gameId != session.GameId)
+                    {
+                        lookupStopwatch.Stop();
+                        currentSession.Value = null;
+                        isTextMode = true;
+                        SegusumProfiler.Log($"phase=session-lookup elapsed_ms={lookupStopwatch.Elapsed.TotalMilliseconds:F1} session_hit=0 reason=game-mismatch");
+                        return null;
+                    }
+                    lookupStopwatch.Stop();
+                    currentSession.Value = session;
+                    isTextMode = session.IsTextMode;
+                    SegusumProfiler.Log($"phase=session-lookup elapsed_ms={lookupStopwatch.Elapsed.TotalMilliseconds:F1} session_hit=1 user_id={session.UserId}");
+                    authStopwatch.Stop();
+                    SegusumProfiler.Log($"phase=auth-total elapsed_ms={authStopwatch.Elapsed.TotalMilliseconds:F1} authenticated=1 session=1");
+                    return new user
+                    {
+                        id = session.UserId,
+                        uname = session.Username,
+                        canPlayGraphicsMode = !session.IsTextMode,
+                        isCasualMode = session.IsCasualMode,
+                        gameId = session.GameId
+                    };
+                }
+
+                lookupStopwatch.Stop();
+                SegusumProfiler.Log($"phase=session-lookup elapsed_ms={lookupStopwatch.Elapsed.TotalMilliseconds:F1} session_hit=0");
+                currentSession.Value = null;
+                isTextMode = true;
+                authStopwatch.Stop();
+                SegusumProfiler.Log($"phase=auth-total elapsed_ms={authStopwatch.Elapsed.TotalMilliseconds:F1} authenticated=0 session=0");
+                return null;
+            }
+
+            currentSession.Value = null;
             user user;
             var retryCount = 0;
         retry:
@@ -3778,11 +3839,21 @@ namespace Seg
                             if (gameId.GetValueOrDefault() == credGameId.GetValueOrDefault() & gameId.HasValue == credGameId.HasValue)
                             {
                                 isTextMode = !user.canPlayGraphicsMode.Value;
-                                user.dateLastAccess = new DateTime?(DateTime.Now);
-                                var authSaveStopwatch = Stopwatch.StartNew();
-                                db.SaveChanges();
-                                authSaveStopwatch.Stop();
-                                SegusumProfiler.Log($"phase=auth-savechanges elapsed_ms={authSaveStopwatch.Elapsed.TotalMilliseconds:F1}");
+                                var sessionToken = sessionStore.Create(user.id, user.uname, isTextMode,
+                                    user.isCasualMode == true, user.gameId);
+                                Response.Headers["X-Segusum-Session-Token"] = sessionToken;
+                                var accessWriteStopwatch = Stopwatch.StartNew();
+                                var now = DateTimeOffset.UtcNow;
+                                var persistAccess = sessionStore.ShouldPersistAccess(user.id, now);
+                                if (persistAccess)
+                                {
+                                    user.dateLastAccess = new DateTime?(DateTime.Now);
+                                    db.SaveChanges();
+                                }
+                                accessWriteStopwatch.Stop();
+                                SegusumProfiler.Log($"phase=auth-savechanges elapsed_ms={accessWriteStopwatch.Elapsed.TotalMilliseconds:F1} session_created=1 persisted={ (persistAccess ? 1 : 0) }");
+                                currentSession.Value = new SegusumSessionStore.SessionData(sessionToken, user.id, user.uname,
+                                    DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, isTextMode, user.isCasualMode == true, user.gameId);
                             }
                             else
                             {
