@@ -51,6 +51,12 @@ public static class SegusumApplicationBuilderExtensions
             context.Response.Headers["X-Segusum-Request-Id"] = requestId;
             using var profilingScope = SegusumProfiler.BeginRequest(requestId);
             SegusumProfiler.Log($"phase=request-start method={context.Request.Method} path={context.Request.Path}");
+            SegusumProfiler.Log("phase=middleware-entered");
+            context.Response.OnCompleted(() =>
+            {
+                SegusumProfiler.Log("phase=response-completed");
+                return Task.CompletedTask;
+            });
             var isApiRequest = context.Request.Path.StartsWithSegments("/api");
             SemaphoreSlim? gate = null;
             var gateWaitMs = 0.0;
@@ -104,6 +110,7 @@ public static class SegusumApplicationBuilderExtensions
             try
             {
                 await next();
+                SegusumProfiler.Log("phase=middleware-next-returned");
             }
             finally
             {

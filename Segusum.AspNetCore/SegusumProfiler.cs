@@ -22,6 +22,7 @@ namespace Seg
                 StartAllocated = startAllocated;
                 AvailableWorkers = availableWorkers;
                 AvailableIo = availableIo;
+                ElapsedStopwatch = System.Diagnostics.Stopwatch.StartNew();
             }
 
             public string Id { get; }
@@ -29,6 +30,7 @@ namespace Seg
             public long StartAllocated { get; }
             public int AvailableWorkers { get; }
             public int AvailableIo { get; }
+            public Stopwatch ElapsedStopwatch { get; }
         }
 
         private static readonly bool Enabled = IsEnabled(Environment.GetEnvironmentVariable("SEGUSUM_PROFILE_ENABLED"));
@@ -61,7 +63,8 @@ namespace Seg
             if (!Enabled || Queue == null) return;
             var context = Current.Value;
             var prefix = context == null ? "" : $"request_id={context.Id} ";
-            Queue.Writer.TryWrite($"{DateTimeOffset.UtcNow:O} [tid={Environment.CurrentManagedThreadId}] {prefix}{message}");
+            var elapsed = context?.ElapsedStopwatch.Elapsed.TotalMilliseconds;
+            Queue.Writer.TryWrite($"{DateTimeOffset.UtcNow:O} [tid={Environment.CurrentManagedThreadId}] {prefix}request_elapsed_ms={(elapsed ?? 0):F1} {message}");
         }
 
         public static void Log(Func<string> messageFactory)

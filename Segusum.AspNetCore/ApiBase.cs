@@ -3107,6 +3107,7 @@ namespace Seg
 
         protected static void autosave(segusumDb db, user user, WorldBase w, string savegameName = "")
         {
+            SegusumProfiler.Log($"phase=autosave-start user_id={user.id}");
             if (w.adminNarrativeMessagesDelivered.Count > 0 &&
                 AdminNarrativeQueue.MarkDelivered(db, user.id, w.adminNarrativeMessagesDelivered))
             {
@@ -3175,6 +3176,7 @@ namespace Seg
             SegusumProfiler.Log($"autosave user={user.id} title={savegameName} phase=persist " +
                 $"elapsed_ms={persistStopwatch.Elapsed.TotalMilliseconds:F1} storage=" +
                 (StorageOptions.IsFile ? "file" : "sql"));
+            SegusumProfiler.Log($"phase=autosave-end user_id={user.id}");
 
 
         }
@@ -3223,7 +3225,7 @@ namespace Seg
         /// <returns></returns>
         protected WorldBase restoreWorldFromMemoryOrDisk(int idUser, segusumDb db, out bool savegameInvalid, out string[] saveNames, string lang, bool isTextMode)
         {
-
+            SegusumProfiler.Log($"phase=restore-start user_id={idUser}");
 
             var exists = eng.worldOfUser.TryGetValue(idUser, out var wo)
                 && wo.IsTutorialMode == currentTutorialMode.Value;
@@ -3773,6 +3775,7 @@ namespace Seg
         protected user auth(Credentials cr, segusumDb db, out bool isTextMode)
         {
             var authStopwatch = Stopwatch.StartNew();
+            SegusumProfiler.Log("phase=controller-entered");
             currentTutorialMode.Value = cr.tutorialMode;
             var bearer = Request?.Headers.Authorization.ToString();
             if (bearer?.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) == true)
@@ -3792,6 +3795,7 @@ namespace Seg
                     lookupStopwatch.Stop();
                     currentSession.Value = session;
                     isTextMode = session.IsTextMode;
+                    SegusumProfiler.Log($"phase=session-resolved elapsed_ms=0.0 user_id={session.UserId}");
                     SegusumProfiler.Log($"phase=session-lookup elapsed_ms={lookupStopwatch.Elapsed.TotalMilliseconds:F1} session_hit=1 user_id={session.UserId}");
                     authStopwatch.Stop();
                     SegusumProfiler.Log($"phase=auth-total elapsed_ms={authStopwatch.Elapsed.TotalMilliseconds:F1} authenticated=1 session=1");
