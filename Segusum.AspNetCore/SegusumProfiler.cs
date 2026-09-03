@@ -51,6 +51,8 @@ namespace Seg
         public static IDisposable BeginRequest(string requestId)
         {
             if (!Enabled) return NoopScope.Instance;
+            Utils.RetryObserver ??= (attempt, delayMs, exceptionType) =>
+                Log($"phase=retry attempt={attempt} delay_ms={delayMs} exception={exceptionType.Name}");
             ThreadPool.GetAvailableThreads(out var availableWorkers, out var availableIo);
             Current.Value = new RequestContext(requestId, Environment.CurrentManagedThreadId,
                 GC.GetAllocatedBytesForCurrentThread(), availableWorkers, availableIo);
@@ -65,6 +67,12 @@ namespace Seg
             var prefix = context == null ? "" : $"request_id={context.Id} ";
             var elapsed = context?.ElapsedStopwatch.Elapsed.TotalMilliseconds;
             Queue.Writer.TryWrite($"{DateTimeOffset.UtcNow:O} [tid={Environment.CurrentManagedThreadId}] {prefix}request_elapsed_ms={(elapsed ?? 0):F1} {message}");
+        }
+
+        public static void LogForRequest(string requestId, double elapsedMs, string message)
+        {
+            if (!Enabled || Queue == null) return;
+            Queue.Writer.TryWrite($"{DateTimeOffset.UtcNow:O} [tid={Environment.CurrentManagedThreadId}] request_id={requestId} request_elapsed_ms={elapsedMs:F1} {message}");
         }
 
         public static void Log(Func<string> messageFactory)

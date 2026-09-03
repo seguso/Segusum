@@ -8,6 +8,8 @@ namespace Seg
 {
         public static class Utils
         {
+                // Optional diagnostics hook; null in normal gameplay and has no effect on retry semantics.
+                public static Action<int, int, Type> RetryObserver { get; set; }
 
                 public static string stringOfDateCentesimi(DateTime d)
                 {
@@ -44,6 +46,7 @@ namespace Seg
                         }
                         catch (Exception e)
                         {
+                                RetryObserver?.Invoke(conto, 400, e.GetType());
                                 var erroreStr = UtilsW.stringOfException(e);
 
                                 eccezioni.Add($"\nErrore: {DateTime.Now.ToString()} : tentativo numero {conto}: dettagli : \n{erroreStr}");

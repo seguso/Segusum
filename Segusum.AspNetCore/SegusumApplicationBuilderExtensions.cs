@@ -54,7 +54,7 @@ public static class SegusumApplicationBuilderExtensions
             SegusumProfiler.Log("phase=middleware-entered");
             context.Response.OnCompleted(() =>
             {
-                SegusumProfiler.Log("phase=response-completed");
+                SegusumProfiler.LogForRequest(requestId, stopwatch.Elapsed.TotalMilliseconds, "phase=response-completed");
                 return Task.CompletedTask;
             });
             var isApiRequest = context.Request.Path.StartsWithSegments("/api");
@@ -115,6 +115,7 @@ public static class SegusumApplicationBuilderExtensions
             finally
             {
                 gateHoldStopwatch?.Stop();
+                SegusumProfiler.Log("phase=gate-releasing");
                 gate?.Release();
                 stopwatch.Stop();
                 SegusumProfiler.Log($"phase=request-summary method={context.Request.Method} path={context.Request.Path} " +
