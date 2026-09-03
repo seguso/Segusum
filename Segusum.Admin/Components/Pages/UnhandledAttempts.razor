@@ -1,7 +1,40 @@
 @page "/unhandled-attempts"
 @rendermode InteractiveServer
 @inject AdminDataService Data
+<PageTitle>Tentativi non gestiti</PageTitle>
 <h1>Tentativi non gestiti</h1>
-<p class="muted">Combinazioni useWith/useFor realmente provate dagli utenti e senza handler.</p>
-<h1>PastActions problematiche</h1><p class="muted">Azioni useWith/useFor realmente presenti nei save XML.</p><div class="toolbar"><label>Game ID<input type="number" @bind="gameId" /></label><label>Username<input @bind="userName" /></label><label>User ID<input type="number" @bind="userId" /></label><label>Cerca<input @bind="search" /></label><label>Tipo<select @bind="type"><option value="">tutti</option><option>useWith</option><option>useFor</option></select></label><label>Minimo<input type="number" min="1" @bind="minimum" /></label><label><input type="checkbox" @bind="separate" /> separa explanation</label><button @onclick="Reload">Aggiorna</button></div><table><thead><tr><th>Tipo</th><th>Combinazione</th><th>Explanation</th><th>Tentativi</th><th>Utenti</th><th>Ultimo</th><th>Unhandled</th></tr></thead><tbody>@foreach(var x in rows){<tr><td>@x.Type</td><td>@x.FirstId / @x.SecondId</td><td>@(x.Explanation ?? "nessuna")</td><td>@x.Attempts</td><td>@x.Users</td><td>@x.LastAttempt.ToLocalTime()</td><td>@(x.AnyUnhandled ? "sì" : "no")</td></tr>}</tbody></table>
-@code {private int? gameId,userId;private string search="",userName="",type="";private int minimum=1;private bool separate=true,onlyUnhandled=true;private List<PastSummary> rows=new();protected override Task OnInitializedAsync()=>Reload();private async Task Reload()=>rows=await Data.FindPastActionsAsync(new(gameId,search,userName,userId,type,minimum,separate,onlyUnhandled));}
+<p class="muted">Problemi realmente provati, separati per singolo utente.</p>
+<div class="toolbar">
+    <label>Game ID<input type="number" @bind="gameId" /></label>
+    <label>Username<input @bind="userName" /></label>
+    <label>User ID<input type="number" @bind="userId" /></label>
+    <label>Cerca<input @bind="search" /></label>
+    <label>Tipo<select @bind="type"><option value="">tutti</option><option>useWith</option><option>useFor</option></select></label>
+    <label>Minimo<input type="number" min="1" @bind="minimum" /></label>
+    <label><input type="checkbox" @bind="separate" /> separa explanation</label>
+    <button @onclick="Reload">Aggiorna</button>
+</div>
+@if (messageRow is not null)
+{
+    <section class="card message-editor">
+        <h3>Invia messaggio narrativo</h3>
+        <p><b>@messageRow.UserName</b> (#@messageRow.UserId), @messageRow.Type: @messageRow.FirstId / @messageRow.SecondId<br />Explanation: @(messageRow.Explanation ?? "nessuna") — prove: @messageRow.AttemptCount — ultima: @messageRow.LastAttempt.ToLocalTime()</p>
+        <label>Sequenza di nartext, separati da /<textarea @bind="messageText"></textarea></label>
+        <p class="muted">Preview:</p>
+        <ol>@foreach (var part in PreviewParts) { <li>@part</li> }</ol>
+        <button @onclick="SendMessage">Metti in coda</button> <button @onclick="CloseMessage">Annulla</button>
+    </section>
+}
+<table><thead><tr><th>Utente</th><th>Combinazione</th><th>Explanation</th><th>Prove</th><th>Ultima prova</th><th>Messaggi</th><th>Visti</th><th>Ultima risposta vista</th><th>Riprovata dopo risposta</th><th></th></tr></thead>
+<tbody>@foreach (var x in rows)
+{<tr><td>@x.UserName<br /><small>#@x.UserId, game @x.GameId</small></td><td>@x.Type<br />@x.FirstId / @x.SecondId</td><td>@(x.Explanation ?? "nessuna")</td><td>@x.AttemptCount</td><td>@x.LastAttempt.ToLocalTime()</td><td>@x.SentMessageCount</td><td>@x.SeenMessageCount</td><td>@(x.LastMessageSeenUtc?.ToLocalTime())</td><td>@(x.RetriedAfterLastMessage ? "sì" : "no")</td><td><button @onclick="() => OpenMessage(x)">Invia</button></td></tr>}</tbody></table>
+@code {
+    private int? gameId, userId; private string search = "", userName = "", type = ""; private int minimum = 1; private bool separate = true;
+    private List<ProblemCombinationSummary> rows = new(); private ProblemCombinationSummary? messageRow; private string messageText = "";
+    protected override Task OnInitializedAsync() => Reload();
+    private async Task Reload() => rows = await Data.FindProblemCombinationsAsync(new(gameId, search, userName, userId, type, minimum, separate, true));
+    private IEnumerable<string> PreviewParts => messageText.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    private void OpenMessage(ProblemCombinationSummary row) { messageRow = row; messageText = ""; }
+    private void CloseMessage() => messageRow = null;
+    private async Task SendMessage() { if (messageRow is null) return; await Data.QueueAdminMessageAsync(messageRow.UserId, messageRow.GameId, messageRow.Type, messageRow.FirstId, messageRow.SecondId, messageRow.Explanation, messageText); messageRow = null; rows = await Data.FindProblemCombinationsAsync(new(gameId, search, userName, userId, type, minimum, separate, true)); }
+}

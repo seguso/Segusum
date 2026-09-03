@@ -1,5 +1,27 @@
 @page "/users/{Id:int}"
 @rendermode InteractiveServer
 @inject AdminDataService Data
-<h1>Dettaglio utente</h1>@if(user==null){<p>Caricamento o utente inesistente.</p>}else{<p><b>@user.User.Name</b> (#@user.User.Id), game @user.User.GameId, ultimo accesso @user.User.LastAccess, ultimo save @user.User.LastSave</p><div class="tabs"><button class="@(tab==0?"selected":"")" @onclick="(()=>tab=0)">Azioni (@user.Actions.Count)</button><button class="@(tab==1?"selected":"")" @onclick="(()=>tab=1)">Cicli (@user.Cycles.Count)</button></div>@if(tab==0){<table><thead><tr><th>Data</th><th>Tipo</th><th>Dettagli</th><th>Explanation</th><th>Handler</th></tr></thead><tbody>@foreach(var x in user.Actions.OrderBy(x=>x.Time)){<tr><td>@x.Time.ToLocalTime()</td><td>@x.Type</td><td>@x.Details</td><td>@x.Explanation</td><td>@(x.HandlerCalled?.ToString() ?? "non registrato")</td></tr>}</tbody></table>}else{<table><thead><tr><th>ID/nome</th><th>Esecuzioni</th><th>Ultima</th></tr></thead><tbody>@foreach(var x in user.Cycles){<tr><td>@x.Id</td><td>@x.Count</td><td>@x.LastExecution</td></tr>}</tbody></table>}}
-@code {[Parameter]public int Id{get;set;}private int tab;private AdminUserDetails? user;protected override async Task OnParametersSetAsync()=>user=await Data.GetUserAsync(Id);}
+<PageTitle>Dettaglio utente</PageTitle>
+<h1>Dettaglio utente</h1>
+@if (user == null) { <p>Caricamento o utente inesistente.</p> }
+else
+{
+    <p><b>@user.User.Name</b> (#@user.User.Id), game @user.User.GameId, ultimo accesso @user.User.LastAccess, ultimo save @user.User.LastSave</p>
+    <button @onclick="OpenMessage">Invia messaggio</button>
+    @if (messageOpen)
+    {
+        <section class="card message-editor"><h3>Messaggio per @user.User.Name (#@user.User.Id)</h3><label>Sequenza di nartext, separati da /<textarea @bind="messageText"></textarea></label><p class="muted">Preview:</p><ol>@foreach (var part in PreviewParts) { <li>@part</li> }</ol><button @onclick="SendMessage">Metti in coda</button> <button @onclick="CloseMessage">Annulla</button></section>
+    }
+    <div class="tabs"><button class="@(tab == 0 ? "selected" : "")" @onclick="(() => tab = 0)">Azioni (@user.Actions.Count)</button><button class="@(tab == 1 ? "selected" : "")" @onclick="(() => tab = 1)">Cicli (@user.Cycles.Count)</button></div>
+    @if (tab == 0)
+    {<table><thead><tr><th>Data</th><th>Tipo</th><th>Dettagli</th><th>Explanation</th><th>Handler</th></tr></thead><tbody>@foreach (var x in user.Actions.OrderBy(x => x.Time)) { <tr><td>@x.Time.ToLocalTime()</td><td>@x.Type</td><td>@x.Details</td><td>@x.Explanation</td><td>@(x.HandlerCalled?.ToString() ?? "non registrato")</td></tr>}</tbody></table>}
+    else
+    {<table><thead><tr><th>ID/nome</th><th>Esecuzioni</th><th>Ultima</th></tr></thead><tbody>@foreach (var x in user.Cycles) { <tr><td>@x.Id</td><td>@x.Count</td><td>@x.LastExecution</td></tr>}</tbody></table>}
+}
+@code {
+    [Parameter] public int Id { get; set; } private int tab; private AdminUserDetails? user; private bool messageOpen; private string messageText = "";
+    protected override async Task OnParametersSetAsync() => user = await Data.GetUserAsync(Id);
+    private IEnumerable<string> PreviewParts => messageText.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    private void OpenMessage() { messageOpen = true; messageText = ""; } private void CloseMessage() => messageOpen = false;
+    private async Task SendMessage() { if (user == null) return; await Data.QueueAdminMessageAsync(user.User.Id, user.User.GameId ?? 0, "", "", "", null, messageText); messageOpen = false; }
+}

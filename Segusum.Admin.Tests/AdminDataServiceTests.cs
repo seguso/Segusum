@@ -55,6 +55,55 @@ public sealed class AdminDataServiceTests
         Assert.Equal(2, all.Count);
     }
 
+    [Fact]
+    public async Task ProblemCombinationsAreGroupedPerUserAndTrackMessageProgress()
+    {
+        var options = new DbContextOptionsBuilder<segusumDb>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
+        var firstAttempt = DateTime.UtcNow.AddMinutes(-10);
+        await using (var seed = new segusumDb(options))
+        {
+            seed.user.AddRange(new user { id = 1, uname = "a", gameId = 2 }, new user { id = 2, uname = "b", gameId = 2 });
+            seed.savegame.AddRange(
+                new savegame { idUser = 1, savegameTitle = "", dateModified = DateTime.UtcNow, savegameXml =
+                    $"<world>{string.Join("", Enumerable.Range(0, 5).Select(i => $"<past_action_use_with lo1Id=\"key\" lo2Id=\"door\" expl=\"e{i % 2}\" handler_called=\"N\" time=\"{firstAttempt.AddMinutes(i):O}\" />"))}</world>" },
+                new savegame { idUser = 2, savegameTitle = "", dateModified = DateTime.UtcNow, savegameXml = $"<world><past_action_use_with lo1Id=\"key\" lo2Id=\"door\" expl=\"e0\" handler_called=\"N\" time=\"{firstAttempt:O}\" /></world>" });
+            seed.adminNarrativeMessage.Add(new AdminNarrativeMessage
+            {
+                userId = 1, gameId = 2, category = "useWith", firstId = "key", secondId = "door", explanationId = "e0",
+                narTextsJson = "[\"try again\"]", createdAtUtc = firstAttempt.AddMinutes(1), seenAtUtc = firstAttempt.AddMinutes(2)
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        var service = new AdminDataService(new Factory(options));
+        var rows = await service.FindProblemCombinationsAsync(new(2, "", "", null, "", 1, true, true));
+
+        Assert.Equal(3, rows.Count); // user 1 has two explanations; user 2 has one
+        var userOneE0 = Assert.Single(rows.Where(x => x.UserId == 1 && x.Explanation == "e0"));
+        Assert.Equal(3, userOneE0.AttemptCount);
+        Assert.Equal(1, userOneE0.SentMessageCount);
+        Assert.Equal(1, userOneE0.SeenMessageCount);
+        Assert.Equal(firstAttempt.AddMinutes(2), userOneE0.LastMessageSeenUtc);
+        Assert.True(userOneE0.RetriedAfterLastMessage);
+        Assert.All(rows.Where(x => x.UserId == 2), x => Assert.Equal(0, x.SentMessageCount));
+    }
+
+    [Fact]
+    public async Task GenericAdminMessageKeepsUserAndOptionalCombinationEmpty()
+    {
+        var options = new DbContextOptionsBuilder<segusumDb>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
+        var service = new AdminDataService(new Factory(options));
+        var id = await service.QueueAdminMessageAsync(42, 7, "", "", "", null, "Prima /  Second");
+
+        await using var db = new segusumDb(options);
+        var row = await db.adminNarrativeMessage.SingleAsync(x => x.id == id);
+        Assert.Equal(42, row.userId);
+        Assert.Equal("", row.category);
+        Assert.Equal("", row.firstId);
+        Assert.Equal("", row.secondId);
+        Assert.Equal("[\"Prima\",\"Second\"]", row.narTextsJson);
+    }
+
     private sealed class Factory(DbContextOptions<segusumDb> options) : IDbContextFactory<segusumDb>
     {
         public segusumDb CreateDbContext() => new(options);

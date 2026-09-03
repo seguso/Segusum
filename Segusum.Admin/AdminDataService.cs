@@ -13,6 +13,7 @@ public sealed record AdminUser(int Id, string Name, int? GameId, DateTime? LastA
 public sealed record AdminUserDetails(AdminUser User, IReadOnlyList<PastAttempt> Actions, IReadOnlyList<CycleInfo> Cycles);
 public sealed record CycleInfo(string Id, int Count, DateTime? LastExecution);
 public sealed record AdminMessageSummary(long Id, int UserId, string Category, string FirstId, string SecondId, string? ExplanationId, string Text, DateTime CreatedAtUtc, DateTime? DeliveredAtUtc, DateTime? SeenAtUtc, bool Cancelled);
+public sealed record ProblemCombinationSummary(int UserId, string UserName, int GameId, string Type, string FirstId, string SecondId, string? Explanation, int AttemptCount, DateTime LastAttempt, int SentMessageCount, int SeenMessageCount, DateTime? LastMessageSeenUtc, bool RetriedAfterLastMessage);
 
 public sealed class AdminDataService
 {
@@ -43,6 +44,31 @@ public sealed class AdminDataService
         db.adminNarrativeMessage.Add(row);
         await db.SaveChangesAsync();
         return row.id;
+    }
+
+    public async Task<List<ProblemCombinationSummary>> FindProblemCombinationsAsync(PastQuery filter)
+    {
+        await using var db = await factory.CreateDbContextAsync();
+        var users = await db.user.AsNoTracking().Where(x => (!filter.GameId.HasValue || x.gameId == filter.GameId) &&
+            (!filter.UserId.HasValue || x.id == filter.UserId) &&
+            (string.IsNullOrWhiteSpace(filter.UserName) || x.uname.Contains(filter.UserName))).ToListAsync();
+        var saves = await db.savegame.AsNoTracking().Where(x => x.savegameTitle == "").ToListAsync();
+        var messages = await db.adminNarrativeMessage.AsNoTracking().ToListAsync();
+        var attempts = users.SelectMany(u => saves.Where(s => s.idUser == u.id).OrderByDescending(s => s.dateModified).Take(1)
+            .SelectMany(s => ParseActions(s.savegameXml, u)))
+            .Where(x => !filter.OnlyUnhandled || x.HandlerCalled == false)
+            .Where(x => string.IsNullOrWhiteSpace(filter.Type) || x.Type == filter.Type)
+            .Where(x => string.IsNullOrWhiteSpace(filter.Search) || x.Details.Contains(filter.Search, StringComparison.OrdinalIgnoreCase) || x.FirstId.Contains(filter.Search, StringComparison.OrdinalIgnoreCase) || x.SecondId.Contains(filter.Search, StringComparison.OrdinalIgnoreCase));
+        var groups = attempts.GroupBy(x => new { x.UserId, x.UserName, x.GameId, x.Type, x.FirstId, x.SecondId, Explanation = filter.SeparateExplanations ? x.Explanation : null });
+        return groups.Select(g => {
+            var last = g.Max(x => x.Time);
+            var sent = messages.Where(m => m.userId == g.Key.UserId && m.gameId == g.Key.GameId &&
+                m.category == g.Key.Type && m.firstId == g.Key.FirstId && m.secondId == g.Key.SecondId &&
+                (!filter.SeparateExplanations || m.explanationId == g.Key.Explanation)).ToList();
+            var lastSeen = sent.Where(x => x.seenAtUtc.HasValue).OrderByDescending(x => x.seenAtUtc).FirstOrDefault()?.seenAtUtc;
+            var lastMessage = sent.OrderByDescending(x => x.createdAtUtc).FirstOrDefault();
+            return new ProblemCombinationSummary(g.Key.UserId, g.Key.UserName, g.Key.GameId, g.Key.Type, g.Key.FirstId, g.Key.SecondId, g.Key.Explanation, g.Count(), last, sent.Count, sent.Count(x => x.seenAtUtc.HasValue), lastSeen, lastMessage != null && g.Any(x => x.Time > lastMessage.createdAtUtc));
+        }).Where(x => x.AttemptCount >= filter.MinAttempts).OrderByDescending(x => x.LastAttempt).ToList();
     }
 
     public async Task CancelAdminMessageAsync(long id)
