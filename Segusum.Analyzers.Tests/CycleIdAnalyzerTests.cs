@@ -11,9 +11,17 @@ public sealed class CycleIdAnalyzerTests
     private const string Api = """
         namespace Seg {
           public class Cycle { }
+          public class LogicObj { }
+          public class Objective { }
+          public class Explanation { }
+          public class HandlerInput { }
           public abstract class WorldBase {
             protected Cycle startCycle(string id, Action a) => new();
             protected Cycle startCycle(CycleElemId id, Action a) => new();
+            protected void addHandlerCombine(LogicObj lo1, LogicObj lo2, string sentence, Action<HandlerInput> handler = null, Explanation explanation = null, Func<bool> isPossibleNow = null) { }
+            protected void addHandlerCombine(LogicObj lo1, LogicObj lo2, Func<string> sentence, Action<HandlerInput> handler = null, Explanation explanation = null, Func<bool> isPossibleNow = null) { }
+            protected void addHandlerUseFor(LogicObj lo, Objective ob, Explanation ex, Action<HandlerInput> handler) { }
+            protected void addHandlerUseFor(LogicObj lo, Objective ob, Action<HandlerInput> handler) { }
           }
           public sealed class CycleElemId { }
           public static class Utils {
@@ -94,6 +102,63 @@ public sealed class CycleIdAnalyzerTests
           var c = new Seg.Cycle();
           c.addToCycle("pippo", () => { });
           startCycle({|SEG003:"pippo"|}, () => { });
+        }}
+        """).RunAsync();
+
+    [Fact]
+    public async Task DuplicateCombineRegistrationIsAnError() => await Test("""
+        class Game : Seg.WorldBase { Seg.LogicObj a = new(), b = new(); void M() {
+          addHandlerCombine(a, b, "one", null);
+          addHandlerCombine({|SEG004:a|}, b, "two", null);
+        }}
+        """).RunAsync();
+
+    [Fact]
+    public async Task CombineIsOrientedAndWorldsAreSeparate() => await Test("""
+        class Game : Seg.WorldBase { Seg.LogicObj a = new(), b = new(), c = new(); void M() {
+          addHandlerCombine(a, b, "one", null);
+          addHandlerCombine(b, a, "reverse", null);
+          addHandlerCombine(a, c, "other target", null);
+          addHandlerCombine(c, b, "other first", null);
+        }}
+        class OtherGame : Seg.WorldBase { Seg.LogicObj a = new(), b = new(); void M() {
+          addHandlerCombine(a, b, "independent", null);
+        }}
+        """).RunAsync();
+
+    [Fact]
+    public async Task CombineOverloadsAndNamedArgumentsStillCollide() => await Test("""
+        class Game : Seg.WorldBase { Seg.LogicObj a = new(), b = new(); void M() {
+          addHandlerCombine(a, b, "one", null);
+          addHandlerCombine(
+            lo2: b, lo1: {|SEG004:this.a|}, sentence: () => "two", handler: null);
+        }}
+        """).RunAsync();
+
+    [Fact]
+    public async Task DuplicateUseForRegistrationIsAnError() => await Test("""
+        class Game : Seg.WorldBase { Seg.LogicObj a = new(); Seg.Objective ob = new(); void M() {
+          addHandlerUseFor(a, ob, null);
+          addHandlerUseFor({|SEG005:this.a|}, ob, null, null);
+        }}
+        """).RunAsync();
+
+    [Fact]
+    public async Task UseForDifferentElementsAndWorldsAreSeparate() => await Test("""
+        class Game : Seg.WorldBase { Seg.LogicObj a = new(), b = new(); Seg.Objective x = new(), y = new(); void M() {
+          addHandlerUseFor(a, x, null);
+          addHandlerUseFor(a, y, null);
+          addHandlerUseFor(b, x, null);
+        }}
+        class OtherGame : Seg.WorldBase { Seg.LogicObj a = new(); Seg.Objective x = new(); void M() {
+          addHandlerUseFor(a, x, null);
+        }}
+        """).RunAsync();
+
+    [Fact]
+    public async Task NonSegusumHandlerNameIsIgnored() => await Test("""
+        class Other { void addHandlerCombine(Seg.LogicObj a, Seg.LogicObj b, string s) { } void M() {
+          addHandlerCombine(null, null, "not Segusum");
         }}
         """).RunAsync();
 }
