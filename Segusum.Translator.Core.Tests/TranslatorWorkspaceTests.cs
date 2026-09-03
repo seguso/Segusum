@@ -145,6 +145,25 @@ public sealed class TranslatorWorkspaceTests
         Assert.False(operations.Synchronize(project.Path, path).Result.Changed);
     }
 
+    [Fact]
+    public void WorkspaceExposesPersistedPreviousTranslationAfterLaterRevision()
+    {
+        using var project = NewProject("World.cs", "dial(character, \"Version 2\");\n");
+        var path = Path.Combine(project.Path, "transl_en.xml");
+        File.WriteAllText(path, "<root><str orig=\"Version 1\" transl=\"Versione uno\" /></root>");
+        var workspace = new TranslationWorkspace { RepositoryRoot = project.Path, CatalogPath = path };
+
+        workspace.Synchronize();
+        workspace.SetTranslation(0, "Versione due");
+        workspace.Save();
+        File.WriteAllText(Path.Combine(project.Path, "World.cs"), "dial(character, \"Version 3\");\n");
+
+        workspace.Synchronize();
+
+        Assert.Equal(new[] { "Version 3", "Version 2", "Version 1" }, workspace.Items.Select(x => x.SourceText));
+        Assert.Equal("Versione due", workspace.Items[0].RelatedOldTranslation);
+    }
+
     private static TempProject NewProject(string relativeFile, string contents)
     {
         var root = Directory.CreateTempSubdirectory("segusum-translator-").FullName;

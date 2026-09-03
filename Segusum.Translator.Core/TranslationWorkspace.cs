@@ -37,8 +37,12 @@ public sealed class TranslationWorkspace
             var entry = TranslationEntry.FromXml(element);
             pairs.TryGetValue(entry.Original, out var pair);
             sourceMap.TryGetValue(entry.Original, out var source);
+            var previous = !entry.IsObsolete
+                ? TranslationCatalogSynchronizer.PreviousTranslated(entry, document.Root?.Elements("str").Select(TranslationEntry.FromXml).ToList() ?? new())
+                : null;
             return new TranslationWorkItem(index, entry.Original, entry.Translation, entry.IsTranslated, entry.IsObsolete,
-                pair is not null, pair?.Similarity, pair?.OldValue, pair is null ? null : FindTranslation(document, pair.OldValue), source?.RelativePath, source?.LineNumber);
+                pair is not null, pair?.Similarity, previous?.Original ?? pair?.OldValue,
+                previous?.Translation ?? (pair is null ? null : FindTranslation(document, pair.OldValue)), source?.RelativePath, source?.LineNumber);
         }).ToArray() ?? Array.Empty<TranslationWorkItem>();
         IsDirty = synchronize && result.Changed;
     }

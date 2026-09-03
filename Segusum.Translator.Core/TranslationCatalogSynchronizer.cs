@@ -47,6 +47,8 @@ public sealed record SyncResult(XDocument Document, SyncStatistics Statistics, b
 
 public sealed class TranslationCatalogSynchronizer
 {
+    internal const string TranslationChainAttribute = "translation-chain";
+    internal const string PreviousTranslatedAttribute = "previous-translated-orig";
     // Similarity is only a conservative hint inside a small sequence-diff
     // replacement block; exact originals are always matched first.
     public const double DefaultSimilarityThreshold = 0.80;
@@ -104,24 +106,34 @@ public sealed class TranslationCatalogSynchronizer
             if (activeIndex.TryGetValue(value, out var activePosition))
             {
                 usedActive.Add(activePosition);
-                output.Add(active[activePosition].With(obsolete: false)); stats.Unchanged++;
+                var entry = active[activePosition].With(obsolete: false);
+                output.Add(entry); stats.Unchanged++;
+                AppendPreviousTranslated(entry, all, output, retainedObsolete);
                 continue;
             }
             if (obsoleteIndex.TryGetValue(value, out var obsoletePosition))
             {
-                output.Add(all[obsoletePosition].With(obsolete: false));
+                var entry = all[obsoletePosition].With(obsolete: false);
+                output.Add(entry);
+                AppendPreviousTranslated(entry, all, output, retainedObsolete);
                 retainedObsolete.Add(value); stats.Reactivated++;
                 continue;
             }
             if (matchesByNew.TryGetValue(value, out var match))
             {
-                output.Add(new TranslationEntry(value, "+", new Dictionary<string, string>(StringComparer.Ordinal)));
-                if (match.Entry.IsTranslated)
+                var previous = PreviousTranslated(match.Entry, all);
+                var lineage = EnsureLineage(match.Entry, previous);
+                var newEntry = new TranslationEntry(value, "+", lineage);
+                output.Add(newEntry);
+                if (previous is not null)
                 {
-                    output.Add(match.Entry.With(obsolete: true));
-                    retainedObsolete.Add(match.Entry.Original); stats.PreservedTranslatedObsolete++;
+                    var previousEntry = WithLineage(previous, lineage);
+                    output.Add(previousEntry.With(obsolete: true));
+                    retainedObsolete.Add(previousEntry.Original); stats.PreservedTranslatedObsolete++;
                 }
-                else stats.RemovedUntranslatedObsolete++;
+                else if (!match.Entry.IsTranslated) stats.RemovedUntranslatedObsolete++;
+                if (match.Entry.IsTranslated && previous?.Original != match.Entry.Original)
+                    stats.PreservedTranslatedObsolete++;
                 processedOld.Add(match.Entry.Original);
                 stats.ModifiedOrReplaced++;
                 stats.ChangedPairs.Add(new ChangedPair(match.Entry.Original, value, match.Distance, match.Similarity));
@@ -139,6 +151,39 @@ public sealed class TranslationCatalogSynchronizer
 
         var doc = new XDocument(new XDeclaration("1.0", "utf-8", null), new XElement("root", output.Select(x => x.ToXml())));
         return new SyncResult(doc, stats, !DocumentsEquivalent(current, doc));
+    }
+
+    private static void AppendPreviousTranslated(TranslationEntry current, IReadOnlyList<TranslationEntry> all,
+        List<TranslationEntry> output, HashSet<string> retainedObsolete)
+    {
+        var previous = PreviousTranslated(current, all);
+        if (previous is null || !previous.IsObsolete || retainedObsolete.Contains(previous.Original)) return;
+        output.Add(previous.With(obsolete: true));
+        retainedObsolete.Add(previous.Original);
+    }
+
+    internal static TranslationEntry? PreviousTranslated(TranslationEntry entry, IReadOnlyList<TranslationEntry> all)
+    {
+        if (entry.IsTranslated) return entry;
+        if (!entry.Attributes.TryGetValue(PreviousTranslatedAttribute, out var previousOriginal)) return null;
+        return all.FirstOrDefault(x => x.Original == previousOriginal && x.IsTranslated);
+    }
+
+    private static Dictionary<string, string> EnsureLineage(TranslationEntry entry, TranslationEntry? previous)
+    {
+        var attributes = new Dictionary<string, string>(entry.Attributes, StringComparer.Ordinal);
+        if (!attributes.TryGetValue(TranslationChainAttribute, out var chain))
+            attributes[TranslationChainAttribute] = Guid.NewGuid().ToString("N");
+        if (previous is not null) attributes[PreviousTranslatedAttribute] = previous.Original;
+        else attributes.Remove(PreviousTranslatedAttribute);
+        return attributes;
+    }
+
+    private static TranslationEntry WithLineage(TranslationEntry entry, IReadOnlyDictionary<string, string> lineage)
+    {
+        var attributes = new Dictionary<string, string>(entry.Attributes, StringComparer.Ordinal);
+        if (lineage.TryGetValue(TranslationChainAttribute, out var chain)) attributes[TranslationChainAttribute] = chain;
+        return entry with { Attributes = attributes };
     }
 
     private static void PreserveOrDropObsolete(TranslationEntry entry, List<TranslationEntry> output,
