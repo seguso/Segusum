@@ -15,16 +15,20 @@ namespace Seg
     {
         private sealed class RequestContext
         {
-            public RequestContext(string id, int startThread, long startAllocated)
+            public RequestContext(string id, int startThread, long startAllocated, int availableWorkers, int availableIo)
             {
                 Id = id;
                 StartThread = startThread;
                 StartAllocated = startAllocated;
+                AvailableWorkers = availableWorkers;
+                AvailableIo = availableIo;
             }
 
             public string Id { get; }
             public int StartThread { get; }
             public long StartAllocated { get; }
+            public int AvailableWorkers { get; }
+            public int AvailableIo { get; }
         }
 
         private static readonly bool Enabled = IsEnabled(Environment.GetEnvironmentVariable("SEGUSUM_PROFILE_ENABLED"));
@@ -45,8 +49,10 @@ namespace Seg
         public static IDisposable BeginRequest(string requestId)
         {
             if (!Enabled) return NoopScope.Instance;
+            ThreadPool.GetAvailableThreads(out var availableWorkers, out var availableIo);
             Current.Value = new RequestContext(requestId, Environment.CurrentManagedThreadId,
-                GC.GetAllocatedBytesForCurrentThread());
+                GC.GetAllocatedBytesForCurrentThread(), availableWorkers, availableIo);
+            Log($"phase=request-threadpool available_worker_threads={availableWorkers} available_io_threads={availableIo}");
             return new RequestScope();
         }
 
@@ -118,8 +124,12 @@ namespace Seg
                     ? $"alloc_current_thread_bytes={GC.GetAllocatedBytesForCurrentThread() - context.StartAllocated}"
                     : "alloc_current_thread_bytes=unavailable_thread_changed";
                 var gc = GC.GetGCMemoryInfo();
+                ThreadPool.GetAvailableThreads(out var availableWorkers, out var availableIo);
                 Log($"phase=request-end elapsed_ms={stopwatch.Elapsed.TotalMilliseconds:F1} {allocation} " +
                     $"gen0={GC.CollectionCount(0)} gen1={GC.CollectionCount(1)} gen2={GC.CollectionCount(2)} " +
+                    $"thread_start={context.StartThread} thread_end={Environment.CurrentManagedThreadId} " +
+                    $"available_worker_threads_start={context.AvailableWorkers} available_io_threads_start={context.AvailableIo} " +
+                    $"available_worker_threads_end={availableWorkers} available_io_threads_end={availableIo} " +
                     $"heap_size_bytes={gc.HeapSizeBytes} fragmented_bytes={gc.FragmentedBytes} " +
                     $"total_committed_bytes={gc.TotalCommittedBytes}");
                 Current.Value = null;
