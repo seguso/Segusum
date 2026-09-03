@@ -3185,6 +3185,7 @@ namespace Seg
                 wo.IsCasualMode = userModeIsCasual(idUser, db);
 
                 wo.invariantConditions();
+                SynchronizeUnhandledCombinationAudit(wo, idUser, db);
                 savegameInvalid = false;
 
 
@@ -3206,12 +3207,20 @@ namespace Seg
                 }
 
                 restored.invariantConditions();
+                SynchronizeUnhandledCombinationAudit(restored, idUser, db);
 
                 return restored; // notare che carico il savegame di default, quello che ha nome stringa vuota.
 
             }
 
 
+        }
+
+        private static void SynchronizeUnhandledCombinationAudit(WorldBase world, int idUser, segusumDb db)
+        {
+            // Run after invariants so the audit observes the playable current state.
+            var gameId = db.user.Where(u => u.id == idUser).Select(u => u.gameId).SingleOrDefault() ?? 0;
+            UnhandledCombinationAudit.Synchronize(world, db, gameId);
         }
 
         private static bool userModeIsCasual(int idUser, segusumDb db) =>

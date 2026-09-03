@@ -41,11 +41,16 @@ namespace Seg
             modelBuilder.Entity<user>().ToTable("user");
             modelBuilder.Entity<ips>().ToTable("ips");
             modelBuilder.Entity<savegame>().ToTable("savegame");
+            modelBuilder.Entity<UnhandledCombination>().ToTable("unhandledCombination");
 
             modelBuilder.Entity<user>().HasKey(x => x.id);
             modelBuilder.Entity<user>().Property(x => x.isCasualMode).HasDefaultValue(false);
             modelBuilder.Entity<ips>().HasKey(x => x.id);
             modelBuilder.Entity<savegame>().HasKey(x => x.id);
+            modelBuilder.Entity<UnhandledCombination>().HasKey(x => x.id);
+            modelBuilder.Entity<UnhandledCombination>()
+                .HasIndex(x => new { x.gameId, x.category, x.firstId, x.secondId })
+                .IsUnique();
             modelBuilder.Entity<ips>().HasOne(x => x.user).WithMany(x => x.ips)
                 .HasForeignKey(x => x.idUser);
             modelBuilder.Entity<savegame>().HasOne(x => x.user).WithMany(x => x.savegame)
@@ -66,5 +71,6 @@ namespace Seg
         public virtual DbSet<ips> ips { get; set; }
         public virtual DbSet<savegame> savegame { get; set; }
         public virtual DbSet<user> user { get; set; }
+        public virtual DbSet<UnhandledCombination> unhandledCombination { get; set; }
     }
 }

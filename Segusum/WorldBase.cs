@@ -4280,6 +4280,13 @@ namespace Seg
         abstract public LogicObj loClimb();
         abstract public LogicObj loDisguiseAs();
 
+        /// <summary>
+        /// Enumerates only combinations available in the current game state.
+        /// Persistence integrations can audit them without coupling the core to SQL.
+        /// </summary>
+        internal IReadOnlyList<UnhandledCombinationCandidate> GetUnhandledCombinationCandidates() =>
+            UnhandledCombinationCandidates.Find(this);
+
         //public bool dangerIsPast(DangerSituation o)
         //{
         //    return !curDangerSituations.Contains(o) && allSeenDangerSituations.Contains(o);
