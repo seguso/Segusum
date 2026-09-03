@@ -859,6 +859,9 @@ namespace Seg
 
         internal static SegActionRes calcolaActionResTalkORoom(WorldBase w, GameStateShowingQuestions gstqDaAttivareDopoLaCutScene, GameStateWaitingForText gstDaAttivareDopo, GameStateFinished gameStateFinished, string[] savenames, bool isTextMode)
         {
+            if (w.gs is GameStateCutScene pendingState)
+                w.AppendAdminNarrativeMessages(pendingState.cs, gstqDaAttivareDopoLaCutScene, gstDaAttivareDopo, gameStateFinished);
+
             SegActionRes ret;
 
             if (gstqDaAttivareDopoLaCutScene != null)

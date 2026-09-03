@@ -335,6 +335,25 @@ namespace Seg
         /// </summary>
         protected internal GameState gs;
 
+        /// <summary>Transient admin narration loaded by the web/persistence integration.</summary>
+        public List<AdminNarrativeMessageClient> adminNarrativeMessagesPending = new();
+
+        public void AppendAdminNarrativeMessages(CutScene cutScene, GameStateShowingQuestions? afterDialog,
+                GameStateWaitingForText? afterText, GameStateFinished? afterFinished)
+        {
+                if (afterDialog != null || afterText != null || afterFinished != null || adminNarrativeMessagesPending.Count == 0)
+                        return;
+                foreach (var message in adminNarrativeMessagesPending)
+                        foreach (var text in message.NarTexts.Where(x => !string.IsNullOrWhiteSpace(x)))
+                        {
+                                var token = new NarToken(false, null, text, cutScene.Count > 0,
+                                        Array.Empty<LayerForClient>(), false, NarSize.Small)
+                                { adminNarrativeMessageId = message.Id };
+                                cutScene.Add(token);
+                        }
+                adminNarrativeMessagesPending.Clear();
+        }
+
         /// <summary>
         /// il tempo attuale. il gioco è a turni. ad ogni azione che compi (diversa da look e talk e poche altre), il tempo avanza di uno.
         /// </summary>

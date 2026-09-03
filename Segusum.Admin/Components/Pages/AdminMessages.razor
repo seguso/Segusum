@@ -1,0 +1,16 @@
+@page "/admin-messages"
+@rendermode InteractiveServer
+@inject AdminDataService Data
+<PageTitle>Messaggi narrativi</PageTitle>
+<h1>Messaggi narrativi amministrativi</h1>
+<p class="muted">Coda per account: consegnato significa inserito nella partita, visto significa confermato dal client.</p>
+<div class="toolbar">
+    <label>User ID<input type="number" @bind="userId" /></label>
+    <label>Game ID<input type="number" @bind="gameId" /></label>
+    <label><input type="checkbox" @bind="pendingOnly" /> solo pendenti</label>
+    <button @onclick="Reload">Aggiorna</button>
+</div>
+<table><thead><tr><th>Stato</th><th>Utente</th><th>Combinazione</th><th>Testo</th><th>Creato</th><th>Consegnato</th><th>Visto</th><th></th></tr></thead>
+<tbody>@foreach (var x in rows)
+{<tr><td>@Status(x)</td><td>@x.UserId</td><td>@x.Category @x.FirstId / @x.SecondId</td><td>@x.Text</td><td>@x.CreatedAtUtc.ToLocalTime()</td><td>@(x.DeliveredAtUtc?.ToLocalTime())</td><td>@(x.SeenAtUtc?.ToLocalTime())</td><td>@if(!x.Cancelled && !x.SeenAtUtc.HasValue){<button @onclick="() => Cancel(x.Id)">Annulla</button>}</td></tr>}</tbody></table>
+@code { private int? userId, gameId; private bool pendingOnly=true; private List<AdminMessageSummary> rows=new(); protected override Task OnInitializedAsync()=>Reload(); private async Task Reload()=>rows=await Data.FindAdminMessagesAsync(userId,gameId,pendingOnly); private async Task Cancel(long id){await Data.CancelAdminMessageAsync(id);await Reload();} private static string Status(AdminMessageSummary x)=>x.Cancelled?"annullato":x.SeenAtUtc.HasValue?"visto":x.DeliveredAtUtc.HasValue?"consegnato":"in coda"; }

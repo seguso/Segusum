@@ -1,4 +1,5 @@
 using System.Xml.Linq;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Seg;
 
@@ -11,11 +12,51 @@ public sealed record PastSummary(int GameId, string Type, string FirstId, string
 public sealed record AdminUser(int Id, string Name, int? GameId, DateTime? LastAccess, DateTime? LastSave);
 public sealed record AdminUserDetails(AdminUser User, IReadOnlyList<PastAttempt> Actions, IReadOnlyList<CycleInfo> Cycles);
 public sealed record CycleInfo(string Id, int Count, DateTime? LastExecution);
+public sealed record AdminMessageSummary(long Id, int UserId, string Category, string FirstId, string SecondId, string? ExplanationId, string Text, DateTime CreatedAtUtc, DateTime? DeliveredAtUtc, DateTime? SeenAtUtc, bool Cancelled);
 
 public sealed class AdminDataService
 {
     private readonly IDbContextFactory<segusumDb> factory;
     public AdminDataService(IDbContextFactory<segusumDb> factory) => this.factory = factory;
+
+    public async Task<List<AdminMessageSummary>> FindAdminMessagesAsync(int? userId, int? gameId, bool pendingOnly)
+    {
+        await using var db = await factory.CreateDbContextAsync();
+        var q = db.adminNarrativeMessage.AsNoTracking().AsQueryable();
+        if (userId.HasValue) q = q.Where(x => x.userId == userId);
+        if (gameId.HasValue) q = q.Where(x => x.gameId == gameId);
+        if (pendingOnly) q = q.Where(x => !x.cancelled && !x.seenAtUtc.HasValue);
+        var rows = await q.OrderByDescending(x => x.id).ToListAsync();
+        return rows.Select(x => new AdminMessageSummary(x.id, x.userId, x.category, x.firstId, x.secondId,
+            x.explanationId, string.Join(" / ", ParseMessageTexts(x.narTextsJson)), x.createdAtUtc,
+            x.deliveredAtUtc, x.seenAtUtc, x.cancelled)).ToList();
+    }
+
+    public async Task<long> QueueAdminMessageAsync(int userId, int gameId, string category, string firstId, string secondId, string? explanationId, string text)
+    {
+        var parts = text.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length == 0) throw new ArgumentException("Il messaggio non può essere vuoto.", nameof(text));
+        await using var db = await factory.CreateDbContextAsync();
+        var row = new AdminNarrativeMessage { userId = userId, gameId = gameId, category = category ?? "",
+            firstId = firstId ?? "", secondId = secondId ?? "", explanationId = explanationId,
+            narTextsJson = JsonSerializer.Serialize(parts), createdAtUtc = DateTime.UtcNow };
+        db.adminNarrativeMessage.Add(row);
+        await db.SaveChangesAsync();
+        return row.id;
+    }
+
+    public async Task CancelAdminMessageAsync(long id)
+    {
+        await using var db = await factory.CreateDbContextAsync();
+        var row = await db.adminNarrativeMessage.SingleOrDefaultAsync(x => x.id == id);
+        if (row != null && !row.seenAtUtc.HasValue) { row.cancelled = true; await db.SaveChangesAsync(); }
+    }
+
+    private static string[] ParseMessageTexts(string json)
+    {
+        try { return JsonSerializer.Deserialize<string[]>(json) ?? Array.Empty<string>(); }
+        catch { return Array.Empty<string>(); }
+    }
 
     public async Task<List<UnhandledCombination>> FindUnhandledAsync(AuditQuery filter)
     {

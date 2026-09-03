@@ -3,7 +3,7 @@
         /// <summary>
         /// posso registrarmi o con email e pwd, o con il token generato dal server.
         /// </summary>
-        public class Credentials
+    public class Credentials
         {
                 public string uname;
                 public string pwd;
@@ -18,7 +18,12 @@
 
         // Seleziona il mini-mondo tutorial e il relativo spazio di salvataggio.
         public bool tutorialMode { get; set; }
-        }
+    }
+
+    public sealed class AdminNarrativeSeenInput : Credentials
+    {
+        public long[] messageIds { get; set; } = Array.Empty<long>();
+    }
 
         public class GameModeInput : Credentials
         {

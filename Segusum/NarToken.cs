@@ -11,6 +11,9 @@ namespace Seg
 
                 public LayerForClient[] ntLayers;
 
+                /// <summary>Identifies an administrator message; null for ordinary narration.</summary>
+                public long? adminNarrativeMessageId;
+
 
                 /// <summary>
                 /// i token che dicono "arrivi qui" non voglio che siano ultimi nella cutscene, perché subito dopo vedi comunque la room. 
@@ -33,6 +36,9 @@ namespace Seg
 
 
                         xelNar.Add(new XAttribute("removeIfLast", removeIfLast? "1" : "0"));
+
+                        if (adminNarrativeMessageId.HasValue)
+                                xelNar.Add(new XAttribute("adminNarrativeMessageId", adminNarrativeMessageId.Value));
 
 
                         foreach (var la in ntLayers)
@@ -60,7 +66,7 @@ namespace Seg
 
                         var removeIfLast = xelTok.Attribute("removeIfLast").Value == "1";
 
-                        return new NarToken(
+                        var result = new NarToken(
                                                           canBeSkipped: cutsceneCanBeSkipped,
                                                           img: img,
                                                           par: par,
@@ -68,6 +74,9 @@ namespace Seg
                                                           ntLayers: ntLayers,
                                                           removeIfLast: removeIfLast
                                                           , size: sizei) ;
+                        if (long.TryParse(xelTok.Attribute("adminNarrativeMessageId")?.Value, out var messageId))
+                                result.adminNarrativeMessageId = messageId;
+                        return result;
                 }
 
                 public NarToken(bool canBeSkipped, string img, string par, bool canGoBackToPrev, LayerForClient[] ntLayers, bool removeIfLast, NarSize size) : base(canBeSkipped, img, canGoBackToPrev)

@@ -164,4 +164,9 @@ public sealed class SegusumController : ApiBase
     [Route("api/markObjectivesSeen")]
     public IActionResult markObjectivesSeen([FromBody] ObjectivesSeenInput i)
         => objectivesSeenImpl(i);
+
+    [HttpPost]
+    [Route("api/markAdminNarrativeSeen")]
+    public IActionResult markAdminNarrativeSeen([FromBody] AdminNarrativeSeenInput i)
+        => markAdminNarrativeSeenImpl(i);
 }

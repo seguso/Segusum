@@ -18,6 +18,19 @@ namespace Seg
     public abstract class ApiBase : ControllerBase
     {
 
+        public IActionResult markAdminNarrativeSeenImpl([FromBody] AdminNarrativeSeenInput i)
+        {
+            try
+            {
+                using var db = new segusumDb();
+                var user = auth(i, db, out _);
+                if (user == null) return Ok(new ApiReturnVal { errore = "noauth" });
+                AdminNarrativeQueue.MarkSeen(db, user.id, i.messageIds ?? Array.Empty<long>());
+                return Ok(new ApiReturnVal { ret = "ok" });
+            }
+            catch (Exception e) { return Ok(new ApiReturnVal { errore = UtilsW.stringOfException(e) }); }
+        }
+
         private static readonly AsyncLocal<bool> currentTutorialMode = new();
 
         protected virtual WorldBase buildEmptyWorld(string lang, bool tutorialMode) => buildEmptyWorld(lang);
@@ -1043,6 +1056,10 @@ namespace Seg
 
 
                     phaseStopwatch.Restart();
+                    AdminNarrativeQueue.MarkSeen(db, user.id,
+                        gsCs.cs.OfType<NarToken>().Where(x => x.adminNarrativeMessageId.HasValue)
+                            .Select(x => x.adminNarrativeMessageId!.Value));
+
                     var ret = eng.calcolaActionResTalkORoom(w, gsCs.afterCutSceneShowDialog, gsCs.afterCutSceneWaitForTextInput,
                             gsCs.afterCutSceneGameFinished,
                             saveNames, isTextMode);
@@ -3186,6 +3203,7 @@ namespace Seg
 
                 wo.invariantConditions();
                 SynchronizeUnhandledCombinationAudit(wo, idUser, db);
+                AdminNarrativeQueue.RefreshPending(wo, db, idUser);
                 savegameInvalid = false;
 
 
@@ -3208,6 +3226,7 @@ namespace Seg
 
                 restored.invariantConditions();
                 SynchronizeUnhandledCombinationAudit(restored, idUser, db);
+                AdminNarrativeQueue.RefreshPending(restored, db, idUser);
 
                 return restored; // notare che carico il savegame di default, quello che ha nome stringa vuota.
 
