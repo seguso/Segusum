@@ -15,7 +15,7 @@ public sealed record FunctionDeclaration(string Name,IReadOnlyList<(string Name,
 public sealed record HandlerDeclaration(string Kind,string First,string? Second,string? Target,DslExpression? Phrase,DslExpression? Explanation,DslExpression? Condition,IReadOnlyList<DslStatement> Body,SourceSpan Span) : DslDeclaration(Span);
 public sealed record CycleDeclaration(string Variable,SourceSpan Span) : DslDeclaration(Span);
 public sealed record NextCycleDeclaration(DslExpression Cycle,SourceSpan Span) : DslDeclaration(Span);
-public sealed record CycleElementDeclaration(string Cycle,string Id,bool Important,DslExpression? Condition,IReadOnlyList<DslStatement> Body,SourceSpan Span) : DslDeclaration(Span);
+public sealed record CycleElementDeclaration(string Cycle,string Id,bool Important,string? Repeat,DslExpression? Condition,IReadOnlyList<DslStatement> Body,SourceSpan Span) : DslDeclaration(Span);
 public sealed record DslDocument(IReadOnlyList<DslDeclaration> Declarations);
 public abstract record DslStatement(SourceSpan Span) : DslNode(Span);
 public sealed record VariableDeclaration(string Name,DslExpression Initializer,SourceSpan Span) : DslStatement(Span);
@@ -28,7 +28,7 @@ public sealed record NarStatement(DslExpression Text,SourceSpan Span) : DslState
 public sealed record NarRoomStatement(DslExpression Text,SourceSpan Span) : DslStatement(Span);
 public sealed record DialogueStatement(string Character,DslExpression Text,SourceSpan Span) : DslStatement(Span);
 public sealed record NextCycleStatement(DslExpression Cycle,SourceSpan Span) : DslStatement(Span);
-public sealed record AddCycleElementStatement(string Cycle,string Id,bool Important,DslExpression? Condition,IReadOnlyList<DslStatement> Body,SourceSpan Span) : DslStatement(Span);
+public sealed record AddCycleElementStatement(string Cycle,string Id,bool Important,string? Repeat,DslExpression? Condition,IReadOnlyList<DslStatement> Body,SourceSpan Span) : DslStatement(Span);
 public sealed record MakesNoSenseStatement(SourceSpan Span) : DslStatement(Span);
 public sealed record FinishGameStatement(SourceSpan Span) : DslStatement(Span);
 public sealed record DoNotAdvanceTimeStatement(SourceSpan Span) : DslStatement(Span);

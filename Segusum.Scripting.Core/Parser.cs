@@ -69,9 +69,17 @@ public static class DslParser
             Need("end"); return new(kind, first, second, target, phrase, explanation, condition, body, span);
         }
         private CycleElementDeclaration ParseCycleElement(SourceSpan span)
-        { var cycle = Word(); var id = Word(); var important = Is("important"); if (important) Take(); var x = ParseBlockWithClause("when"); return new(cycle, id, important, x.Condition, x.Body, span); }
+        { var cycle = Word(); var id = Word(); var important = Is("important"); if (important) Take(); var repeat = ParseRepeatModifier(); var x = ParseBlockWithClause("when"); return new(cycle, id, important, repeat, x.Condition, x.Body, span); }
         private AddCycleElementStatement ParseAdd(SourceSpan span)
-        { var cycle = Word(); var id = Word(); var important = Is("important"); if (important) Take(); var x = ParseBlockWithClause("when"); return new(cycle, id, important, x.Condition, x.Body, span); }
+        { var cycle = Word(); var id = Word(); var important = Is("important"); if (important) Take(); var repeat = ParseRepeatModifier(); var x = ParseBlockWithClause("when"); return new(cycle, id, important, repeat, x.Condition, x.Body, span); }
+        private string? ParseRepeatModifier()
+        {
+            if (Current.Kind != DslTokenKind.Identifier) return null;
+            var value = Take().Text;
+            if (value is "once" or "forever") return value;
+            diagnostics.Add(new DslDiagnostic("SEGDSL102", $"Unknown Repeat modifier '{value}'. Expected 'once' or 'forever'.", tokens[position - 1].Span));
+            return value;
+        }
         private (DslExpression? Condition, IReadOnlyList<DslStatement> Body) ParseBlockWithClause(string clause)
         {
             SkipTerminators(); DslExpression? condition = null; var body = new List<DslStatement>();
@@ -131,6 +139,8 @@ public static class DslParser
             if (Current.Kind == DslTokenKind.LParen) { Take(); var expression = Expression(); Need(")"); return new ParenthesizedExpression(expression, span); }
             if (Current.Kind == DslTokenKind.String) return new LiteralExpression(Take().Text, "string", span);
             if (Current.Kind == DslTokenKind.Number) return new LiteralExpression(Take().Text, "number", span);
+            if (Is("true") || Is("false")) return new LiteralExpression(Take().Text, "bool", span);
+            if (Is("new-cycle")) { Take(); return new LiteralExpression("new-cycle", "cycle", span); }
             var identifier = new IdentifierExpression(Word(), span);
             if (Is("not-seen-recently")) { Take(); return new CallExpression("not-seen-recently", new[] { new DslArgument(null, identifier, span), new DslArgument(null, Prefix(), Current.Span) }, span); }
             if (Is("was-seen-at-least-once")) { Take(); return new CallExpression("was-seen-at-least-once", new[] { new DslArgument(null, identifier, span) }, span); }

@@ -28,7 +28,7 @@ public sealed class DslParserStructureTests
         var handler = Assert.IsType<HandlerDeclaration>(result.Document.Declarations.Single());
         Assert.IsType<LiteralExpression>(handler.Phrase);
         Assert.IsType<IdentifierExpression>(handler.Explanation);
-        Assert.IsType<IdentifierExpression>(handler.Condition);
+        Assert.IsType<LiteralExpression>(handler.Condition);
         var add = Assert.IsType<AddCycleElementStatement>(handler.Body.OfType<AddCycleElementStatement>().Single());
         Assert.NotNull(add.Condition);
         Assert.IsType<IfStatement>(handler.Body.OfType<IfStatement>().Single());
@@ -42,5 +42,16 @@ public sealed class DslParserStructureTests
         Assert.Empty(result.Diagnostics);
         Assert.Equal(2, result.Document.Declarations.OfType<CycleDeclaration>().Count());
         Assert.IsType<NextCycleDeclaration>(result.Document.Declarations.Last());
+    }
+
+    [Fact]
+    public void RepeatModifierIsPreservedAndInvalidValuesAreDiagnosed()
+    {
+        var valid = DslParser.Parse(new DslSource("repeat.seg", "add c id1 once\nend\nadd c id2 forever\nend"));
+        Assert.Empty(valid.Diagnostics);
+        Assert.Equal(new[] { "once", "forever" }, valid.Document.Declarations.OfType<CycleElementDeclaration>().Select(x => x.Repeat));
+
+        var invalid = DslParser.Parse(new DslSource("repeat.seg", "add c id sometimes\nend"));
+        Assert.Contains(invalid.Diagnostics, x => x.Id == "SEGDSL102");
     }
 }
