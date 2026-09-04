@@ -18,4 +18,5 @@
   <Project Path="Segusum.Scripting.Generator.Tests/Segusum.Scripting.Generator.Tests.csproj" />
   <Project Path="Segusum.Scripting.Tooling/Segusum.Scripting.Tooling.csproj" />
   <Project Path="Segusum.Scripting.Semantics/Segusum.Scripting.Semantics.csproj" />
+  <Project Path="Segusum.Tooling.Host/Segusum.Tooling.Host.csproj" />
 </Solution>

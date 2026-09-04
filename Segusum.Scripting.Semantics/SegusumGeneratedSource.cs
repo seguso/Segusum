@@ -22,9 +22,10 @@ public static class SegusumGeneratedSource
     private static bool IsLegacyGeneratorHint(string? path)
     {
         if (string.IsNullOrEmpty(path)) return false;
-        var file = Path.GetFileName(path) ?? "";
+        var stablePath = path!;
+        var file = Path.GetFileName(stablePath) ?? "";
         return file.StartsWith("Segusum.Generated.", System.StringComparison.Ordinal)
             && file.EndsWith(".g.cs", System.StringComparison.Ordinal)
-            && path.IndexOf("Segusum.Scripting.Generator", System.StringComparison.OrdinalIgnoreCase) >= 0;
+            && stablePath.IndexOf("Segusum.Scripting.Generator", System.StringComparison.OrdinalIgnoreCase) >= 0;
     }
 }

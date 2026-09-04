@@ -1,0 +1,21 @@
+{
+  "name": "segusum-dsl",
+  "displayName": "Segusum DSL",
+  "description": "Segusum DSL semantic tooling",
+  "version": "0.1.0",
+  "publisher": "seguso",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Programming Languages"],
+  "activationEvents": ["onLanguage:segusum", "onCommand:segusum.findAllReferences", "onCommand:segusum.renameSymbol"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [{ "id": "segusum", "aliases": ["Segusum", "seg"], "extensions": [".seg"] }],
+    "configuration": { "properties": { "segusum.toolingHostPath": { "type": "string", "default": "", "description": "Path to Segusum.Tooling.Host.dll" } } },
+    "commands": [{ "command": "segusum.findAllReferences", "title": "Segusum: Find All References" }, { "command": "segusum.renameSymbol", "title": "Segusum: Rename Symbol" }],
+    "keybindings": [{ "command": "segusum.renameSymbol", "key": "ctrl+r ctrl+r" }],
+    "viewsContainers": { "panel": [{ "id": "segusum.references", "title": "Segusum", "icon": "$(references)" }] },
+    "views": { "segusum.references": [{ "id": "segusum.referencesView", "name": "References" }] }
+  },
+  "scripts": { "compile": "tsc -p ./tsconfig.json" },
+  "devDependencies": { "@types/node": "^22.0.0", "@types/vscode": "^1.85.0", "typescript": "^5.6.0" }
+}
