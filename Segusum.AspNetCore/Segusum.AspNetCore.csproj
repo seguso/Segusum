@@ -28,5 +28,13 @@
     <ProjectReference Include="../Segusum/Segusum.csproj" />
     <ProjectReference Include="../Segusum.Persistence/Segusum.Persistence.csproj" />
     <ProjectReference Include="../Segusum.WebClient/Segusum.WebClient.csproj" />
+    <ProjectReference Include="../Segusum.Scripting.Generator/Segusum.Scripting.Generator.csproj" ReferenceOutputAssembly="false" OutputItemType="Analyzer" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="../Segusum.Scripting.Generator/bin/$(Configuration)/netstandard2.0/Segusum.Scripting.Generator.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+    <None Include="../Segusum.Scripting.Core/bin/$(Configuration)/netstandard2.0/Segusum.Scripting.Core.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+    <None Include="buildTransitive/Segusum.AspNetCore.props" Pack="true" PackagePath="buildTransitive" />
+    <None Include="buildTransitive/Segusum.AspNetCore.targets" Pack="true" PackagePath="buildTransitive" />
   </ItemGroup>
 </Project>

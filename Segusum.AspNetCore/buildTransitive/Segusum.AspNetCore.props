@@ -1,0 +1,5 @@
+<Project>
+  <PropertyGroup>
+    <SegusumDslEnabled Condition="'$(SegusumDslEnabled)' == ''">true</SegusumDslEnabled>
+  </PropertyGroup>
+</Project>

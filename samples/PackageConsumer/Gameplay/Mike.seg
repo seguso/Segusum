@@ -1,0 +1,12 @@
+def creaCicloMikeNonRipete ret Cycle:
+    ret new-cycle
+end
+
+var cyc = new-cycle
+
+add cyc xww7
+end
+
+use mike for goal:
+    exp explanation
+end

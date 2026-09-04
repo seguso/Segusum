@@ -1,0 +1,8 @@
+<Project>
+  <ItemGroup Condition="'$(SegusumDslEnabled)' == 'true'">
+    <_SegusumDslFiles Include="$(MSBuildProjectDirectory)\**\*.seg"
+                      Exclude="$(MSBuildProjectDirectory)\obj\**\*;$(MSBuildProjectDirectory)\bin\**\*;$(MSBuildProjectDirectory)\generated\**\*;$(MSBuildProjectDirectory)\**\obj\**\*;$(MSBuildProjectDirectory)\**\bin\**\*;$(MSBuildProjectDirectory)\**\generated\**\*" />
+    <AdditionalFiles Remove="@(_SegusumDslFiles)" />
+    <AdditionalFiles Include="@(_SegusumDslFiles)" />
+  </ItemGroup>
+</Project>
