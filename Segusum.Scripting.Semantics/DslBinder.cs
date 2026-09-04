@@ -278,7 +278,7 @@ public sealed class DslBinder
                 if (Accessible(member))
                     yield return member;
     }
-    private bool Accessible(ISymbol member) => compilation.IsSymbolAccessibleWithin(member, world, world);
+    private bool Accessible(ISymbol member) => !SegusumGeneratedSource.IsGenerated(member) && compilation.IsSymbolAccessibleWithin(member, world, world);
     private bool Accessible(ISymbol member, ITypeSymbol receiverType)
     {
         if (!Accessible(member)) return false;
@@ -307,6 +307,7 @@ public sealed class DslBinder
         foreach (var tree in compilation.SyntaxTrees)
         {
             var model = compilation.GetSemanticModel(tree);
+            if (SegusumGeneratedSource.IsGenerated(tree)) continue;
             foreach (var invocation in tree.GetRoot().DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.InvocationExpressionSyntax>())
             {
                 if (invocation.Expression is not Microsoft.CodeAnalysis.CSharp.Syntax.IdentifierNameSyntax { Identifier.ValueText: "addRoomChangedHandler" } || invocation.ArgumentList.Arguments.Count == 0) continue;

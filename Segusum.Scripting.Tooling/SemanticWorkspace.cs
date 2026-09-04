@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.FindSymbols;
@@ -60,6 +61,9 @@ public sealed class DslSemanticWorkspace
 
     public IReadOnlyList<DslDiagnostic> Diagnostics => diagnostics;
     public IReadOnlyList<SemanticReference> FindReferences(string path, int line, int column)
+        => FindReferencesAsync(path, line, column, CancellationToken.None).GetAwaiter().GetResult();
+
+    public async Task<IReadOnlyList<SemanticReference>> FindReferencesAsync(string path, int line, int column, CancellationToken cancellationToken = default)
     {
         var definition = GetDefinition(path, line, column);
         if (definition == null) return Array.Empty<SemanticReference>();
@@ -72,10 +76,11 @@ public sealed class DslSemanticWorkspace
             var workspaceSymbol = ResolveWorkspaceSymbol(definition.CSharpSymbol);
             if (workspaceSymbol != null)
             {
-                var references = SymbolFinder.FindReferencesAsync(workspaceSymbol, roslynSolution, cancellationToken: CancellationToken.None).GetAwaiter().GetResult();
+                var references = await SymbolFinder.FindReferencesAsync(workspaceSymbol, roslynSolution, cancellationToken: cancellationToken).ConfigureAwait(false);
                 foreach (var reference in references.SelectMany(x => x.Locations))
                 {
                     var location = reference.Location;
+                    if (location.SourceTree != null && SegusumGeneratedSource.IsGenerated(location.SourceTree)) continue;
                     var sourcePath = location.SourceTree?.FilePath ?? "";
                     var semanticReference = new SemanticReference(definition.DisplayName, new SemanticLocation(sourcePath, FromLocation(location), "csharp-reference"), definition.CSharpSymbol, null);
                     if (!dsl.Any(x => x.Location.Path == sourcePath && x.Location.Span.Start == semanticReference.Location.Span.Start)) dsl.Add(semanticReference);
@@ -134,6 +139,8 @@ public sealed class DslSemanticWorkspace
             foreach (var project in roslynSolution.Projects)
                 foreach (var originalDocument in project.Documents)
                 {
+                    var originalRoot = originalDocument.GetSyntaxRootAsync().GetAwaiter().GetResult();
+                    if (originalRoot != null && SegusumGeneratedSource.IsGenerated(originalRoot.SyntaxTree)) continue;
                     var renamedDocument = renamedSolution.GetDocument(originalDocument.Id);
                     if (renamedDocument == null) continue;
                     foreach (var change in renamedDocument.GetTextChangesAsync(originalDocument).GetAwaiter().GetResult())
