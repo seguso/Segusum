@@ -2834,7 +2834,10 @@ namespace Seg
 
 
                                 ,
-                            canPlayGraphicsMode = !StorageOptions.IsFile
+                            // New users start in graphical mode regardless of
+                            // the persistence provider. Existing users keep
+                            // their persisted canPlayGraphicsMode value.
+                            canPlayGraphicsMode = true
                                 ,
                             gameId = i.gameId,
                             isCasualMode = false
@@ -2860,7 +2863,7 @@ namespace Seg
 
                 var actionRes = startNewGame(user, db, i.lang, w, saveNames: new string[] { } /* usati solo per precalcolare subito la room dopo la cutscene, non servono*/
 
-                , isTextMode: true // sopra ho appena messo graphics mode = false
+                , isTextMode: false
 
                 );
 
@@ -3812,10 +3815,18 @@ namespace Seg
                 lookupStopwatch.Stop();
                 SegusumProfiler.Log($"phase=session-lookup elapsed_ms={lookupStopwatch.Elapsed.TotalMilliseconds:F1} session_hit=0");
                 currentSession.Value = null;
-                isTextMode = true;
-                authStopwatch.Stop();
-                SegusumProfiler.Log($"phase=auth-total elapsed_ms={authStopwatch.Elapsed.TotalMilliseconds:F1} authenticated=0 session=0");
-                return null;
+                if (!isCredentialBootstrapRequest())
+                {
+                    isTextMode = true;
+                    authStopwatch.Stop();
+                    SegusumProfiler.Log($"phase=auth-total elapsed_ms={authStopwatch.Elapsed.TotalMilliseconds:F1} authenticated=0 session=0");
+                    return null;
+                }
+
+                // A credential bootstrap may arrive with a token from a
+                // previous process lifetime. Ignore only that stale bearer
+                // and continue to the normal username/password verification.
+                SegusumProfiler.Log("phase=auth-stale-bearer-fallback credential_bootstrap=1");
             }
 
             currentSession.Value = null;
@@ -3934,6 +3945,12 @@ namespace Seg
             authStopwatch.Stop();
             SegusumProfiler.Log($"phase=auth-total elapsed_ms={authStopwatch.Elapsed.TotalMilliseconds:F1} authenticated={(user != null ? 1 : 0)}");
             return user;
+        }
+
+        private bool isCredentialBootstrapRequest()
+        {
+            var path = Request?.Path.Value;
+            return path?.EndsWith("/api/loadGame", StringComparison.OrdinalIgnoreCase) == true;
         }
 
 

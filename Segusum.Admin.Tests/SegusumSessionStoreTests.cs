@@ -42,6 +42,21 @@ public sealed class SegusumSessionStoreTests
     }
 
     [Fact]
+    public void TokenFromPreviousProcessIsNotAcceptedByFreshStore()
+    {
+        var oldStore = new SegusumSessionStore();
+        var oldToken = oldStore.Create(7, "mau", false, false, 42);
+        var restartedStore = new SegusumSessionStore();
+
+        Assert.False(restartedStore.TryGet(oldToken, out _));
+
+        var newToken = restartedStore.Create(7, "mau", false, false, 42);
+        Assert.NotEqual(oldToken, newToken);
+        Assert.True(restartedStore.TryGet(newToken, out var session));
+        Assert.False(session.IsTextMode);
+    }
+
+    [Fact]
     public void AccessPersistenceIsThrottledPerUser()
     {
         var store = new SegusumSessionStore();
