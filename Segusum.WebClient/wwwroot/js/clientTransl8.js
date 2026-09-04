@@ -1,6 +1,5 @@
 var stringheClient = {
     en: {
-        "emailAuthor": "Ask for a hint via email",
         "remember": "Remember",
         "nienteDaRacQui": "Nothing to pick up here",
         "nienteDaRicQui": "Nothing to remember here",
@@ -9,18 +8,13 @@ var stringheClient = {
         "thingsToDoAndDiary": "To-do list and diary",
         'Nientedispeciale': "Nothing special",
         'raccogliPuntini': "Pick up",
-        'leggiDiario': "Remember what you need to do",
         'quiVedi': "Here you see:",
         'objectsInRoom': "Objects in the room:",
         'azioniPossibili': "Possible actions:",
         'inmodoche': "What will happen then?",
         'hoUnIdea': "I've got an idea",
         'use1For': 'I can use {1} in order to ...',
-        'pensieri': "who lives there? --  somebody is really someone else--  I could disguise myself as him -- someone wants to be famous --  someone is waiting for something --  that strange object, who put it there? --  questa deve essere la sua stanza -- lui sta aspettando qualcuno --  deve averlo scritto da qualche parte --  chi può arrivare a quella profondità? --  la gente ci getta dei soldi --  lui trae la sua energia da quell'oggetto --  che ci fa lì quell'animale? -- lui sarà mandato a pulire --  mi posso nascondere e aspettare --  è stato trasformato con la magia --  forse non era davvero lì che lo ha messo --  mi verrà il mal di pancia --  qualcuno annuserà qualcosa --  deve essere opera sua --  posso spiarlo mentre lo fa --  stava aspettando qualcosa --  qualcuno crederà che lui non abbia pagato --  devo guardarlo da dietro --  contiene il suo odore --  se la toglierà volontariamente --  qual è la sua maggiore paura? -- lui non l'ha mai vista --    chi lo ha preso lo ha fatto senza volerlo --  posso farla mangiare a lui --  in quel posto vivono degli animali --  chi può arrivare così in alto? --  perché quella persona non è arrivata? --  chi può arrivare fin lì senza stancarsi? --  perché lo sta cercando? --  il problema è che lui mi sente --  mi ricorda le crociate --  dev'esserci una parete magica --  qualcuno sbaglierà strada --  se aziono questo oggetto, lui verrà qui --  qualcuno si sveglierà troppo presto --  lui in realtà non l'ha mai vista --  ha due piedi destri --  usciranno fuori ed io vedrò dov'è --  lui si trasformerà --  crederà che io sia più intelligente --  crederà di aver catturato qualcosa --  che fine ha fatto quella persona? --  posso sporcarmi la faccia --  perché lavora in un posto del genere? --  la puzza si sente da venti metri --  spaccata in due da un fulmine --  era molto scintillante --  posso fargli credere di essere intelligente --  lui dipende da quell'oggetto --  è in realtà un suo servitore",
-        'rimescola': 'Shuffle',
-        'yourThoughts': 'Your thoughts',
         'haicomposto': 'You have chosen:',
-        'perchefunz': 'Complete the action',
         'cosasucced': 'What will happen after your action?',
         'nextHint': 'Show the next hint',
         'scegliEnigmaSuCuiHint': 'Which puzzle do you need a hint for?',
@@ -30,7 +24,6 @@ var stringheClient = {
         'talkTo': 'talk to {1}',
         'deduceSomethingAbout': 'deduce something about {1}',
         'deduce': 'deduce',
-        'saySomething': "Say something",
         'sayThatYouAre': 'Say that you are...',
         'egli': 'he',
         'ella': 'she',
@@ -58,7 +51,6 @@ var stringheClient = {
         'useForUpper': 'Use for',
         'deduceUpper': 'Deduce that',
 
-        'say': 'say',
         'diary': 'diary',
         'diaryUpper': 'Diary',
         'howToUseIt': "How do you want to use it?",
@@ -74,12 +66,9 @@ var stringheClient = {
         , "cantContactServer": "The server does not respond. Please check your internet connection."
         , "tooFar": "Too far"
         , "youCanOnlyMove": "You can only move to locations you already visited, or that are close to locations you already visited."
-        , "neverVisited": "Never visited"
-        , "youNeverVisited": "You never visited this place."
         , "pressToCont": "Press to continue"
         , "savegameInvalid": "Savegame invalid"
         , "yourSaveg": "Your savegame is too old and is now invalid. Please clear the browser cache and start over."
-        , "startNew": "Restart"
         , "refresh": "Refresh"
         , "userNotFound": "Your user was not found or the password is wrong."
         , "questoNomeUt": "This username is already in use. Please specify a different one."
@@ -88,8 +77,6 @@ var stringheClient = {
         , "registered": "Registered"
 
         , "seiReg": "You are now registered."
-        , "notFound": "Not found"
-        , "noUserWith": "There is no user with this username and this password."
         , "loggedIn": "Logged in"
         , "yourGameProgress": "Your game progress has been restored."
         , "restoreSave": "Restore savegame and lose the current progress?"
@@ -132,21 +119,16 @@ var stringheClient = {
         , "register": "Register"
         , "login": "Log in"
         , "startnewgame": "New game"
-        , "username": "User name"
         , "yourUsername": "Your username"
         , "chooseAUsername": "Choose a username"
         , "pwd": "Password"
         , "repeatpwd": "Repeat password"
-        , "email": "Email"
         , "retry": "Retry"
-        , "nothingHere": "There's nothing special here"
-        , "youHaveNothing": "You are carrying nothing"
         , "objectsInThisPlace": "Objects in this place:"
         , "objectsYouAreCarrying": "Objects you are carrying:"
         , "loginInstead": "I already have an account, I want to login"
         , "registerInstead": "I don't have an account, I want to register"
         , "nonHaiSalv": "You have no saved games."
-        , "enterUserName": "Your email"
         , "enterPwd": "Your password"
         , 'pickup1': "pick up {1}"
         , 'look1': "look at {1}"
@@ -164,7 +146,6 @@ var stringheClient = {
 
     de: {},
     it: {
-        "emailAuthor": "Chiedi aiuto per email",
         "remember": "Ricorda",
         "nienteDaRacQui": "Niente da raccogliere qui",
         "nienteDaRicQui": "Niente da ricordare qui",
@@ -173,18 +154,13 @@ var stringheClient = {
         "thingsToDoAndDiary": "Cose che devi fare e diario",
         'Nientedispeciale': "Niente di speciale",
         'raccogliPuntini': "Raccogli",
-        'leggiDiario': "Ricorda cosa devi fare",
         'quiVedi': "Qui vedi:",
         'objectsInRoom': "Oggetti nella stanza:",
         'azioniPossibili': "Azioni possibili:",
         'inmodoche': "Che cosa succederà poi?",
         'hoUnIdea': "Ho un'idea",
         'use1For': 'posso usare {1} per...',
-        'pensieri': "chi vive lì dentro? --  qualcuno è in realtà qualcun altro --  potrei travestirmi come lui -- qualcuno vuole essere famoso --  qualcuno sta aspettando qualcosa --  quello strano oggetto, chi lo ha piazzato lì? --  questa deve essere la sua stanza -- lui sta aspettando qualcuno --  deve averlo scritto da qualche parte --  chi può arrivare a quella profondità? --  la gente ci getta dei soldi --  lui trae la sua energia da quell'oggetto --  che ci fa lì quell'animale? -- lui sarà mandato a pulire --  mi posso nascondere e aspettare --  è stato trasformato con la magia --  forse non era davvero lì che lo ha messo --  mi verrà il mal di pancia --  qualcuno annuserà qualcosa --  deve essere opera sua --  posso spiarlo mentre lo fa --  stava aspettando qualcosa --  qualcuno crederà che lui non abbia pagato --  devo guardarlo da dietro --  contiene il suo odore --  se la toglierà volontariamente --  qual è la sua maggiore paura? -- lui non l'ha mai vista --    chi lo ha preso lo ha fatto senza volerlo --  posso farla mangiare a lui --  in quel posto vivono degli animali --  chi può arrivare così in alto? --  perché quella persona non è arrivata? --  chi può arrivare fin lì senza stancarsi? --  perché lo sta cercando? --  il problema è che lui mi sente --  mi ricorda le crociate --  dev'esserci una parete magica --  qualcuno sbaglierà strada --  se aziono questo oggetto, lui verrà qui --  qualcuno si sveglierà troppo presto --  lui in realtà non l'ha mai vista --  ha due piedi destri --  usciranno fuori ed io vedrò dov'è --  lui si trasformerà --  crederà che io sia più intelligente --  crederà di aver catturato qualcosa --  che fine ha fatto quella persona? --  posso sporcarmi la faccia --  perché lavora in un posto del genere? --  la puzza si sente da venti metri --  spaccata in due da un fulmine --  era molto scintillante --  posso fargli credere di essere intelligente --  lui dipende da quell'oggetto --  è in realtà un suo servitore",
-        'rimescola': 'Rimescola',
-        'yourThoughts': 'I tuoi pensieri',
         'haicomposto': 'Hai composto:',
-        'perchefunz': 'Completa l\'azione',
         'cosasucced': 'Cosa succederà dopo la tua azione?',
         'nextHint': 'Mostra il prossimo suggerimento',
         'scegliEnigmaSuCuiHint': 'Per quale enigma vuoi un suggerimento?',
@@ -194,7 +170,6 @@ var stringheClient = {
         'talkTo': 'parla con {1}',
         'deduceSomethingAbout': 'deduci qualcosa su {1}',
         'deduce': 'deduci',
-        'saySomething': "Di' qualcosa",
         'sayThatYouAre': "Di' che sei...",
         'egli': 'lui',
         'ella': 'lei',
@@ -221,7 +196,6 @@ var stringheClient = {
         'useForUpper': 'Usa per',
         'deduceUpper': 'Deduci che',
         'pickupUpper': 'Raccogli',
-        'say': "di' qualcosa",
         'diary': 'diario',
         'diaryUpper': 'Diario',
         'howToUseIt': "Come vuoi usarlo?",
@@ -237,12 +211,9 @@ var stringheClient = {
         , "cantContactServer": "Non riesco a contattare il server. Controllare la connessione a internet."
         , "tooFar": "Troppo lontano"
         , "youCanOnlyMove": "Puoi spostarti solo in luoghi già visitati, o vicini a luoghi già visitati."
-        , "neverVisited": "Mai visitato"
-        , "youNeverVisited": "Non hai mai visitato questo luogo."
         , "pressToCont": "Premi per continuare"
         , "savegameInvalid": "Salvataggio non valido"
         , "yourSaveg": "Il tuo salvataggio è troppo vecchio e non è più valido. Devi ricominciare una nuova partita."
-        , "startNew": "Ricomincia"
         , "refresh": "Aggiorna"
         , "userNotFound": "Il tuo utente non è stato trovato o la password è errata."
         , "questoNomeUt": "Questo nome utente è già usato da qualcun altro. Per favore specifica un nome utente diverso."
@@ -250,8 +221,6 @@ var stringheClient = {
         , "passwordsNotEq": "Le due password non sono uguali."
         , "registered": "Registrato"
         , "seiReg": "Sei registrato."
-        , "notFound": "Non trovato"
-        , "noUserWith": "Non esiste un utente con questo nome e questa password."
         , "loggedIn": "Accesso effettuato"
         , "yourGameProgress": "Il tuo progresso nel gioco è stato ripristinato."
         , "restoreSave": "Caricare il salvataggio perdendo il progresso attuale?"
@@ -293,21 +262,16 @@ var stringheClient = {
         , "register": "Registrati"
         , "login": "Accedi"
         , "startnewgame": "Nuova partita"
-        , "username": "Nome utente"
         , "yourUsername": "Il tuo nome utente"
         , "chooseAUsername": "Scegli un nome utente"
         , "pwd": "Password"
         , "repeatpwd": "Ripeti password"
-        , "email": "Email"
         , "retry": "Riprova"
-        , "nothingHere": "Non c'è niente di particolare qui"
-        , "youHaveNothing": "Non hai niente per ora"
         , "objectsInThisPlace": "Oggetti in questo luogo:"
         , "objectsYouAreCarrying": "Oggetti che porti con te:"
         , "loginInstead": "Ho già un account, voglio fare login"
         , "registerInstead": "Non ho un account, voglio registrarmi"
         , "nonHaiSalv": "Non hai salvataggi."
-        , "enterUserName": "La tua email"
         , "enterPwd": "La tua password"
         , 'pickup1': "raccogli {1}"
         , 'look1': "guarda {1}"
@@ -352,21 +316,17 @@ stringheClient.de = {
     "chooseObj": "Wähle einen Gegenstand:",
     "chooseVerb": "Wähle ein Verb:",
     "explainWhy": "Erkläre, warum dies sinnvoll ist:"
-    , "emailAuthor": "Per E-Mail um einen Hinweis bitten"
     , "nienteDaRacQui": "Hier gibt es nichts aufzuheben"
     , "nienteDaRicQui": "Hier gibt es nichts, woran du dich erinnern kannst"
     , "deduciChe1Puntini": "Schlussfolgere, dass {1} ..."
     , "Nientedispeciale": "Nichts Besonderes"
     , "raccogliPuntini": "Nimm ..."
-    , "leggiDiario": "Lies deine Aufgaben und Hinweise"
     , "quiVedi": "Hier siehst du:"
     , "objectsInRoom": "Gegenstände im Raum:"
     , "inmodoche": "Was wird dann passieren?"
     , "hoUnIdea": "Ich habe eine Idee"
     , "use1For": "Ich kann {1} für ... benutzen"
-    , "yourThoughts": "Deine Gedanken"
     , "haicomposto": "Du hast gewählt:"
-    , "perchefunz": "Aktion vervollständigen"
     , "cosasucced": "Was passiert nach deiner Aktion?"
     , "nextHint": "Nächsten Hinweis anzeigen"
     , "hintsystem": "Hinweissystem"
@@ -374,7 +334,6 @@ stringheClient.de = {
     , "saySomethingTo": "Sag {1} etwas"
     , "talkTo": "Sprich mit {1}"
     , "deduceSomethingAbout": "Schlussfolgere etwas über {1}"
-    , "saySomething": "Sag etwas"
     , "sayThatYouAre": "Sag, dass du ... bist"
     , "lookat": "ansehen"
     , "hideInsideUpper": "Verstecke dich in"
@@ -383,19 +342,15 @@ stringheClient.de = {
     , "pickup": "nehmen"
     , "walk": "gehen"
     , "talk": "sprechen"
-    , "say": "sagen"
     , "diary": "Tagebuch"
     , "pleaseRefresh": "Bitte aktualisieren"
     , "logOut": "Abmelden"
     , "error": "Fehler"
     , "cantContactServer": "Der Server antwortet nicht. Bitte prüfe deine Internetverbindung."
     , "tooFar": "Zu weit entfernt"
-    , "neverVisited": "Noch nicht besucht"
-    , "youNeverVisited": "Du warst noch nie an diesem Ort."
     , "pressToCont": "Zum Fortfahren drücken"
     , "savegameInvalid": "Spielstand ungültig"
     , "refresh": "Aktualisieren"
-    , "notFound": "Nicht gefunden"
     , "loggedIn": "Angemeldet"
     , "yourGameProgress": "Dein Spielfortschritt wurde wiederhergestellt."
     , "restoreSave": "Spielstand wiederherstellen und aktuellen Fortschritt verlieren?"
@@ -418,14 +373,11 @@ stringheClient.de = {
     , "register": "Registrieren"
     , "login": "Anmelden"
     , "startnewgame": "Neues Spiel"
-    , "username": "Benutzername"
     , "yourUsername": "Dein Benutzername"
     , "chooseAUsername": "Wähle einen Benutzernamen"
     , "pwd": "Passwort"
     , "repeatpwd": "Passwort wiederholen"
     , "retry": "Erneut versuchen"
-    , "nothingHere": "Hier gibt es nichts Besonderes."
-    , "youHaveNothing": "Du trägst nichts bei dir."
     , "objectsYouAreCarrying": "Gegenstände, die du trägst:"
     , "nonHaiSalv": "Du hast keine Spielstände."
     , "chooseTutorialQuestion": "Möchtest du das Interface-Tutorial spielen?"

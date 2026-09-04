@@ -1,5 +1,5 @@
 let thisVersion = "54"; // 52 = sushi, tasse , yrface , milan, someone, etc. 54: matt
-const gClientScriptVersion = "87";
+const gClientScriptVersion = "88";
 
 function replaceTargetPossessive(text, target, templateSource) {
     if (text == null || !text.includes("{targetPossessive}")) return text;
@@ -11946,29 +11946,6 @@ $(function () {
             cliccatoNelVuotoDeselezionaTutto();
         }
     });
-
-
-    let brainStr = "pensieri".tr();
-    let stringoneSpl = brainStr.split("--").map(x => `"${x.trim()}"`);
-
-
-    function rebuildPensieri() {
-
-
-
-        $(".brainTtem").remove();
-
-        for (let br of stringoneSpl) {
-            let newItem = $("<div class='brainTtem'>").text(br.trim()).appendTo(".brainstormingOuter");
-        }
-    }
-
-    rebuildPensieri();
-
-    $(".btnMescola").click(e => {
-        shuffle(stringoneSpl);
-        rebuildPensieri();
-    })
 
 
     $(".roomTextMode").click(e => {
