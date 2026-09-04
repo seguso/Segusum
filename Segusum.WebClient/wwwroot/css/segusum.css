@@ -818,6 +818,16 @@ div#mapOuter {
     line-height: 15px !important;
 }
 
+@font-face {
+    font-family: 'dosis-regular';
+    src: url('../fonts/dosis/dosis-regular.ttf') format('truetype');
+}
+
+@font-face {
+    font-family: 'dosis-semibold';
+    src: url('../fonts/dosis/dosis-semibold.ttf') format('truetype');
+}
+
 div#mapInner {
     position: relative;
     transform-origin: 0% 0%;

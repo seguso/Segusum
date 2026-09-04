@@ -5,6 +5,6 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Segusum.AspNetCore" Version="0.1.21" />
+    <PackageReference Include="Segusum.AspNetCore" Version="0.1.22" />
   </ItemGroup>
 </Project>

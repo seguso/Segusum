@@ -380,8 +380,10 @@ function riabilitaTuttoTemporaneamenteDisabilitatoFrase() {
 function calcolaTempoFrase(fullText) {
     let tempoFrasiBrevi = 1000;
     let tempoFrasiLunghe = 2400;
-    let fraseBreve = "parla con mike";
-    let fraseLunga = "travestiti da tizio caio così la sirena vorrà schiantarti sugli scogli";
+    // Frasi campione usate solo per calibrare il tempo di visualizzazione:
+    // non devono dipendere dai contenuti di uno specifico gioco.
+    let fraseBreve = "parla con qualcuno";
+    let fraseLunga = "travestiti da qualcuno per superare l'ostacolo";
 
     let y0 = tempoFrasiBrevi;
     let y1 = tempoFrasiLunghe;
