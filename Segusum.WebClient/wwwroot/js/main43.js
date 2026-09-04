@@ -1,5 +1,5 @@
 let thisVersion = "54"; // 52 = sushi, tasse , yrface , milan, someone, etc. 54: matt
-const gClientScriptVersion = "86";
+const gClientScriptVersion = "87";
 
 function replaceTargetPossessive(text, target, templateSource) {
     if (text == null || !text.includes("{targetPossessive}")) return text;
@@ -2545,6 +2545,9 @@ function posizionaDidascaliaOggetto(dat, lo, lfc, forcedName = null) {
 
 
     newEl.appendTo(".divLayersContainer"); // subito, se no non misura la larghezza
+    // Il bersaglio è un indicatore UI sopra i layer grafici della stanza:
+    // non deve finire sotto uno sprite o un oggetto con z-index narrativo.
+    newEl.css("z-index", 2147483647);
 
 
     // Per i layer normali il rettangolo descritto dai dati coincide con
