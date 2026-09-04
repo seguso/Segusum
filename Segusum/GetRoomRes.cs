@@ -5,6 +5,11 @@ namespace Seg
     public class GetRoomRes
     {
         public List<RoomCoords> grrRoomCoords;
+        public string grrMapImage;
+        public double grrMapImageX;
+        public double grrMapImageY;
+        public double grrMapImageWidth;
+        public double grrMapImageHeight;
 
         public string grrHideInsideLoId { get; set; }
         public string grrTravestitiLoId { get; set; }

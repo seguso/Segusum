@@ -1516,6 +1516,14 @@ namespace Seg
         //}
 
         protected virtual string mapFileName => null;
+        /// <summary>Web-root-relative folder containing exported map images.</summary>
+        protected virtual string mapImageFolder => "img";
+
+        private string mapImageFileName;
+        private double mapImageX;
+        private double mapImageY;
+        private double mapImageWidth;
+        private double mapImageHeight;
 
         protected virtual Character initialActiveCharacter => null;
 
@@ -4906,6 +4914,11 @@ namespace Seg
                 grrLayersOfCurRoom = grrLayersOfCurRoom,
                 grrCurRoomId = curRoom.roomId,
                 grrRoomCoords = roomCoords,
+                grrMapImage = mapImageFileName == null ? null : $"{mapImageFolder}/{mapImageFileName}",
+                grrMapImageX = mapImageX,
+                grrMapImageY = mapImageY,
+                grrMapImageWidth = mapImageWidth,
+                grrMapImageHeight = mapImageHeight,
                 grrRooms = dicRooms,
                 grrObjectives = grrObjectives,
                 grrTemplatesToExcludeOfObj = grrTemplatesToExcludeOfObj,
@@ -6235,6 +6248,25 @@ namespace Seg
 
             var text = System.IO.File.ReadAllText(fullpath);
             var cl = System.Text.Json.JsonSerializer.Deserialize<Seg.LocationData>(text);
+
+            if (cl == null)
+                throw new InvalidOperationException($"Il file mappa '{fullpath}' non contiene un JSON valido.");
+
+            // The editor writes an absolute path, but the engine intentionally keeps
+            // only the basename: the generated JPG is deployed under the web root.
+            if (!string.IsNullOrWhiteSpace(cl.BackgroundImageExportedPath))
+            {
+                // Normalize Windows paths too, because the engine may run on Linux.
+                mapImageFileName = System.IO.Path.GetFileName(
+                    cl.BackgroundImageExportedPath.Replace('\\', '/'));
+                var mapImagePath = Utils.MapPathCrossHost($"~/{mapImageFolder}/{mapImageFileName}");
+                if (!System.IO.File.Exists(mapImagePath))
+                    throw new System.IO.FileNotFoundException($"Immagine mappa non trovata nella cartella '{mapImageFolder}'.", mapImagePath);
+                mapImageX = cl.BackgroundImageX;
+                mapImageY = cl.BackgroundImageY;
+                mapImageWidth = cl.BackgroundImageWidth;
+                mapImageHeight = cl.BackgroundImageHeight;
+            }
 
             foreach (var ro in cl.Locations)
             {
