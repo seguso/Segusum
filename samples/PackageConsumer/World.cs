@@ -2,9 +2,10 @@ using Seg;
 
 namespace PackageConsumer;
 
-public partial class World : WorldBase
+[SegusumWorld("game")]
+public partial class PackageGame : WorldBase
 {
-    protected World() : base("en") { }
+    protected PackageGame() : base("en") { }
 
     public Character mike = null!;
     public Objective goal = null!;

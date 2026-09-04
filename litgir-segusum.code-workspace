@@ -1,0 +1,15 @@
+{
+	"folders": [
+		{
+			"name": "Segusum",
+			"path": "."
+		},
+		{
+			"name": "litgir",
+			"path": "../litgir"
+		}
+	],
+	"settings": {
+		"git.autoRepositoryDetection": "subFolders"
+	}
+}

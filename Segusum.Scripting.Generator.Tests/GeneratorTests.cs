@@ -14,6 +14,7 @@ namespace Segusum.Scripting.Generator.Tests;
 public sealed class GeneratorTests
 {
     private const string MikeAcceptanceDsl = """
+world game
 def creaCicloMikeNonRipete ret Cycle:
     var cyc = new-cycle
     add cyc cidNonRipete1
@@ -66,6 +67,83 @@ public NamedCutSceneId ncsMikeStalloneIlBenefattore = null!;
         Assert.Contains("namedCutSceneIsSeen(ncsMikeStalloneIlBenefattore)", generated);
         Assert.Contains("execNextInCycle(cyc)", generated);
         Assert.Contains("e.makesNoSenseAtThisTime = true;", generated);
+    }
+
+    [Fact]
+    public void WorldDiscoveryUsesExplicitAttributeAndIgnoresDerivedTutorialWorld()
+    {
+        var result = RunWithWorld("world game\nvar cyc = new-cycle\nadd cyc xww7\nend", "[SegusumWorld(\"game\")] public abstract partial class GameWorld : WorldBase { protected GameWorld() : base(\"en\") { } protected override void configureActionHandlers() { } } [SegusumWorld(\"tutorial\")] public partial class TutorialWorld : GameWorld { }");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id == "SEGDSL200");
+        Assert.Contains("partial class GameWorld", Generated(result));
+        Assert.Contains("partial class TutorialWorld", Generated(result));
+        Assert.Equal(2, Count(Generated(result), "protected override void configureGeneratedActionHandlers()"));
+    }
+
+    [Fact]
+    public void WorldDiscoveryDoesNotUseClassNameConvention()
+    {
+        var result = RunWithWorld("world game\nvar cyc = new-cycle", "[SegusumWorld(\"game\")] public abstract partial class PincoPallinoWorld : WorldBase { }");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id == "SEGDSL200");
+        Assert.Contains("partial class PincoPallinoWorld", Generated(result));
+    }
+
+    [Fact]
+    public void WorldDiscoveryReportsUnknownWorldId()
+    {
+        var result = RunWithWorld("world missing\nvar cyc = new-cycle", "[SegusumWorld(\"game\")] public abstract partial class GameWorld : WorldBase { }");
+        Assert.Contains(result.Diagnostics, d => d.GetMessage().Contains("Unknown SegusumWorld id 'missing'"));
+    }
+
+    [Fact]
+    public void WorldDiscoveryReportsDuplicateAttributeId()
+    {
+        var result = RunWithWorld("world game\nvar cyc = new-cycle", "[SegusumWorld(\"game\")] public abstract partial class FirstWorld : WorldBase { } namespace Other { [SegusumWorld(\"game\")] public abstract partial class SecondWorld : WorldBase { } }");
+        Assert.Contains(result.Diagnostics, d => d.GetMessage().Contains("Duplicate SegusumWorld id 'game'"));
+    }
+
+    [Fact]
+    public void WorldDiscoveryReportsNonPartialTarget()
+    {
+        var result = RunWithWorld("world game\nvar cyc = new-cycle", "[SegusumWorld(\"game\")] public abstract class GameWorld : WorldBase { }");
+        Assert.Contains(result.Diagnostics, d => d.GetMessage().Contains("must be declared partial"));
+        Assert.Empty(result.GeneratedSources);
+    }
+
+    [Fact]
+    public void WorldDiscoveryReportsMissingTarget()
+    {
+        var result = RunWithWorld("world game\nvar cyc = new-cycle", "public abstract partial class OtherWorld : WorldBase { }");
+        Assert.Contains(result.Diagnostics, d => d.GetMessage().Contains("Unknown SegusumWorld id 'game'"));
+    }
+
+    [Fact]
+    public void MultipleFilesForOneWorldShareDslScope()
+    {
+        var result = RunWithWorldFiles("[SegusumWorld(\"game\")] public abstract partial class GameWorld : WorldBase { }", ("Mike.seg", "world game\ndef helper:\nend"), ("Dracula.seg", "world game\ndef main:\n call helper\nend"));
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id == "SEGDSL200");
+        Assert.Contains("private void helper", Generated(result));
+        Assert.Contains("private void main", Generated(result));
+    }
+
+    [Fact]
+    public void DifferentWorldIdsGenerateSeparatePartialTargets()
+    {
+        var result = RunWithWorldFiles("[SegusumWorld(\"game\")] public abstract partial class GameWorld : WorldBase { protected GameWorld() : base(\"en\") { } } [SegusumWorld(\"tutorial\")] public abstract partial class TutorialWorld : GameWorld { protected TutorialWorld() : base() { } }", ("Game.seg", "world game\nvar gameCycle = new-cycle\nadd gameCycle gameId\nend"), ("Tutorial.seg", "world tutorial\nvar tutorialCycle = new-cycle\nadd tutorialCycle tutorialId\nend"));
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id == "SEGDSL200");
+        Assert.Contains("partial class GameWorld", Generated(result));
+        Assert.Contains("partial class TutorialWorld", Generated(result));
+        Assert.Contains("public CycleElemId gameId", Generated(result));
+        Assert.Contains("public CycleElemId tutorialId", Generated(result));
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
+    public void WorldDirectiveDiagnosticsAreExplicit()
+    {
+        var world = "[SegusumWorld(\"game\")] public abstract partial class GameWorld : WorldBase { }";
+        Assert.Contains(RunWithWorld("var cyc = new-cycle", world).Diagnostics, d => d.GetMessage().Contains("must begin with a world directive"));
+        Assert.Contains(RunWithWorld("world game\nworld game\nvar cyc = new-cycle", world).Diagnostics, d => d.GetMessage().Contains("exactly once"));
+        Assert.Contains(RunWithWorld("var cyc = new-cycle\nworld game", world).Diagnostics, d => d.GetMessage().Contains("before declarations"));
     }
     [Fact]
     public void CycleElementIdGeneratesOneExactPropertyAndUsesIt()
@@ -159,12 +237,23 @@ public NamedCutSceneId ncsMikeStalloneIlBenefattore = null!;
 
     private static RunResult Run(string dsl, string additionalMembers = "")
     {
+        if (!dsl.StartsWith("world ", StringComparison.Ordinal)) dsl = "world game\n" + dsl;
+        return RunWithWorld(dsl, $"[SegusumWorld(\"game\")] public abstract partial class World : WorldBase {{ protected World() : base(\"en\") {{ }} public void helper(int nomeParametro) {{ }} public void helper(CycleElemId id) {{ }} {additionalMembers} protected override void configureActionHandlers() {{ }} }}");
+    }
+
+    private static RunResult RunWithWorld(string dsl, string worldSource)
+    {
+        return RunWithWorldFiles(worldSource, ("test.seg", dsl));
+    }
+
+    private static RunResult RunWithWorldFiles(string worldSource, params (string Path, string Text)[] files)
+    {
         var references = ((string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES"))?.Split(Path.PathSeparator).Select(path => MetadataReference.CreateFromFile(path)).Cast<MetadataReference>().ToList() ?? new List<MetadataReference>();
         if (typeof(Seg.WorldBase).Assembly.Location is { Length: > 0 } location) references.Add(MetadataReference.CreateFromFile(location));
-        var tree = CSharpSyntaxTree.ParseText($"using System; using Seg; namespace Demo {{ public abstract partial class World : WorldBase {{ protected World() : base(\"en\") {{ }} public void helper(int nomeParametro) {{ }} public void helper(CycleElemId id) {{ }} {additionalMembers} protected override void configureActionHandlers() {{ }} }} }}");
+        var tree = CSharpSyntaxTree.ParseText($"using System; using Seg; namespace Demo {{ {worldSource} }}");
         var compilation = CSharpCompilation.Create("DslTest", new[] { tree }, references, new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
         GeneratorDriver driver = CSharpGeneratorDriver.Create(new SegusumGenerator());
-        driver = driver.AddAdditionalTexts(ImmutableArray.Create<AdditionalText>(new InMemoryAdditionalText("test.seg", dsl)));
+        driver = driver.AddAdditionalTexts(ImmutableArray.Create<AdditionalText>(files.Select(x => (AdditionalText)new InMemoryAdditionalText(x.Path, x.Text)).ToArray()));
         driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out var updated, out _);
         var generatorDiagnostics = driver.GetRunResult().Diagnostics;
         var generated = driver.GetRunResult().Results.SelectMany(x => x.GeneratedSources).ToImmutableArray();

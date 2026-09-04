@@ -8,6 +8,7 @@ public sealed class DslMikeAcceptanceExtractionTests
     public void ExtractsAllNineMikeAcceptanceDialoguesFromDslAst()
     {
         const string dsl = """
+world game
 def creaCicloMikeNonRipete ret Cycle:
     var cyc = new-cycle
     add cyc cidNonRipete1

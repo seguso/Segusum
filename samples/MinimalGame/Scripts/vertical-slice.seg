@@ -1,3 +1,5 @@
+world game
+
 state numero-tentativi: int = 0
 state caffettiera-rotta: bool = false
 

@@ -9,7 +9,7 @@ public static class DslParser
     {
         var diagnostics = new List<DslDiagnostic>();
         var parser = new Parser(DslLexer.Lex(source, diagnostics), diagnostics);
-        return (new DslDocument(parser.ParseDocument()), diagnostics);
+        return (parser.ParseDocument(), diagnostics);
     }
 
     private sealed class Parser
@@ -27,9 +27,11 @@ public static class DslParser
         private void Error(string message) => diagnostics.Add(new DslDiagnostic("SEGDSL101", message, Current.Span));
         private void RecoverLine() { while (Current.Kind is not (DslTokenKind.NewLine or DslTokenKind.Semicolon or DslTokenKind.EndOfFile)) Take(); }
 
-        public IReadOnlyList<DslDeclaration> ParseDocument()
+        public DslDocument ParseDocument()
         {
-            var result = new List<DslDeclaration>(); SkipTerminators();
+            var result = new List<DslDeclaration>(); SkipTerminators(); string? worldId = null;
+            if (Is("world")) { Take(); worldId = Word(); SkipTerminators(); }
+            else diagnostics.Add(new DslDiagnostic("SEGDSL103", "A .seg file must begin with a world directive.", Current.Span));
             while (Current.Kind != DslTokenKind.EndOfFile)
             {
                 var span = Current.Span; var keyword = Word();
@@ -42,11 +44,12 @@ public static class DslParser
                     case "add": result.Add(ParseCycleElement(span)); break;
                     case "var": { var name = Word(); Need("="); Need("new-cycle"); result.Add(new CycleDeclaration(name, span)); break; }
                     case "next": result.Add(new NextCycleDeclaration(Expression(), span)); break;
+                    case "world": diagnostics.Add(new DslDiagnostic("SEGDSL104", worldId == null ? "The world directive must appear before declarations." : "The world directive must appear exactly once before declarations.", span)); RecoverLine(); break;
                     default: Error($"Unexpected declaration '{keyword}'."); RecoverLine(); break;
                 }
                 SkipTerminators();
             }
-            return result;
+            return new DslDocument(worldId, result);
         }
         private StateDeclaration ParseState(SourceSpan span) { var name = Word(); Need(":"); var type = Word(); Need("="); return new(name, type, Expression(), span); }
         private FunctionDeclaration ParseFunction(SourceSpan span)

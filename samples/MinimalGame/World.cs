@@ -2,6 +2,7 @@ using Seg;
 
 namespace MinimalGame;
 
+[SegusumWorld("game")]
 public sealed partial class World : WorldBase
 {
     private readonly Character active = new() { loId = "active", name = "active" };

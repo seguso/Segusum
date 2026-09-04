@@ -16,7 +16,7 @@ public sealed record HandlerDeclaration(string Kind,string First,string? Second,
 public sealed record CycleDeclaration(string Variable,SourceSpan Span) : DslDeclaration(Span);
 public sealed record NextCycleDeclaration(DslExpression Cycle,SourceSpan Span) : DslDeclaration(Span);
 public sealed record CycleElementDeclaration(string Cycle,string Id,bool Important,string? Repeat,DslExpression? Condition,IReadOnlyList<DslStatement> Body,SourceSpan Span) : DslDeclaration(Span);
-public sealed record DslDocument(IReadOnlyList<DslDeclaration> Declarations);
+public sealed record DslDocument(string? WorldId, IReadOnlyList<DslDeclaration> Declarations);
 public abstract record DslStatement(SourceSpan Span) : DslNode(Span);
 public sealed record VariableDeclaration(string Name,DslExpression Initializer,SourceSpan Span) : DslStatement(Span);
 public sealed record AssignmentStatement(string Name,string Operator,DslExpression Value,SourceSpan Span) : DslStatement(Span);

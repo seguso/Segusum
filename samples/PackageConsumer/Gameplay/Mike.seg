@@ -1,3 +1,5 @@
+world game
+
 def creaCicloMikeNonRipete ret Cycle:
     ret new-cycle
 end

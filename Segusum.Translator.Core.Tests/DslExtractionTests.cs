@@ -8,7 +8,7 @@ public sealed class DslExtractionTests
     [Fact]
     public void ParserRecognizesStateFunctionHandlerAndCycleElement()
     {
-        var source = new DslSource("demo.seg", "state attempts: int = 0\ndef check object: LogicObj ret bool:\n    ret true\nend\ncombine a with b:\n    phrase \"A\"\nend\nadd cyc stable-id important\n    when it not-seen-recently 5\nend");
+        var source = new DslSource("demo.seg", "world game\nstate attempts: int = 0\ndef check object: LogicObj ret bool:\n    ret true\nend\ncombine a with b:\n    phrase \"A\"\nend\nadd cyc stable-id important\n    when it not-seen-recently 5\nend");
         var result = DslParser.Parse(source);
         Assert.Empty(result.Diagnostics);
         Assert.Equal(4, result.Document.Declarations.Count);
@@ -17,7 +17,7 @@ public sealed class DslExtractionTests
     [Fact]
     public void DuplicateCycleIdsAreVisibleToGeneratorModel()
     {
-        var source = new DslSource("demo.seg", "add cyc same\nend\nadd cyc same\nend");
+        var source = new DslSource("demo.seg", "world game\nadd cyc same\nend\nadd cyc same\nend");
         var result = DslParser.Parse(source);
         var ids = result.Document.Declarations.OfType<CycleElementDeclaration>().Select(x => x.Id).ToArray();
         Assert.Equal(new[] { "same", "same" }, ids);

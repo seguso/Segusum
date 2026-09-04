@@ -29,6 +29,7 @@
     <ProjectReference Include="../Segusum.Persistence/Segusum.Persistence.csproj" />
     <ProjectReference Include="../Segusum.WebClient/Segusum.WebClient.csproj" />
     <ProjectReference Include="../Segusum.Scripting.Generator/Segusum.Scripting.Generator.csproj" ReferenceOutputAssembly="false" OutputItemType="Analyzer" PrivateAssets="all" />
+    <ProjectReference Include="../Segusum.Scripting.Core/Segusum.Scripting.Core.csproj" ReferenceOutputAssembly="false" OutputItemType="Analyzer" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>
