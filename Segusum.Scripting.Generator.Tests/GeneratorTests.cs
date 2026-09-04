@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using System.IO;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Text;
@@ -17,6 +19,7 @@ public sealed class GeneratorTests
         Assert.Contains(result.Diagnostics, d => d.GetMessage().Contains("Duplicate CycleElementId"));
 
         var valid = Run("var cyc = new-cycle\nadd cyc xww7\nend\nnext cyc");
+        AssertGeneratedCompilationSucceeds(valid);
         var generated = Generated(valid);
         Assert.Equal(1, Count(generated, "public CycleElemId xww7 { get; set; } = new();"));
         Assert.Contains("addToCycle(xww7", generated);
@@ -37,6 +40,7 @@ public sealed class GeneratorTests
         Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL"));
         Assert.Contains("use(xww7)", Generated(result));
         Assert.Contains("helper(id)", Generated(result));
+        AssertGeneratedCompilationSucceeds(result);
     }
 
     [Fact]
@@ -45,6 +49,7 @@ public sealed class GeneratorTests
         var result = Run("def main:\n call helper nome-parametro: 1\nend");
         Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL"));
         Assert.Contains("helper(nomeParametro: 1)", Generated(result));
+        AssertGeneratedCompilationSucceeds(result);
     }
 
     [Fact]
@@ -63,6 +68,7 @@ public sealed class GeneratorTests
         var result = Run($"var cyc = new-cycle\nadd cyc xww7 {modifier}\nend");
         Assert.DoesNotContain(result.Diagnostics, d => d.GetMessage().Contains("Repeat"));
         Assert.Contains(emittedValue, Generated(result));
+        AssertGeneratedCompilationSucceeds(result);
     }
 
     [Fact]
@@ -72,6 +78,7 @@ public sealed class GeneratorTests
         var generated = Generated(result);
         Assert.DoesNotContain("Repeat.", generated);
         Assert.Contains("addToCycle(xww7", generated);
+        AssertGeneratedCompilationSucceeds(result);
     }
 
     [Theory]
@@ -92,14 +99,14 @@ public sealed class GeneratorTests
         Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL"));
         Assert.Contains("x.notSeenRecently(5)", generated);
         Assert.Contains("wasSeenAtLeastOnce(id)", generated);
+        AssertGeneratedCompilationSucceeds(result);
     }
 
     private static RunResult Run(string dsl, string additionalMembers = "")
     {
-        var references = ((string?)typeof(Seg.WorldBase).Assembly.Location) is { Length: > 0 } location
-            ? new[] { MetadataReference.CreateFromFile(location) }
-            : Array.Empty<MetadataReference>();
-        var tree = CSharpSyntaxTree.ParseText($"using Seg; namespace Demo {{ public partial class World : WorldBase {{ public void helper(int nomeParametro) {{ }} public void helper(CycleElemId id) {{ }} {additionalMembers} protected override void configureActionHandlers() {{ }} }} }}");
+        var references = ((string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES"))?.Split(Path.PathSeparator).Select(path => MetadataReference.CreateFromFile(path)).Cast<MetadataReference>().ToList() ?? new List<MetadataReference>();
+        if (typeof(Seg.WorldBase).Assembly.Location is { Length: > 0 } location) references.Add(MetadataReference.CreateFromFile(location));
+        var tree = CSharpSyntaxTree.ParseText($"using System; using Seg; namespace Demo {{ public abstract partial class World : WorldBase {{ protected World() : base(\"en\") {{ }} public void helper(int nomeParametro) {{ }} public void helper(CycleElemId id) {{ }} {additionalMembers} protected override void configureActionHandlers() {{ }} }} }}");
         var compilation = CSharpCompilation.Create("DslTest", new[] { tree }, references, new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
         GeneratorDriver driver = CSharpGeneratorDriver.Create(new SegusumGenerator());
         driver = driver.AddAdditionalTexts(ImmutableArray.Create<AdditionalText>(new InMemoryAdditionalText("test.seg", dsl)));
@@ -110,6 +117,11 @@ public sealed class GeneratorTests
     }
 
     private static string Generated(RunResult result) => string.Join("\n", result.GeneratedSources.Select(x => x.SourceText.ToString()));
+    private static void AssertGeneratedCompilationSucceeds(RunResult result)
+    {
+        var errors = result.Compilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).ToArray();
+        Assert.True(errors.Length == 0, string.Join(Environment.NewLine, errors.Select(x => x.ToString())));
+    }
     private static int Count(string text, string value) => text.Split(value, StringSplitOptions.None).Length - 1;
     private sealed record RunResult(ImmutableArray<Diagnostic> Diagnostics, ImmutableArray<GeneratedSourceResult> GeneratedSources, Compilation Compilation);
 
