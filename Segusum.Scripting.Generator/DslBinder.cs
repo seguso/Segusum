@@ -1,13 +1,27 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Segusum.Scripting.Core;
 
 namespace Segusum.Scripting.Generator;
 
-internal sealed record BoundArgument(DslArgument Source, string ParameterName);
-internal sealed record BoundCall(IMethodSymbol? Method, IReadOnlyList<BoundArgument> Arguments);
+internal sealed record BoundValue(ITypeSymbol? Type, string CSharpName);
+internal sealed record BoundArgument(DslArgument Source, IParameterSymbol? Parameter, string ParameterName);
+internal sealed record BoundCall(IMethodSymbol? Method, string TargetName, IReadOnlyList<BoundArgument> Arguments, ITypeSymbol? ReturnType);
+internal sealed class BoundModel
+{
+    public Dictionary<DslExpression, BoundValue> Values { get; } = new(ReferenceComparer<DslExpression>.Instance);
+    public Dictionary<DslExpression, BoundCall> Calls { get; } = new(ReferenceComparer<DslExpression>.Instance);
+}
+internal sealed class ReferenceComparer<T> : IEqualityComparer<T> where T : class
+{
+    public static readonly ReferenceComparer<T> Instance = new();
+    public bool Equals(T? x, T? y) => ReferenceEquals(x, y);
+    public int GetHashCode(T obj) => RuntimeHelpers.GetHashCode(obj);
+}
 
 internal sealed class DslBinder
 {
@@ -16,7 +30,7 @@ internal sealed class DslBinder
     private readonly Action<DslDiagnostic> report;
     private readonly Dictionary<string, ITypeSymbol> globals = new(StringComparer.Ordinal);
     private readonly Dictionary<string, FunctionDeclaration> functions = new(StringComparer.Ordinal);
-    private readonly Dictionary<int, BoundCall> calls = new();
+    private readonly BoundModel model = new();
     private readonly INamedTypeSymbol? cycle;
     private readonly INamedTypeSymbol? cycleElementId;
     private readonly ITypeSymbol? dateTimeNullable;
@@ -24,7 +38,7 @@ internal sealed class DslBinder
     private readonly INamedTypeSymbol? objective;
     private readonly INamedTypeSymbol? explanation;
 
-    public IReadOnlyDictionary<int, BoundCall> Calls => calls;
+    public BoundModel Model => model;
     public DslBinder(Compilation compilation, INamedTypeSymbol world, Action<DslDiagnostic> report)
     {
         this.compilation = compilation; this.world = world; this.report = report;
@@ -97,7 +111,11 @@ internal sealed class DslBinder
         switch (expression)
         {
             case LiteralExpression l: return l.Kind == "string" ? compilation.GetSpecialType(SpecialType.System_String) : l.Kind == "bool" ? compilation.GetSpecialType(SpecialType.System_Boolean) : l.Kind == "cycle" ? cycle : compilation.GetSpecialType(SpecialType.System_Int32);
-            case IdentifierExpression i: return i.Name == "it" && contextualIt != null ? contextualIt : BindName(i.Name, i.Span, scope);
+            case IdentifierExpression i:
+                if (i.Name == "it" && contextualIt != null) { model.Values[i] = new BoundValue(contextualIt, "x"); return contextualIt; }
+                var resolved = BindName(i.Name, i.Span, scope);
+                if (resolved != null) model.Values[i] = new BoundValue(resolved, SymbolEqualityComparer.Default.Equals(resolved, cycleElementId) ? "new CycleElemId(\"" + i.Name + "\")" : Name(i.Name));
+                return resolved;
             case ParenthesizedExpression p: return BindExpression(p.Expression, scope, contextualIt);
             case UnaryExpression u: var ut = BindExpression(u.Operand, scope, contextualIt); if (u.Operator == "not") Require(ut, compilation.GetSpecialType(SpecialType.System_Boolean), u.Span, "not requires bool."); return compilation.GetSpecialType(SpecialType.System_Boolean);
             case BinaryExpression b:
@@ -110,31 +128,30 @@ internal sealed class DslBinder
     }
     private ITypeSymbol? BindCall(CallExpression call, Dictionary<string, ITypeSymbol> scope, ITypeSymbol? contextualIt)
     {
-        if (call.Name == "not-seen-recently") { if (call.Arguments.Count == 2) { Require(BindExpression(call.Arguments[0].Expression, scope, contextualIt), dateTimeNullable, call.Arguments[0].Span, "not-seen-recently receiver must be DateTime?."); Require(BindExpression(call.Arguments[1].Expression, scope), compilation.GetSpecialType(SpecialType.System_Int32), call.Arguments[1].Span, "cooldown must be numeric."); } return compilation.GetSpecialType(SpecialType.System_Boolean); }
-        if (call.Name == "was-seen-at-least-once") { if (call.Arguments.Count == 1) { var t = BindExpression(call.Arguments[0].Expression, scope); if (call.Arguments[0].Expression is IdentifierExpression id) t = cycleElementId; Require(t, cycleElementId, call.Arguments[0].Span, "was-seen-at-least-once requires CycleElemId."); } return compilation.GetSpecialType(SpecialType.System_Boolean); }
-        if (functions.TryGetValue(NormalizeKey(call.Name), out var function)) { var bound = BindArgumentList(call, function.Parameters.Select(p => new ParameterInfo(p.Name, TypeOf(p.Type)!, false)).ToArray(), scope, contextualIt); if (bound == null) return null; calls[call.Span.Start] = new BoundCall(null, bound); return TypeOf(function.ReturnType ?? "void"); }
+        if (call.Name == "not-seen-recently") { if (call.Arguments.Count == 2) { Require(BindExpression(call.Arguments[0].Expression, scope, contextualIt), dateTimeNullable, call.Arguments[0].Span, "not-seen-recently receiver must be DateTime?."); Require(BindExpression(call.Arguments[1].Expression, scope), compilation.GetSpecialType(SpecialType.System_Int32), call.Arguments[1].Span, "cooldown must be numeric."); model.Values[call] = new BoundValue(compilation.GetSpecialType(SpecialType.System_Boolean), "DOMAIN_NOT_SEEN"); } return compilation.GetSpecialType(SpecialType.System_Boolean); }
+        if (call.Name == "was-seen-at-least-once") { if (call.Arguments.Count == 1) { var t = BindExpression(call.Arguments[0].Expression, scope); if (call.Arguments[0].Expression is IdentifierExpression) t = cycleElementId; Require(t, cycleElementId, call.Arguments[0].Span, "was-seen-at-least-once requires CycleElemId."); model.Values[call] = new BoundValue(compilation.GetSpecialType(SpecialType.System_Boolean), "DOMAIN_WAS_SEEN"); } return compilation.GetSpecialType(SpecialType.System_Boolean); }
+        if (functions.TryGetValue(NormalizeKey(call.Name), out var function)) { var bound = BindArgumentList(call, function.Parameters.Select(p => new ParameterInfo(p.Name, TypeOf(p.Type)!, false)).ToArray(), scope, contextualIt); if (bound == null) return null; model.Calls[call] = new BoundCall(null, Name(function.Name), bound, TypeOf(function.ReturnType ?? "void")); return TypeOf(function.ReturnType ?? "void"); }
         var methods = AllMembers(call.Name).OfType<IMethodSymbol>().Concat(DslNames.Candidates(call.Name).Skip(1).SelectMany(AllMembers).OfType<IMethodSymbol>()).Where(m => NormalizeKey(m.Name) == NormalizeKey(call.Name)).GroupBy(m => m.ToDisplayString()).Select(g => g.First()).ToArray();
         if (methods.Length == 0) { Report("SEGDSL305", $"Unknown function or method '{call.Name}'.", call.Span); return null; }
         var candidates = methods.Select(m => TryBind(call, m, scope, contextualIt)).Where(x => x != null).Cast<BoundCall>().ToArray();
         if (candidates.Length != 1) { Report("SEGDSL306", candidates.Length == 0 ? $"No overload of '{call.Name}' accepts these arguments." : $"Call to '{call.Name}' is ambiguous.", call.Span); return null; }
-        calls[call.Span.Start] = candidates[0]; return candidates[0].Method?.ReturnType;
+        model.Calls[call] = candidates[0]; return candidates[0].ReturnType;
     }
-    private sealed record ParameterInfo(string Name, ITypeSymbol Type, bool Optional);
+    private sealed record ParameterInfo(string Name, ITypeSymbol Type, bool Optional, IParameterSymbol? Symbol = null);
     private BoundCall? TryBind(CallExpression call, IMethodSymbol method, Dictionary<string, ITypeSymbol> scope, ITypeSymbol? contextualIt)
-    { var parameters = method.Parameters.Select(p => new ParameterInfo(p.Name, p.Type, p.IsOptional)).ToArray(); var bound = BindArgumentList(call, parameters, scope, contextualIt); return bound == null ? null : new BoundCall(method, bound); }
+    { var parameters = method.Parameters.Select(p => new ParameterInfo(p.Name, p.Type, p.IsOptional, p)).ToArray(); var bound = BindArgumentList(call, parameters, scope, contextualIt); return bound == null ? null : new BoundCall(method, method.Name, bound, method.ReturnType); }
     private List<BoundArgument>? BindArgumentList(CallExpression call, IReadOnlyList<ParameterInfo> parameters, Dictionary<string, ITypeSymbol> scope, ITypeSymbol? contextualIt = null)
     {
         var result = new List<BoundArgument>(); var used = new HashSet<string>(StringComparer.Ordinal); var namedSeen = false; var positionalIndex = 0;
         foreach (var argument in call.Arguments)
         {
-            if (argument.Name != null) { namedSeen = true; var parameter = parameters.FirstOrDefault(p => string.Equals(p.Name, argument.Name, StringComparison.Ordinal)); if (parameter == null) { Report("SEGDSL307", $"Unknown named argument '{argument.Name}'.", argument.Span); return null; } if (!used.Add(parameter.Name)) { Report("SEGDSL308", $"Duplicate named argument '{argument.Name}'.", argument.Span); return null; } if (!Compatible(BindExpression(argument.Expression, scope, contextualIt), parameter.Type)) { Report("SEGDSL309", $"Argument '{argument.Name}' has incompatible type.", argument.Expression.Span); return null; } result.Add(new BoundArgument(argument, ToParameter(parameter))); }
-            else { if (namedSeen) { Report("SEGDSL310", "Positional arguments cannot follow a named argument.", argument.Span); return null; } while (positionalIndex < parameters.Count && used.Contains(parameters[positionalIndex].Name)) positionalIndex++; if (positionalIndex >= parameters.Count) return null; var parameter = parameters[positionalIndex++]; used.Add(parameter.Name); if (!Compatible(BindExpression(argument.Expression, scope, contextualIt), parameter.Type)) return null; result.Add(new BoundArgument(argument, ToParameter(parameter))); }
+            if (argument.Name != null) { namedSeen = true; var parameter = parameters.FirstOrDefault(p => string.Equals(p.Name, argument.Name, StringComparison.Ordinal)); if (parameter == null) { Report("SEGDSL307", $"Unknown named argument '{argument.Name}'.", argument.Span); return null; } if (!used.Add(parameter.Name)) { Report("SEGDSL308", $"Duplicate named argument '{argument.Name}'.", argument.Span); return null; } if (!Compatible(BindExpression(argument.Expression, scope, contextualIt), parameter.Type)) { Report("SEGDSL309", $"Argument '{argument.Name}' has incompatible type.", argument.Expression.Span); return null; } result.Add(new BoundArgument(argument, parameter.Symbol, parameter.Name)); }
+            else { if (namedSeen) { Report("SEGDSL310", "Positional arguments cannot follow a named argument.", argument.Span); return null; } while (positionalIndex < parameters.Count && used.Contains(parameters[positionalIndex].Name)) positionalIndex++; if (positionalIndex >= parameters.Count) return null; var parameter = parameters[positionalIndex++]; used.Add(parameter.Name); if (!Compatible(BindExpression(argument.Expression, scope, contextualIt), parameter.Type)) return null; result.Add(new BoundArgument(argument, parameter.Symbol, parameter.Name)); }
         }
         if (parameters.Any(p => !p.Optional && !used.Contains(p.Name))) return null;
         return result;
     }
-    private static string ToParameter(ParameterInfo parameter) => parameter.Name;
-    private static bool Compatible(ITypeSymbol? actual, ITypeSymbol expected) => actual != null && (SymbolEqualityComparer.Default.Equals(actual, expected) || expected.SpecialType == SpecialType.System_Object || actual.SpecialType == expected.SpecialType);
+    private bool Compatible(ITypeSymbol? actual, ITypeSymbol expected) => actual != null && Microsoft.CodeAnalysis.CSharp.CSharpExtensions.ClassifyConversion(compilation, actual, expected).IsImplicit;
     private ITypeSymbol? BindName(string name, SourceSpan span, Dictionary<string, ITypeSymbol>? scope = null)
     { if (name == "it") return dateTimeNullable; if (scope != null && scope.TryGetValue(NormalizeKey(name), out var local)) return local; if (globals.TryGetValue(NormalizeKey(name), out var global)) return global; var candidates = DslNames.Candidates(name).SelectMany(AllMembers).ToArray(); if (candidates.Length == 1) return candidates[0] switch { IFieldSymbol f => f.Type, IPropertySymbol p => p.Type, IMethodSymbol m => m.ReturnType, _ => null }; if (candidates.Length > 1) Report("SEGDSL311", $"Ambiguous name '{name}'.", span); else Report("SEGDSL312", $"Unknown identifier '{name}'.", span); return null; }
     private IEnumerable<ISymbol> AllMembers(string name) { for (INamedTypeSymbol? t = world; t != null; t = t.BaseType) foreach (var member in t.GetMembers(name)) yield return member; }
@@ -142,6 +159,7 @@ internal sealed class DslBinder
     private static string NormalizeKey(string name) => DslNames.Camel(name).ToUpperInvariant();
     private void Require(ITypeSymbol? actual, ITypeSymbol? expected, SourceSpan span, string message) { if (actual == null || expected == null || !Compatible(actual, expected)) Report("SEGDSL313", message, span); }
     private void Report(string id, string message, SourceSpan span) => report(new DslDiagnostic(id, message, span));
+    private static string Name(string name) => name.Contains('-') ? DslNames.Camel(name) : name;
     private void CheckDuplicateElements(IEnumerable<DslDeclaration> declarations) { var ids = declarations.OfType<CycleElementDeclaration>().GroupBy(x => x.Id, StringComparer.Ordinal); foreach (var group in ids.Where(x => x.Count() > 1)) foreach (var item in group.Skip(1)) Report("SEGDSL314", $"Duplicate CycleElementId '{item.Id}'.", item.Span); }
     private void CheckDuplicateCombines(IEnumerable<DslDeclaration> declarations) { var combines = declarations.OfType<HandlerDeclaration>().Where(x => x.Kind == "combine").GroupBy(x => NormalizeKey(x.First) + "\0" + NormalizeKey(x.Second!)); foreach (var group in combines.Where(x => x.Count() > 1)) foreach (var item in group.Skip(1)) Report("SEGDSL315", "Duplicate combine handler.", item.Span); }
     private static IEnumerable<CycleElementDeclaration> FindNestedElements(DslDeclaration declaration) => declaration switch

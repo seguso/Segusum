@@ -75,10 +75,10 @@ public static class DslParser
         private string? ParseRepeatModifier()
         {
             if (Current.Kind != DslTokenKind.Identifier) return null;
-            var value = Take().Text;
-            if (value is "once" or "forever") return value;
-            diagnostics.Add(new DslDiagnostic("SEGDSL102", $"Unknown Repeat modifier '{value}'. Expected 'once' or 'forever'.", tokens[position - 1].Span));
-            return value;
+            if (Is("once") || Is("forever")) return Take().Text;
+            if (Is("when") || Is("nar") || Is("nar-room") || Is("call") || Is("if") || Is("var") || Is("next") || Is("makes-no-sense") || Is("finish-game") || Is("do-not-advance-time")) return null;
+            diagnostics.Add(new DslDiagnostic("SEGDSL102", $"Unknown Repeat modifier '{Current.Text}'. Expected 'once' or 'forever'.", Current.Span));
+            return null;
         }
         private (DslExpression? Condition, IReadOnlyList<DslStatement> Body) ParseBlockWithClause(string clause)
         {
