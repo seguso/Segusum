@@ -27,5 +27,6 @@
     <PackageReference Include="Segusum.Analyzers" Version="$(Version)" PrivateAssets="none" />
     <ProjectReference Include="../Segusum/Segusum.csproj" />
     <ProjectReference Include="../Segusum.Persistence/Segusum.Persistence.csproj" />
+    <ProjectReference Include="../Segusum.WebClient/Segusum.WebClient.csproj" />
   </ItemGroup>
 </Project>

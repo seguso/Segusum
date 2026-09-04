@@ -1,0 +1,273 @@
+div.invNew {
+        /* background: black; */
+        color: #dedede;
+}
+
+:not(#mapOuter) div.roomAndInv {
+        background: #000000;
+        /* border-top: 1px solid hsla(227, 22%, 9%, 1); */
+        /* border-bottom: 1px solid hsla(227, 22%, 9%, 1); */
+}
+
+.sepRoom {
+        color: hsla(235, 11%, 60%, 1);
+        /* font-weight: bold; */
+}
+
+.btn.btn-default:not(.btnLocation):not(.btnExitMap) {
+        FONT-WEIGHT: 500;
+        /* background-image: linear-gradient(to bottom, hsla(230, 0%, 21%, 1) 0%, hsla(230, 12%, 17%, 1) 100%); */
+        border-color: hsl(0, 0%, 0%);
+        color: hsl(0, 0%, 83%);
+        text-shadow: none;
+        background: hsl(227, 22%, 16%);
+        font-weight: 400;
+        text-shadow: black;
+        box-shadow: inset 0px 1px 0px #3a415d, inset 0px -1px 0px hsla(227, 22%, 14%, 1);
+}
+
+.modal-content {
+        background: #1b1c23;
+        color: white;
+        border-color: #2e2f3c;
+        border-width: 1px;
+        box-shadow: 0px 0px 10px #000000;
+}
+
+.seNonVedi {
+        color: hsla(203, 10%, 67%, 1);
+}
+
+.modal-title {
+        color: hsl(53, 90%, 51%);
+        /* text-transform: uppercase; */
+        /* font-weight: bold; */
+        
+        /* font-weight: bold; */
+        font-size: 21px;
+        margin-left: 15px;
+}
+
+.parSentence.titoloPer {
+        /* color: #e2a86b; */
+        /* font-weight: bold; */
+}
+
+.modal:not(.bootstrap-dialog) .modal-header button.close {
+        color: #6a8ca0;
+        text-shadow: 0 1px 0 #000;
+}
+
+.btn-default:hover:not(.btnLocation):not(.btnExitMap) {
+        background: hsla(230, 17%, 21%, 1);
+}
+
+.btnOpt.obiettivoDisabled {
+        color: hsla(0, 0%, 86%, 1);
+        margin-bottom: 11px;
+        margin-top: 10px;
+}
+
+:not(#mapOuter) button.btn.btnLocation.btnNeverVisitedPlace.btn-default {
+        /* background: #4a6d3b; */
+}
+
+div#divExitMapPicker {
+        /* background: #c5c5c5; */
+        /* color: black; */
+}
+
+button#btnExitMapPicker {
+}
+
+.mapSpiegazInner {
+        /* color: #0a0a0a; */
+}
+
+.modal-header {
+        border-bottom-color: #2e2f3c;
+}
+
+.modal-footer {
+        border-top-color: #2e2f3c;
+}
+
+.containerPulsantiBack {
+        background: #191a21;
+}
+
+        .containerPulsantiBack .btn-default {
+                background-color: #141a48;
+                color: white;
+        }
+
+                .containerPulsantiBack .btn-default:hover {
+                        background-color: #5d6392;
+                }
+
+.btn-success {
+        background-color: #1b4026;
+        background-image: none;
+        color: white;
+        border-color: black;
+}
+
+        .btn-success:hover {
+                background-color: #286139;
+                background-image: none;
+                color: white;
+                border-color: black;
+        }
+
+button.btnStopRemembering.btn.btn-default.disabled {
+        /* opacity: 0.35; */
+}
+
+
+.riepilogoSottotit {
+        color: #d6d6d6;
+}
+
+hr.riepilogoSottotitHr {
+        border-color: #2e2f3c;
+}
+
+
+.titoloSeparatoreCompositoreSentence {
+        color: #8b98a0;
+}
+
+
+.parSentence.nonObiettivo {
+        /* font-weight: bold; */
+}
+
+
+.divObjInRoom {
+}
+
+div.contRoomObjs {
+        /* border-bottom: 1px solid #222531; */
+        width: 100%;
+        /* margin-bottom: 9px; */
+}
+
+
+.bloccoFraseCompostafinoraOuter {
+        color: #ffbc00;
+}
+
+
+.modal .btnSceltaSentence.btn.btn-default.form-control {
+        background: #3e475a;
+        box-shadow: inset 0px 1px 0px hsla(229, 17%, 40%, 1);
+        color: #f3f3f3;
+}
+
+
+.btnSceltaSentence.btn.btn-default.form-control:hover {
+        background-color: hsla(220, 18%, 36%, 1);
+}
+
+
+.modal .btn.btn-default:not(.btnLocation):not(.btnExitMap) {
+        background: #3e475a;
+        box-shadow: inset 0px 1px 0px hsla(0, 0%, 100%, 0.16);
+        color: #f3f3f3;
+        
+        font-size: 21px;
+}
+
+
+        .modal .btn.btn-default:not(.btnLocation):not(.btnExitMap):not(.disabled):hover {
+                background-color: hsla(221, 18%, 33%, 1);
+        }
+
+
+.scrollbar-outer > .scroll-element {
+        background-color: transparent !important;
+}
+
+.scroll-element_track {
+        background-color: #00000000 !important;
+        /* border-left: 1px solid #363c54 !important; */
+        /* padding-left: 1px !important; */
+        /* margin-left: 15px !important; */
+}
+
+.scroll-element_track {
+}
+
+.scroll-bar {
+        background-color: hsla(227, 22%, 27%, 1) !important;
+        /* margin-left: 1px !important; */
+        /* width: 7px !important; */
+        /* border-radius: 2px !important; */
+}
+
+
+.btnBottomBar {
+        background-color: hsl(227, 22%, 27%) !important;
+        box-shadow: inset 0px 1px 0px #5b6690 !important;
+        padding-left: 22px;
+        padding-right: 22px;
+}
+
+        .btnBottomBar.disabled {
+                opacity: 0.4;
+        }
+
+
+button#indietroDiUno {
+        /* background: hsla(172, 35%, 28%, 1); */
+        /* box-shadow: inset 0px 1px 0px hsla(0, 0%, 100%, 0.27); */
+}
+
+
+        button#indietroDiUno.disabled {
+                opacity: 0.4;
+        }
+
+
+.modal-header button.close:hover {
+        color: #b1bbd0;
+}
+
+
+.containerPulsantiBackNar {
+        background: #191a21;
+}
+
+
+.bootstrap-dialog.type-primary .modal-header {
+        background: hsla(232, 25%, 29%, 1);
+}
+
+.bootstrap-dialog-close-button {
+        color: white;
+}
+
+.bootstrap-dialog .bootstrap-dialog-close-button {
+        /* color: white !important; */
+}
+
+
+button.close {
+}
+
+.bootstrap-dialog-close-button .close {
+        color: white;
+        font-size: 28px;
+        text-shadow: none;
+        opacity: 1;
+}
+
+
+.nothinginroom.btnSceltaSentence {
+        color: #c7c7c7;
+}
+
+
+.parSentence.titoloPer.nobold {
+        color: #cecece;
+}

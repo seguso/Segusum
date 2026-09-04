@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Segusum.WebClient</RootNamespace>
+    <AssemblyName>Segusum.WebClient</AssemblyName>
+    <PackageId>Segusum.WebClient</PackageId>
+    <Title>Segusum generic web client</Title>
+    <Description>Razor/static web client for Segusum gameplay.</Description>
+    <IsPackable>true</IsPackable>
+    <AddRazorSupportForMvc>true</AddRazorSupportForMvc>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+  <Import Project="../Segusum.Package.props" />
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="../Segusum/Segusum.csproj" />
+  </ItemGroup>
+</Project>

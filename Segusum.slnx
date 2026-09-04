@@ -1,5 +1,6 @@
 <Solution>
   <Project Path="Segusum.AspNetCore/Segusum.AspNetCore.csproj" />
+  <Project Path="Segusum.WebClient/Segusum.WebClient.csproj" />
   <Project Path="Segusum.Persistence.Tests/Segusum.Persistence.Tests.csproj" />
   <Project Path="Segusum.Persistence/Segusum.Persistence.csproj" />
   <Project Path="Segusum.Tests/Segusum.Tests.csproj" />
@@ -11,4 +12,5 @@
   <Project Path="Segusum.Translator.Core/Segusum.Translator.Core.csproj" />
   <Project Path="Segusum.Translator.Cli/Segusum.Translator.Cli.csproj" />
   <Project Path="Segusum.Translator.Web/Segusum.Translator.Web.csproj" />
+  <Project Path="samples/MinimalGame/MinimalGame.csproj" />
 </Solution>

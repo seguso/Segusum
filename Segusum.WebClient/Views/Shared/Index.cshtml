@@ -1,0 +1,1665 @@
+@model Segusum.WebClient.SegusumHomeModel
+
+@{
+    Layout = null;
+}
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0">
+    <title>@Model.Title</title>
+
+    <script src="~/_content/Segusum.WebClient/lib/jquery/jquery.js"></script>
+    <script src="~/_content/Segusum.WebClient/lib/bootstrap/bootstrap.js"></script>
+    <script src="~/_content/Segusum.WebClient/lib/bootstrap-dialog/bootstrap-dialog.js"></script>
+    <script src="~/_content/Segusum.WebClient/lib/jquery-visible/jquery.visible.min.js"></script>
+
+    <script src="~/_content/Segusum.WebClient/lib/underscore.min.js"></script>
+
+    <script src="~/_content/Segusum.WebClient/lib/smoothscroll/smoothscroll.js"></script>
+    <link href="~/_content/Segusum.WebClient/lib/bootstrap/bootstrap.css" rel="stylesheet" />
+    <link href="~/_content/Segusum.WebClient/lib/bootstrap/bootstrap-theme.css" rel="stylesheet" />
+    <link href="~/_content/Segusum.WebClient/lib/bootstrap-dialog/bootstrap-dialog.css" rel="stylesheet" />
+
+    <script type="text/javascript">
+
+        var prefissoWebApi = "@Model.ApiPrefix";
+
+        var gLang = "@Model.Language";
+
+        var gGameIdStr = "@Model.GameId";
+
+
+        var gInvIconsFolder = "@Model.InventoryIconsPath";
+
+        // request.querystring in javascript https://stackoverflow.com/questions/901115/how-can-i-get-query-string-values-in-javascript
+        function getParameterByName(name, url)
+        {
+            if (!url) url = window.location.href;
+            name = name.replace(/[\[\]]/g, "\\$&");
+            var regex = new RegExp("[?&]" + name + "(=([^&#]*)|&|#|$)"),
+                results = regex.exec(url);
+            if (!results) return null;
+            if (!results[2]) return "";
+            return decodeURIComponent(results[2].replace(/\+/g, " "));
+        }
+
+
+
+    </script>
+
+    <script src="~/_content/Segusum.WebClient/js/clientTransl8.js"></script>
+    <script src="~/_content/Segusum.WebClient/js/main43.js"></script>
+
+    <link href="~/_content/Segusum.WebClient/css/segusum.css" rel="stylesheet" />
+
+    <link href="~/_content/Segusum.WebClient/css/black-skin.css" rel="stylesheet" />
+
+    @*non mi piace*@
+    @*<link href="~/css/lightTheme.css" rel="stylesheet" />*@
+    <link href="https://fonts.googleapis.com/css?family=Roboto+Condensed:300,400,400i,700|Titillium+Web:900|Cambay:400,700" rel="stylesheet">
+
+
+
+    <script src="~/_content/Segusum.WebClient/lib/touch-scroll/RequestAnimationFrame.js"></script>
+    <script src="~/_content/Segusum.WebClient/lib/touch-scroll/TouchScroll.js"></script>
+
+
+
+    <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.6.3/css/solid.css" integrity="sha384-+0VIRx+yz1WBcCTXBkVQYIBVNEFH1eP6Zknm16roZCyeNg2maWEpk/l/KsyFKs7G" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.6.3/css/fontawesome.css" integrity="sha384-jLuaxTTBR42U2qJ/pm4JRouHkEDHkVqH0T1nyQXn1mZ7Snycpf6Rl25VBNthU4z0" crossorigin="anonymous">
+
+
+    <link rel="stylesheet"
+          href="https://unpkg.com/simplebar@5.2.1/dist/simplebar.css" />
+    <script src="https://unpkg.com/simplebar@5.2.1/dist/simplebar.min.js"></script>
+
+
+
+    <link rel="apple-touch-icon" sizes="57x57" href="@Model.GameAssetPrefix/img/favicon/apple-icon-57x57.png">
+    <link rel="apple-touch-icon" sizes="60x60" href="@Model.GameAssetPrefix/img/favicon/apple-icon-60x60.png">
+    <link rel="apple-touch-icon" sizes="72x72" href="@Model.GameAssetPrefix/img/favicon/apple-icon-72x72.png">
+    <link rel="apple-touch-icon" sizes="76x76" href="@Model.GameAssetPrefix/img/favicon/apple-icon-76x76.png">
+    <link rel="apple-touch-icon" sizes="114x114" href="@Model.GameAssetPrefix/img/favicon/apple-icon-114x114.png">
+    <link rel="apple-touch-icon" sizes="120x120" href="@Model.GameAssetPrefix/img/favicon/apple-icon-120x120.png">
+    <link rel="apple-touch-icon" sizes="144x144" href="@Model.GameAssetPrefix/img/favicon/apple-icon-144x144.png">
+    <link rel="apple-touch-icon" sizes="152x152" href="@Model.GameAssetPrefix/img/favicon/apple-icon-152x152.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="@Model.GameAssetPrefix/img/favicon/apple-icon-180x180.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="@Model.GameAssetPrefix/img/favicon/android-icon-192x192.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="@Model.GameAssetPrefix/img/favicon/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="96x96" href="@Model.GameAssetPrefix/img/favicon/favicon-96x96.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="@Model.GameAssetPrefix/img/favicon/favicon-16x16.png">
+    <link rel="manifest" href="@Model.GameAssetPrefix/img/favicon/manifest.json">
+    <meta name="msapplication-TileColor" content="#ffffff">
+    <meta name="msapplication-TileImage" content="@Model.GameAssetPrefix/img/favicon/ms-icon-144x144.png">
+    <meta name="theme-color" content="#ffffff">
+
+</head>
+<body style="background-color:black" class="nocontextmenu">
+
+    <div class="roomTextMode" style="display:none">
+        <div class="textModeGlobalScroll">
+            <div class="textModeLeftBar0">
+                <div class="textModeFraseComposta"></div>
+                <div class="textModeLeftBar"></div>
+            </div>
+
+            <div class="textModeRightBar00">
+            <div class="textVerbiSticky">
+                <div class="textVerbiSticky2">
+                    <div class="textModeIntroAzioniOgggetti azioni" my_transl="azioniPossibili"></div>
+                    <div class="textModeVerbiQuick0">
+                        <div class="textModeVerbiQuick">
+                            <button class="btn btn-default btnTextModeRight btnTextWalk" my_transl="walkUpper"></button>
+
+                            <button class="btn btn-default btnTextModeRight btnTextPickup" my_transl="raccogliPuntini"></button>
+                            <button class="btn btn-default btnTextModeRight btnTextTalk" my_transl="talkUpper"></button>
+                        </div>
+                    </div>
+            <div class="textModeRightBar0">
+
+                <div class="textModeRightBar">
+
+                    <div class="textModeRightBar2">
+
+
+                        <hr class="textModeSepOpz" />
+
+
+                    </div>
+
+
+                </div>
+
+            </div>
+            </div>
+            </div>
+            </div>
+        </div>
+
+        <div class="textoptionsdiary">
+            <button class="btn btn-default btnTextModeRight btnTextDiario" my_transl="diaryUpper"></button>
+            <div class="textSepDiaryOpt"></div>
+            <button class="btn btn-default btnTextModeRight btnTextRicorda" my_transl="remember"></button>
+
+            <div class="textSepDiaryOpt"></div>
+            <button class="btn btn-default btnTextModeRight btnTextOpzioni" my_transl="options"></button>
+        </div>
+
+    </div>
+
+    <div id="roomOuter">
+
+
+        <div class="graphicsAndSidebar">
+            <div id="grafica">
+
+                <div class="divLayersContainer">
+                    <img class="imgGrafica nocontextmenu" src="" />
+                    <div class="fraseParzialeOuter">
+                        <div class="fraseParzialeInner strokeme">
+
+                        </div>
+                    </div>
+                    <div class="contextMenu">
+                        @*qui solo i verbi hardcoded*@
+                        <div class="contextMenuItem ciTalkTo" my_transl="talkToUpper">Parla conxx</div>
+                        <div class="contextMenuItem ciPickUp" my_transl="pickupUpper">Raccoglixx</div>
+                        <div class="contextMenuItem ciUseHere" my_transl="useUpper">Usa quixx</div>
+                        <div class="contextMenuItem ciUseFor" my_transl="useForUpper">Usa perxx</div>
+                        <div class="contextMenuItem ciDeduce" my_transl="deduceUpper">Deducixxx</div>
+                        <div class="contextMenuItem ciHideInside" my_transl="hideInsideUpper">HideInsidexxx</div>
+                        <div class="contextMenuItem ciClimb" my_transl="climbUpper">Climbxxx</div>
+                        <div class="contextMenuItem ciDressUpAs" my_transl="dressUpAsUpper">Dressupasxxx</div>
+                        @*qui verranno aggiunti verbi custom*@
+                    </div>
+                </div>
+
+                <!--<div id="roomTitleOuter">
+                    <div id="roomTitle" class="strokeme"></div>
+                </div>-->
+            </div>
+            <div class="roomAndInv ">
+
+
+                <div class="actionbar"><!--coltello + ...--></div>
+                <div class="btn scrollUp scrollButtonMio">
+                    <i class="fas fa-caret-up"></i>
+                </div>
+
+                <div class="invNewOuter  scrollanteConPulsanti">
+                    <div class="invNew">
+                        <div class="sepRoom titoloRoomObjs scrollingItem"></div>
+                        <div class="contRoomObjs">
+
+                        </div>
+
+
+                        <div class="sepRoom titoloVerbi scrollingItem"></div>
+
+                        <div class="contVerbiInv">
+                            <button class="btn btn-default form-control btnMap btnGroupedRounded btnZeroVerb btnCammina scrollingItem" my_transl="walk">xxxCammina</button>
+                            <!--<button class="btn btn-default btnVerbObject form-control">Raccogli</button>
+                            <button class="btn btn-default btnVerbObject  form-control">Parla</button>
+                            <button class="btn btn-default btnVerbObject  form-control">Entra</button>-->
+                        </div>
+
+
+                        <!--<div class="sepRoom" id="titoloSpostamentiPossibili">Spostamenti possibili:</div>-->
+                        <!--<div class="contUscite">
+
+                        </div>-->
+
+
+                        <div class="sepRoom your_objectives scrollingItem">xxxxHai come obiettivi:</div>
+
+                        <div class="contObiettiviRecap">
+
+                        </div>
+
+
+                        <div class="sepRoom bisognoAiuto scrollingItem">xxxSei bloccato?</div>
+
+                        <div class="contAiuto">
+
+                            <button class="btn btn-default btnVerbObject form-control btnGroupedRounded primoFiglio btn_named_cut_scenes scrollingItem" my_transl="rereadClues">xxRileggi gli indizi</button>
+                            <!--<button class="btn btn-default btnVerbObject form-control btnGroupedRounded " id="btnRiepilogo">Ragiona sugli oggetti</button>-->
+                            <!--<button class="btn btn-default btnVerbObject form-control btnGroupedRounded ultimoFiglio " id="btnChiediAiuto"><span id="spanAiuto">Chiedi aiuto</span></button>-->
+
+                            <button class="btn btn-default btnVerbObject form-control btnGroupedRounded btnApriInv scrollingItem" my_transl="rememberAnObject">xxxRicorda un oggetto</button>
+                        </div>
+
+
+
+                        <div class="sepRoom more scrollingItem" my_transl="other">xxAltro:</div>
+
+
+
+
+
+                        <button class="btn btn-default btnVerbObject form-control btnGroupedRounded primoFiglio btnSalvaPartita0 scrollingItem" my_transl="saveGame">xxSave game</button>
+                        <button class="btn btn-default btnVerbObject form-control btnGroupedRounded btnCaricaPartita0 scrollingItem" my_transl="loadGame">xxLoad game</button>
+                        <button class="btn btn-default btnVerbObject form-control btnGroupedRounded btnOptMio scrollingItem" my_transl="Options">xxxOptions</button>
+
+                        <div class="sepRoom scrollingItem" my_transl="yourIqLevel">xxIl tuo livello di intelligenza attuale è:</div>
+
+                        <div class="livIntelligenza scrollingItem">bla bla bla</div>
+                    </div>
+                </div>
+
+
+                <div class="btn  scrollDown scrollButtonMio">
+
+                    <i class="fas fa-caret-down"></i>
+                </div>
+            </div>
+        </div>
+        <div class="dialogChoiceOuterFullScreen" style="display:none">
+            <div class="dialogCloseOuter"><div class="dialogCloseInner">Chiudi</div></div>
+            <div class="dialogChoicesOuter">
+                <div class="dialogChoiceTemplate">
+                    <div class="dialogIcon"><img class="dialogImg" /></div>
+                    <div class="dialogText">ciao come stai</div>
+                </div>
+
+            </div>
+        </div>
+
+
+        <div class="invBar">
+
+            <div class="containerFixedVerbs">
+
+
+                <div class="walkIcon invIcon btnMap invIconNotObject">
+                    <div class="imgInvOuterGen"><img src="~/@(Model.InventoryIconsPath)/feet.png" class="invImg" /></div>
+                    <div class="selectorIcon" style="display:none"></div>
+                    <div class="invObjectTesto fisso" my_transl="walkUpper">Testo bla bla bla blabla bla blabla bla blabla bla bla ....</div>
+                </div>
+
+                <div class="talkIcon invIcon invIconNotObject">
+                    <div class="imgInvOuterGen"><img src="~/@(Model.InventoryIconsPath)/talk.png" class="invImg" /></div>
+                    <div class="selectorIcon" style="display:none"></div>
+                    <div class="invObjectTesto fisso" my_transl="talkUpper">Testo bla bla bla blabla bla blabla bla blabla bla bla ....</div>
+
+                </div>
+
+                <div class="eyeIcon invIcon invIconNotObject">
+                    <div class="imgInvOuterGen"><img src="~/@(Model.InventoryIconsPath)/eyes.png" class="invImg" /></div>
+                    <div class="selectorIcon" style="display:none"></div>
+                    <div class="invObjectTesto fisso" my_transl="lookatUpper">Testo bla bla bla blabla bla blabla bla blabla bla bla ....</div>
+                </div>
+
+                @*<div class="pickUpIcon invIcon invIconNotObject">
+                        <div class="imgInvOuterGen"><img src="~/@(Model.InventoryIconsPath)/hand.png" class="invImg" /></div>
+                        <div class="selectorIcon" style="display:none"></div>
+                        <div class="invObjectTesto fisso" my_transl="raccogliPuntini">Testo ....</div>
+                    </div>*@
+                @*<div class="optionsIcon invIcon invIconNotObject useIcon">
+                        <div class="imgInvOuterGen"><img src="~/@(Model.InventoryIconsPath)/gear.png" class="invImg" /></div>
+                        <div class="selectorIcon" style="display:none"></div>
+                        <div class="invObjectTesto fisso" my_transl="useUpper">Testo ....</div>
+                    </div>*@
+                @*<div class="deduceIcon invIcon invIconNotObject">
+                        <img src="~/@(Model.InventoryIconsPath)/sherlockhat.png" class="invImg" />
+                        <div class="selectorIcon" style="display:none"></div>
+                        <div class="invObjectTesto fisso" my_transl="deduceUpper">Testo bla bla bla blabla bla blabla bla blabla bla bla ....</div>
+                    </div>*@
+
+
+            </div>
+
+
+
+            @*<div class="invScrollArrowsOuter">
+                        <div class="invScroll invIcon scrollButtonMio scrollUp"><i class="fas fa-caret-up"></i></div>
+                        <div class="invScroll invIcon scrollButtonMio scrollDown"><i class="fas fa-caret-down"></i></div>
+                </div>*@
+            <div class="invContainerInnerJustObjects ">
+                <div class="invScroll invIcon scrollButtonMio scrollLeft"><i class="fas fa-caret-left"></i></div>
+                <div class="invContenitoreOggettiInner">
+
+                    <img src="~/@(Model.InventoryIconsPath)/bersaglio.png" class="imgTarget" />
+                    <img src="~/@(Model.InventoryIconsPath)/exit-icon.png" class="imgTargetExit" />
+                    <img src="~/@(Model.InventoryIconsPath)/exit-icon-down.png" class="imgTargetExitDown" />
+
+                    <div class="invObjTemplate invIcon scrollingItem ">
+                        <img class="imginv" />
+                        <div class="selectorIcon" style="display:none">
+                        </div>
+                        <div class="invObjectTesto">Testo bla bla bla blabla bla blabla bla blabla bla bla ....</div>
+
+                    </div>
+
+
+                </div>
+                <div class="invScroll invIcon scrollButtonMio scrollRight"><i class="fas fa-caret-right"></i></div>
+            </div>
+
+
+            <div class="containerFixedVerbs secondo">
+                <div class="objectivesIcon invIcon invIconNotObject">
+                    <div class="imgInvOuterGen"><img src="~/@(Model.InventoryIconsPath)/notes.png" class="invImg" /></div>
+
+                    <div class="invObjectTesto fisso" my_transl="diaryUpper">Testo ....</div>
+                </div>
+                <div class="optionsIcon invIcon invIconNotObject">
+                    <div class="imgInvOuterGen"><img src="~/@(Model.InventoryIconsPath)/gear.png" class="invImg" /></div>
+
+                    <div class="invObjectTesto fisso" my_transl="options">Testo ....</div>
+                </div>
+            </div>
+
+            </div>
+        </div>
+    </div>
+
+
+    <div id="narBig">
+        <!--questo serve per dire "arrivi qui" e nel contempo far vedere la grafica. serve anche per le scene cutscene con immagine. ma non abusare.-->
+        <!--<div class="arriviInBlaBla">Arrivi nella piazza bla bla bla bla</div>-->
+        <div class="narOuter2">
+            <div class="narOuter">
+                <div id="imgContainerNarBig">
+                    <div class="didascOuter">
+                        <div class="didascNarBig"></div>
+                    </div>
+                    <img id="imgMainNarBig" src="" class="mainImgNarBig " />
+                    <div class="endTitlesContainer">
+                        @*<div class="endTitesItem">@Model.Title</div>
+                            <div class="endTitesItem"></div>
+                            <div class="endTitesItem"></div>
+                            <div class="endTitesItem"></div>
+                            <div class="endTitesItem"></div>
+                            <div class="endTitesItem"></div>
+                            <div class="endTitesItem"></div>
+                            <div class="endTitesItem"></div>
+
+                            <div class="endTitesItem"></div>
+                            <div class="endTitesItem"></div>
+                            <div class="endTitesItem"></div>
+                            <div class="endTitesItem"></div>
+
+                            <div class="endTitesItem">Scritto da the author</div>
+                            <div class="endTitesItem"></div>
+
+                            <div class="endTitesItem"></div>
+                            <div class="endTitesItem"></div>
+                            <div class="endTitesItem"></div>
+                            <div class="endTitesItem"></div><div class="endTitesItem"></div>
+                            <div class="endTitesItem"></div>
+                            <div class="endTitesItem">Beta testing:</div>
+                            <div class="endTitesItem"></div>
+                            <div class="endTitesItem">Tizio</div>
+                            <div class="endTitesItem">Caio</div>
+                            <div class="endTitesItem">Caio</div>
+                            <div class="endTitesItem">Caio</div>
+                            <div class="endTitesItem">Caio</div>
+                            <div class="endTitesItem">Caio</div>
+                            <div class="endTitesItem">Caio</div>
+                            <div class="endTitesItem">Caio</div>
+                            <div class="endTitesItem">Caio</div>
+                            <div class="endTitesItem">Caio</div>
+                            <div class="endTitesItem">Caio</div>
+                            <div class="endTitesItem">Caio</div>
+                            <div class="endTitesItem">Caio</div>
+                            <div class="endTitesItem">Caio</div>
+                            <div class="endTitesItem">Caio</div>
+                            <div class="endTitesItem">Caio</div>
+                            <div class="endTitesItem">Caio</div>
+                            <div class="endTitesItem">Caio</div>
+                            <div class="endTitesItem">Caio</div>
+                            <div class="endTitesItem">Caio</div>*@
+
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!--<div class="maybeSiEspandeVert"></div>-->
+        <div class="containerPulsantiBackNar">
+            <div class="containerPulsantiBackNar2">
+                <button class="btnBackCutScene btnBottomBar btn btn-default"><i class="fas fa-caret-left"></i> <span my_transl="previousLine"></span> </button>
+
+                <button class="btnStopRemembering btnBottomBar  btn btn-default"><i class="fas fa-fast-forward"></i> <span my_transl="skip"></span></button>
+
+                <button class="btnSaveDuringCutscene btnBottomBar btn btn-default"><i class="fas fa-save"></i> <span my_transl="saveGame"></span></button>
+
+                <button class="btnOptionsEndTitles btnBottomBar  btn btn-default"><i class="fas fa-cog"></i> <span my_transl="startNewGame"></span></button>
+            </div>
+        </div>
+    </div>
+
+
+
+
+    <div id="narDialog">
+        <div id="narDialogInner0">
+
+            <div id="narDialogInner2">
+                <div class="divperspingereilrestoGiu"></div>
+                <div id="narDialogInner" class="conPadding">
+
+                    <div id="imgContainer">
+                        <img id="imgMain" src="" class="mainImg " />
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="containerPulsantiBack">
+            <div class="containerPulsantiBack2">
+                <button class="btnBackCutScene btnBottomBar  btn btn-default"><i class="fas fa-caret-left"></i> <span my_transl="previousLine">xxxPrevious line</span> </button>
+
+                <button class="btnStopRemembering  btnBottomBar  btn btn-default"><i class="fas fa-fast-forward"></i> <span my_transl="skip">xxxSkip</span></button>
+
+                <button class="btnSaveDuringCutscene btnBottomBar btn btn-default"><i class="fas fa-save"></i> <span my_transl="saveGame">Salva partita</span></button>
+            </div>
+        </div>
+    </div>
+
+
+
+    <div id="dialogChoices">
+        <!--<div class="dialogChoiceTitle">Parla con Tizio</div>-->
+        <div class="dialogChoice">Scelta 1</div>
+
+    </div>
+
+
+    <!--<div id="verbMenu" style="display:none">
+        <div id="picInVerbMenu"><img class="imgInVerbMenu" src="@Model.GameAssetPrefix/img/" /></div>
+        <div id="selectedObjName">Limone</div>
+        <div class="verbName">Apri</div>
+
+    </div>-->
+
+
+    <div id="waitingServer" style="cursor:wait">
+        <div id="pleaseWait" my_transl="pleaseWaitPuntini"></div>
+    </div>
+
+    <div id="clientDiagnostics" style="display:none; position:fixed; left:8px; right:8px; bottom:8px; z-index:100000; background:#210d0d; color:#ffdede; border:2px solid #e66; border-radius:6px; padding:12px; font-family:monospace; font-size:13px; white-space:pre-wrap; max-height:45vh; overflow:auto; pointer-events:auto; user-select:text; -webkit-user-select:text; -webkit-touch-callout:default;">
+        <div style="font-family:sans-serif; font-weight:bold; margin-bottom:6px;">Diagnostica client — Segusum.WebClient/js/main43.js</div>
+        <div id="clientDiagnosticsText"></div>
+        <button id="clientDiagnosticsReload" type="button" style="margin-top:8px; background:#eeeeee; color:#111111; border:1px solid #777; padding:6px 10px;">Ricarica pagina</button>
+        <button id="clientDiagnosticsCopy" type="button" style="margin-top:8px; background:#eeeeee; color:#111111; border:1px solid #777; padding:6px 10px;">Copia diagnostica</button>
+    </div>
+    <script>
+        (function () {
+            function showFallbackDiagnostic(title, details) {
+                var box = document.getElementById("clientDiagnostics");
+                var text = document.getElementById("clientDiagnosticsText");
+                if (!box || !text) return;
+                text.textContent = "Client JavaScript: Segusum.WebClient/js/main43.js\n\n" + title + "\n\n" + details +
+                    "\n\nURL pagina: " + window.location.href +
+                    "\nUser agent: " + navigator.userAgent;
+                box.style.display = "block";
+            }
+
+            window.addEventListener("error", function (event) {
+                showFallbackDiagnostic("Errore nel caricamento della pagina", JSON.stringify({
+                    message: event.message,
+                    source: event.filename,
+                    line: event.lineno,
+                    column: event.colno
+                }, null, 2));
+            });
+
+            setTimeout(function () {
+                var waiting = document.getElementById("waitingServer");
+                if (waiting && !waiting.classList.contains("nascosto")) {
+                    showFallbackDiagnostic(
+                        "La pagina è ancora in attesa dopo 15 secondi",
+                        "Il JavaScript non ha completato l'inizializzazione oppure una richiesta al server non ha ricevuto risposta."
+                    );
+                }
+            }, 15000);
+        })();
+    </script>
+
+
+    <div id="mapOuterOuter" style="display:none">
+        <div id="divExitMapPicker">
+
+            <div class="mapspiegazOuter">
+                <div class="mapSpiegazInner">bla bla</div>
+            </div>
+            <button id="btnExitMapPicker" class="btn btn-default btnExitMap "><i class="fas fa-times"></i><span class="spanExitMap"> Indietroxxx</span></button>
+        </div>
+        <div id="mapOuter">
+            <div id="mapInner0">
+                <div id="mapInner">
+                    <div id="imgMap" role="img" aria-label="map"></div>
+
+
+                </div>
+            </div>
+
+        </div>
+
+    </div>
+
+    <div class="modal modalInputNew" id="dialogInputText" tabindex="-1" role="dialog" aria-labelledby="myModalLabel">
+        <div class="modalDialogOuter">
+            <div class="modal-dialog" role="document">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true"><i class="fas fa-times"></i></span></button>
+                        <h4 class="modal-title" id="myModalLabel">xxxTitle</h4>
+                    </div>
+                    <div class="modal-body modalExplaInnerGeneric" id="textInputInner">
+
+
+
+                        <div class="composerLower">
+
+
+                            <div class="contieneIntroEText">
+                                <div class="introTextInput primo"></div>
+                                <input type="text" class="form-control" id="myTextInput" autocomplete="off" />
+                            </div>
+
+                            <div class="iconaComposerThinking">
+                                <img <div class="imgThink" aria-hidden="true"></div>
+                            </div>
+                        </div>
+                        <div class="composerMiddle">
+                            <img src="~/@(Model.InventoryIconsPath)/horizLine.png" class="horizline" />
+                        </div>
+
+
+                        <div class="composerFondoBianco">
+
+                            <div class="introTextInput secondo"></div>
+                            <input type="text" class="form-control" id="myTextInput2" autocomplete="off" />
+
+                            <div class="introExplanations"></div>
+                            <div class="containerExplanations">
+
+                                <div class="radio templateRadioExplanation">
+                                    <label>
+                                        <input type="radio" name="explanations" class="radioExplan">
+                                        <span class="testoRadioExplan">Option one is this and that&mdash;be sure to include why it's great</span>
+                                    </label>
+                                </div>
+
+                                <div class="radio templateRadioExplanation">
+                                    <label>
+                                        <input type="radio" name="optionsRadios" id="optionsRadios1" value="option1" checked>
+                                        Option one is this and that&mdash;be sure to include why it's great
+                                    </label>
+                                </div>
+
+
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+
+                        <button type="button" class="btn btn-default" id="cancelTextInput" data-dismiss="modal" my_transl="back">xxxIndietro</button>
+
+                        <button type="button" class="btn btn-primary" id="submitTextInput" my_transl="answer">xxxAvanti</button>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+
+
+    <div class="modal modalInputNew" id="dialogUseFor" tabindex="-1" role="dialog" aria-labelledby="myModalLabelObiettivoExp">
+        <div class="modalDialogOuter">
+            <div class="modal-dialog" role="document">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true"><i class="fas fa-times"></i></span></button>
+                        <h4 class="modal-title" id="myModalLabelObiettivoExp" my_transl="hoUnIdea"></h4>
+                    </div>
+                    <div class="modal-body modalExplaInnerGeneric" id="obiettivoExplanationInner">
+
+
+
+                        <div class="composerLower">
+
+
+                            <div class="contieneIntroEText">
+                                <div class="introTextInput primo"></div>
+                                <select class="selectObiettivo">
+                                </select>
+                            </div>
+
+                            <div class="iconaComposerThinking">
+                                <img <div class="imgThink" aria-hidden="true"></div>
+                            </div>
+                        </div>
+
+                        <div class="composerMiddle">
+                            <img src="~/@(Model.InventoryIconsPath)/horizLine.png" class="horizline" />
+                        </div>
+
+
+                        <div class="composerFondoBianco">
+
+
+                            <div class="introExplanations"></div>
+                            <div class="containerExplanations">
+
+                                <div class="radio templateRadioExplanation">
+                                    <label>
+                                        <input type="radio" name="explanations" class="radioExplan">
+                                        <span class="testoRadioExplan">Option one is this and that&mdash;be sure to include why it's great</span>
+                                    </label>
+                                </div>
+
+
+
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+
+                        <button type="button" class="btn btn-default" id="cancelObiettivoExp" data-dismiss="modal" my_transl="back">xxxIndietro</button>
+
+                        <button type="button" class="btn btn-primary" id="submitUseFor" my_transl="answer">xxxAvanti</button>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+
+    <div class="modal modalConScrollBar" id="textModeRoomTargetsModal" tabindex="-1" role="dialog" aria-labelledby="textModeRoomTargetsTitle">
+        <div class="modalDialogOuter">
+            <div class="modal-dialog" role="document">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Chiudi"><span aria-hidden="true"><i class="fas fa-times"></i></span></button>
+                        <h4 class="modal-title" id="textModeRoomTargetsTitle">Scegli un oggetto della stanza</h4>
+                    </div>
+                    <div class="modal-body textModeRoomTargetsBody">
+                        <div class="textModeRoomTargetsSectionTitle textModeRoomTargetsRoomTitle" my_transl="objectsInRoom"></div>
+                        <div class="textModeRoomTargetsList"></div>
+                        <div class="textModeRoomTargetsSectionTitle textModeRoomTargetsInventoryTitle" my_transl="inv"></div>
+                        <div class="textModeRoomTargetsInventoryList"></div>
+                        <div class="textModeRoomTargetsEmpty" style="display:none">Non ci sono oggetti combinabili nella stanza.</div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal">Chiudi</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <div class="modal modalInputNew" id="dialogIsActually" tabindex="-1" role="dialog" aria-labelledby="titoloIsActually">
+        <div class="modalDialogOuter">
+            <div class="modal-dialog " role="document">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true"><i class="fas fa-times"></i></span></button>
+                        <h4 class="modal-title" id="titoloIsActually" my_transl="hoUnIdea"></h4>
+                    </div>
+                    <div class="modal-body modalExplaInnerGeneric" id="isActuallyInner">
+
+
+
+                        <div class="composerLower">
+
+
+                            <div class="contieneIntroEText">
+                                <div class="introTextInput primo"></div>
+
+                            </div>
+
+                            <div class="iconaComposerThinking">
+                                <img <div class="imgThink" aria-hidden="true"></div>
+                            </div>
+                        </div>
+
+                        <div class="composerMiddle">
+                            <img src="~/@(Model.InventoryIconsPath)/horizLine.png" class="horizline" />
+                        </div>
+
+
+                        <div class="composerFondoBianco">
+
+
+
+                            <div class="containerExplanations level1">
+
+                                <div class="radio templateRadioExplanation">
+                                    <label>
+                                        <input type="radio" name="explanations" class="radioExplan">
+                                        <span class="testoRadioExplan">Option one is this and that&mdash;be sure to include why it's great</span>
+                                    </label>
+                                </div>
+
+
+
+                            </div>
+
+
+                            <div class="containerDropdownIsActually ">
+
+                                <select class="dropdIsActually">
+
+                                    <option class="optIsActually">del mago</option>
+                                    <option class="optIsActually">del drago</option>
+                                </select>
+
+
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+
+                        <button type="button" class="btn btn-default" id="cancelIsActually" data-dismiss="modal" my_transl="back">xxxIndietro</button>
+
+                        <button type="button" class="btn btn-primary" id="submitIsActually" my_transl="answer">xxxAvanti</button>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal modalInputNew" id="dialogChooseExplanation" tabindex="-1" role="dialog" aria-labelledby="myModalLabelExplan">
+        <div class="modalDialogOuter">
+            <div class="modal-dialog" role="document">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true"><i class="fas fa-times"></i></span></button>
+                        <h4 class="modal-title" id="myModalLabelExplan" my_transl="hoUnIdea"></h4>
+                    </div>
+                    <div class="modal-body modalExplaInnerGeneric" id="chooseExplaInner">
+
+
+
+                        <div class="composerLower">
+
+
+                            <div class="contieneIntroEText">
+                                <div class="introHaiScelto" my_transl="haicomposto"></div>
+                                <div class="fraseCheHaiScelto"></div>
+
+                            </div>
+
+                            <div class="iconaComposerThinking">
+                                <img <div class="imgThink" aria-hidden="true"></div>
+                            </div>
+                        </div>
+                        <div class="composerMiddle">
+                            <img src="~/@(Model.InventoryIconsPath)/horizLine.png" class="horizline" />
+                        </div>
+
+
+                        <div class="composerFondoBianco">
+
+
+                            <div class="introExplanations"></div>
+                            <div class="containerExplanations">
+
+                                <div class="radio templateRadioExplanation">
+                                    <label>
+                                        <input type="radio" name="explanations" class="radioExplan">
+                                        <span class="testoRadioExplan">Option one is this and that&mdash;be sure to include why it's great</span>
+                                    </label>
+                                </div>
+
+                                <div class="radio templateRadioExplanation">
+                                    <label>
+                                        <input type="radio" name="optionsRadios" id="optionsRadios1" value="option1" checked>
+                                        Option one is this and that&mdash;be sure to include why it's great
+                                    </label>
+                                </div>
+
+
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+
+                        <button type="button" class="btn btn-default" id="cancelExplanation" data-dismiss="modal" my_transl="back">xxxIndietro</button>
+
+                        <button type="button" class="btn btn-primary" id="submitExplanation" my_transl="answer">xxxAvanti</button>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+
+
+    <div class="modal fullScreenModal " id="sayThatNew" tabindex="-1" role="dialog" aria-labelledby="solve-puzzle-h4">
+        <div class="modalDialogOuter">
+            <div class="modal-dialog" role="document">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true"><i class="fas fa-times"></i></span></button>
+                        <h4 class="modal-title" my_transl="sayThatYouAre">cdd</h4>
+                    </div>
+
+                    <div class="btn scrollUp scrollButtonMio">
+                        <i class="fas fa-caret-up"></i>
+                    </div>
+
+
+
+                    @*<div class="composerUsaPerTitolo" my_transl="sayThatYouAre">sss.</div>*@
+
+
+
+                    <div class="scrollanteConPulsanti scrollingSay">
+                        <div class="sayItemOuter">        <button class="sayItem scrollingItem btn btn-default form-control">Personaggio</button></div>
+                        <div class="sayItemOuter">        <button class="sayItem scrollingItem btn btn-default form-control">Altro personaggio</button></div>
+
+                    </div>
+
+
+
+                    <div class="btn scrollDown scrollButtonMio">
+                        <i class="fas fa-caret-down"></i>
+                    </div>
+
+                    <div class="modal-footer">
+
+
+
+                        <button type="button" class="btn btn-default" data-dismiss="modal" my_transl="back">xxxChiudi</button>
+
+
+
+
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+
+    <div class="modal fullScreenModal sentenceComposerNewClass" id="sentenceComposerNew" tabindex="-1" role="dialog" aria-labelledby="solve-puzzle-h4">
+        <div class="modalDialogOuter">
+            <div class="modal-dialog" role="document">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true"><i class="fas fa-times"></i></span></button>
+                        <h4 class="modal-title" id="solve-puzzle-h4" my_transl="howToUseIt">xxxSolve puzzle</h4>
+                    </div>
+
+                    <div class="bodyNewComposer">
+
+                        <div class="composerUsaPerTitolo">USA personaggio...</div>
+                        <div class="composerLower">
+
+                            <div class="frecceCompSuGiu">
+
+                                <div class="frecciaComposerNew su"><i class="fas fa-caret-up frecciasugiu"></i></div>
+                                <div class="frecciaComposerNew giu"><i class="fas fa-caret-down frecciasugiu"></i></div>
+                            </div>
+
+                            <div class="parteConFrasiIncompletePiuFrecciaOk">
+                                <div class="parteConFrasiIncomplete">
+
+                                    @*<div class="ombraComposer up"></div>
+                                        <div class="ombraComposer down"></div>
+                                        <div class="fraseConBuchi">
+                                            <div class="pezzoNonCliccab pezzoComp">in modo che1</div>
+                                            <div class="pezzoCliccab pezzoComp"></div>
+                                            <div class="pezzoNonCliccab pezzoComp">crede che</div>
+                                            <div class="pezzoCliccab pezzoComp"></div>
+                                            <div class="pezzoNonCliccab pezzoComp">non abbia pagato</div>
+                                        </div>*@
+                                    <div class="fraseConBuchi">
+                                        <div class="pezzoNonCliccab pezzoComp">in modo che2</div>
+                                        <div class="pezzoCliccab pezzoComp"></div>
+                                        <div class="pezzoNonCliccab pezzoComp">crede che</div>
+                                        <div class="pezzoCliccab pezzoComp"></div>
+                                        <div class="pezzoNonCliccab pezzoComp">non abbia pagato</div>
+                                    </div>
+                                    @*<div class="fraseConBuchi">
+                                            <div class="pezzoNonCliccab pezzoComp">in modo che3</div>
+                                            <div class="pezzoCliccab pezzoComp"></div>
+                                            <div class="pezzoNonCliccab pezzoComp">crede che</div>
+                                            <div class="pezzoCliccab pezzoComp"></div>
+                                            <div class="pezzoNonCliccab pezzoComp">non abbia pagato</div>
+                                        </div>
+                                        <div class="fraseConBuchi">
+                                            <div class="pezzoNonCliccab pezzoComp">in modo che4</div>
+                                            <div class="pezzoCliccab pezzoComp"></div>
+                                            <div class="pezzoNonCliccab pezzoComp">crede che</div>
+                                            <div class="pezzoCliccab pezzoComp"></div>
+                                            <div class="pezzoNonCliccab pezzoComp">non abbia pagato</div>
+                                        </div>*@
+                                </div>
+
+                            </div>
+
+
+                            <div class="iconaComposerThinking">
+                                <img <div class="imgThink" aria-hidden="true"></div>
+                            </div>
+                        </div>
+                        <div class="composerMiddle">
+                            <img src="~/@(Model.InventoryIconsPath)/horizLine.png" class="horizline" />
+                        </div>
+                        <div class="composerUpperOUter">
+                            <div class="composerUpper">
+                                <div class="composerUpper2">
+                                    <div class="templateObjectComposerNew"><div class="templateface"><img class="imgfacefiller" /></div> <div class="nomeoggpersonacomp">oggetto1</div></div>
+                                    <div class="templateObjectComposerNew"><div class="templateface"></div> <div class="nomeoggpersonacomp">oggetto2</div></div>
+
+                                    <div class="templateObjectComposerNew"><div class="templateface"></div> <div class="nomeoggpersonacomp">oggetto3</div></div>
+                                    <div class="templateObjectComposerNew"><div class="templateface"></div> <div class="nomeoggpersonacomp">oggetto4</div></div>
+                                    <div class="templateObjectComposerNew"><div class="templateface"></div> <div class="nomeoggpersonacomp">oggetto5</div></div>
+                                    <div class="templateObjectComposerNew"><div class="templateface"></div> <div class="nomeoggpersonacomp">oggetto6</div></div>
+                                    <div class="templateObjectComposerNew"><div class="templateface"></div> <div class="nomeoggpersonacomp">oggetto7</div></div>
+                                    <div class="templateObjectComposerNew"><div class="templateface"></div> <div class="nomeoggpersonacomp">oggetto8</div></div>
+                                    <div class="templateObjectComposerNew"><div class="templateface"></div> <div class="nomeoggpersonacomp">oggetto9</div></div>
+                                    <div class="templateObjectComposerNew"><div class="templateface"></div> <div class="nomeoggpersonacomp">oggetto</div></div>
+                                    <div class="templateObjectComposerNew"><div class="templateface"></div> <div class="nomeoggpersonacomp">oggetto</div></div>
+                                    <div class="templateObjectComposerNew"><div class="templateface"></div> <div class="nomeoggpersonacomp">oggetto</div></div>
+                                    <div class="templateObjectComposerNew"><div class="templateface"></div> <div class="nomeoggpersonacomp">oggetto</div></div>
+                                    <div class="templateObjectComposerNew"><div class="templateface"></div> <div class="nomeoggpersonacomp">oggetto</div></div>
+                                    <div class="templateObjectComposerNew"><div class="templateface"></div> <div class="nomeoggpersonacomp">oggetto</div></div>
+                                    <div class="templateObjectComposerNew"><div class="templateface"></div> <div class="nomeoggpersonacomp">oggetto</div></div>
+                                    <div class="templateObjectComposerNew"><div class="templateface"></div> <div class="nomeoggpersonacomp">oggetto</div></div>
+                                </div>
+                            </div>
+
+                            <div class="btn btn-primary btnComposerAvanti"><img src="@Model.GameAssetPrefix/img/play-icon.png" class="playIconImg" /><img src="@Model.GameAssetPrefix/img/play-icon-disabled.png" class="playIconImgDisabled" /></div>
+                        </div>
+
+
+
+
+
+                    </div>
+                    <div class="modal-footer">
+
+
+
+                        <button type="button" class="btn btn-default" data-dismiss="modal" my_transl="back">xxxChiudi</button>
+
+
+
+
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+
+
+    <div class="modal fullScreenModal" id="sentenceComposer" tabindex="-1" role="dialog" aria-labelledby="solve-puzzle-h4">
+        <div class="modalDialogOuter">
+            <div class="modal-dialog" role="document">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true"><i class="fas fa-times"></i></span></button>
+                        <h4 class="modal-title" id="solve-puzzle-h4" my_transl="solvePuzzle">xxxSolve puzzle</h4>
+                    </div>
+
+                    <div class="bloccoFraseCompostafinoraOuter">
+                        <div class="bloccoObiettivo">
+                            <div class="parSentence titoloPer">PER xxxx, </div>
+
+
+                        </div>
+
+                    </div>
+                    <div class="seNonVedi sopra oggetto" my_transl="chooseObj">Sxxxcegli un oggetto:</div>
+                    <div class="seNonVedi sopra verbo" my_transl="chooseVerb">xxxScegli un'azione:</div>
+                    <div class="seNonVedi sopra continuazione" my_transl="chooseHowtoCont">xxxScegli come continuare la frase:</div>
+                    <div class="seNonVedi sopra spiegaperche" my_transl="explainWhy">xxxSpiega perché questo ha senso:</div>
+                    <div class="seNonVedi sopra spiegaCosaSuccedera" my_transl="explainWhy">Spiega perché questo ha senso:</div>
+                    <div class="btn scrollUp scrollButtonMio">
+                        <i class="fas fa-caret-up"></i>
+                    </div>
+
+                    <div class="scrollbar-outer scrollanteConPulsanti">
+                        <div class="bloccoDaScegliereSentence">
+                            <div class="bloccoDaScegliereSentenceInner">
+                                <div class="btnSceltaSentence btn btn-default form-control templateOggettoPicker scrollingItem">
+                                    <div class="imgOggettoPickerOuter">
+                                        <img class="imgOggettoPicker" />
+                                    </div>
+                                    <div class="testoPickerOuter">
+                                        <div class="testoPickerInner"></div>
+                                    </div>
+                                </div>
+                                <div class="btnSceltaSentence templateOggettoPickerNonClic scrollingItem">
+                                    <div class="imgOggettoPickerOuter">
+                                        <img class="imgOggettoPicker" />
+                                    </div>
+                                    <div class="testoPickerOuter">
+                                        <div class="testoPickerInner"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="btn scrollDown scrollButtonMio">
+                        <i class="fas fa-caret-down"></i>
+                    </div>
+
+
+                    <div class="modal-footer">
+
+                        <button type="button" class="btn btn-default" id="indietroDiUno"><i class="fas fa-caret-left"></i> <span my_transl="backOne">xxxIndietro di uno</span></button>
+
+                        <button type="button" class="btn btn-default" id="cancelSolvePuzzle" data-dismiss="modal" my_transl="close">xxxChiudi</button>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <div class="modal" id="invModal" tabindex="-1" role="dialog" aria-labelledby="inv-h4">
+        <div class="modalDialogOuter">
+            <div class="modal-dialog" role="document">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true"><i class="fas fa-times"></i></span></button>
+                        <h4 class="modal-title" id="inv-h4" my_transl="inv">xxInventario</h4>
+                    </div>
+                    <div class="modal-body" id="invInner">
+                        <div class="bloccoObiettivoInv">
+                            <!--<div class="parSentence titoloPer nobold" my_transl="hereAreTheoBjectswithyou">xxxEcco gli oggetti che porti con te.</div>-->
+                            <div class="parSentence titoloPer nobold" my_transl="youcanclickano">xxPuoi fare clic su un oggetto per ricordare cos'è.</div>
+                        </div>
+
+                        <div class="bloccoDaScegliereInv">
+
+                        </div>
+
+                    </div>
+                    <div class="modal-footer">
+
+
+
+                        <button type="button" class="btn btn-default" data-dismiss="modal" my_transl="close">xxxChiudi</button>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+
+
+
+
+
+
+
+    <div class="modal" id="div_scene_passate_dialog" tabindex="-1" role="dialog" aria-labelledby="myModalLabel">
+        <div class="modalDialogOuter">
+            <div class="modal-dialog" role="document">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true"><i class="fas fa-times"></i></span></button>
+                        <h4 class="modal-title" id="myModalLabel" my_transl="pastScenes">xxxPast scenes</h4>
+                    </div>
+                    <div class="btn scrollUp scrollButtonMio">
+                        <i class="fas fa-caret-up"></i>
+                    </div>
+
+                    <div class="scrollbar-outer scrollanteConPulsanti">
+                        <div id="scene_passate_inner">
+                            <div class="riepilogoSottotit scrollingItem" my_transl="oftencontain">xxxPast scenes often contain clues to move forwardxxx.<!--Le scene passate contengono spesso degli indizi per andare avanti. Attenzione: gli indizi sono detti in modo da non sembrare tali! Rileggi le scene passate con attenzione e forse ti verrà un'idea su cosa fare!--></div>
+                            <hr class="riepilogoSottotitHr scrollingItem" />
+                        </div>
+                    </div>
+                    <div class="btn  scrollDown scrollButtonMio">
+
+                        <i class="fas fa-caret-down"></i>
+                    </div>
+                    <div class="modal-footer">
+
+                        <button type="button" class="btn btn-default" data-dismiss="modal" my_transl="back">xxxIndietro</button>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+
+
+    <div class="modal" id="divSave" tabindex="-1" role="dialog" aria-labelledby="myModalLabel">
+        <div class="modalDialogOuter">
+            <div class="modal-dialog" role="document">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true"><i class="fas fa-times"></i></span></button>
+                        <h4 class="modal-title" id="myModalLabel" my_transl="savegameas">xxxSave game as</h4>
+                    </div>
+                    <div class="modal-body invContentOuter" id="modalBodySave">
+                        <div my_transl="typename">xxxType name:</div>
+                        <input type="text" class="form-control" id="txtSaveGameName" />
+                        <div class="saveGamesExistingTitle" my_transl="existingSavegames"></div>
+                        <div id="saveGamesExistingList" class="saveGamesExistingList"></div>
+                        <div id="saveGameOverwriteNotice" class="saveGameOverwriteNotice" style="display:none"></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-primary" id="btnSalvaConNome" my_transl="save" default_button="true">xxSave</button>
+                        <button type="button" class="btn btn-default" data-dismiss="modal" my_transl="back">xxxBack</button>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <div class="modal" id="divLoadGame" tabindex="-1" role="dialog" aria-labelledby="myModalLabel">
+        <div class="modalDialogOuter">
+            <div class="modal-dialog" role="document">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true"><i class="fas fa-times"></i></span></button>
+                        <h4 class="modal-title" id="myModalLabel" my_transl="loadGame">xxxLoad game</h4>
+                    </div>
+
+                    <div class="btn scrollUp scrollButtonMio">
+                        <i class="fas fa-caret-up"></i>
+                    </div>
+
+
+                    <div class="modal-body invContentOuter scrollanteConPulsanti" id="modalBodyLoad">
+
+                    </div>
+
+                    <div class="btn  scrollDown scrollButtonMio">
+
+                        <i class="fas fa-caret-down"></i>
+                    </div>
+                    <div class="modal-footer">
+
+                        <button type="button" class="btn btn-default" data-dismiss="modal" my_transl="back">xxxBack</button>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+
+
+
+    <!--<div class="modal " id="divObjectivesNotClickable" tabindex="-1" role="dialog" aria-labelledby="myModalLabel">
+        <div class="modalDialogOuter">
+            <div class="modal-dialog" role="document">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true"><i class="fas fa-times"></i></span></button>
+                        <h4 class="modal-title" id="myModalLabel">I tuoi obiettivi attuali</h4>
+                    </div>
+                    <div class="modal-body" id="objectivesContentOuter">
+
+
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal">Indietro</button>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>-->
+
+
+
+
+    <div class="modal modalConScrollBar" id="modalHints" tabindex="-1" role="dialog" aria-labelledby="myModalLabel">
+        <div class="modalDialogOuter">
+            <div class="modal-dialog" role="document">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true"><i class="fas fa-times"></i></span></button>
+                        <h4 class="modal-title" id="myModalLabel" my_transl="hintsystem">xxxhints</h4>
+                    </div>
+                    <div class="modal-body">
+
+                        <div class="preamboloGetHints" my_transl="scegliEnigmaSuCuiHint">xxxperquale</div>
+
+
+                        <div class="modal-body contenitoreHintTitles " id="modalBodyLoad">
+
+                        </div>
+
+
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal" my_transl="back">xxxIndietro</button>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <div class="modal modalConScrollBar" id="modalHintsSingleObjective" tabindex="-1" role="dialog" aria-labelledby="titoloObiettivoScelto">
+        <div class="modalDialogOuter">
+            <div class="modal-dialog" role="document">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true"><i class="fas fa-times"></i></span></button>
+                        <h4 class="modal-title" id="titoloObiettivoScelto">xxxhints</h4>
+                    </div>
+                    <div class="modal-body">
+
+                        @*<div class="hintSceltoTitle" ></div>*@
+
+
+
+                        <div class="modal-body contenitoreHintVisti " id="modalBodyLoad">
+
+
+                        </div>
+
+
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal" my_transl="back">xxxIndietro</button>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+
+
+    <div class="modal modalConScrollBar " id="options" tabindex="-1" role="dialog" aria-labelledby="myModalLabel">
+        <div class="modalDialogOuter">
+            <div class="modal-dialog" role="document">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true"><i class="fas fa-times"></i></span></button>
+                        <h4 class="modal-title" id="myModalLabel" my_transl="options">xxxOptions</h4>
+                    </div>
+                    <div class="modal-body">
+
+                        <div class="form-group" id="btnLoadOuter">
+                            <button id="btnLoadGame0" class="form-control btn btn-default btnOpt " my_transl="loadGame"></button>
+
+                        </div>
+                        <div class="form-group" id="btnSaveOuter">
+                            <button id="btnSaveGame0" class="form-control btn btn-default btnOpt " my_transl="saveGame"></button>
+
+                        </div>
+
+                        <div class="form-group" id="btnRegisterOuter">
+                            <button id="btnRegister0" class="form-control btn btn-default btnOpt " my_transl="register"></button>
+
+                        </div>
+                        <div class="form-group" id="btnLoginOuter">
+                            <button id="btnLogin0" class="form-control btn btn-default btnOpt " my_transl="login"></button>
+
+                        </div>
+
+                        <div class="form-group">
+                            <button id="btnNewGame" class="form-control btn btn-default btnOpt " my_transl="startnewgame"></button>
+
+                        </div>
+
+                        <div class="form-group">
+                            <button id="btnGameMode" class="form-control btn btn-default btnOpt">Modalità: normale</button>
+                        </div>
+
+                        <div class="form-group">
+                            <button id="btnPlayTutorial" class="form-control btn btn-default btnOpt">Gioca tutorial</button>
+                        </div>
+
+
+                        <hr class="hintSeparatorStatic" />
+                        <div class="form-group">
+                            <button id="btnHintSystem" class="form-control btn btn-default btnOpt " my_transl="hintsystem"></button>
+
+                        </div>
+
+                        <hr class="hintSeparatorStatic" />
+                        <div class="form-group" id="btnLogoutOuter">
+                            <button id="btnLogOut0" class="form-control btn btn-default btnOpt " my_transl="logOut"></button>
+
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <a href="#" class="hrefCredits">Credits</a>
+                        <button type="button" class="btn btn-default" data-dismiss="modal" my_transl="back">xxxIndietro</button>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+
+    <!--<div class="modal fade" id="introScreen" tabindex="-1" role="dialog" aria-labelledby="myModalLabel">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true"><i class="fas fa-times"></i></span></button>
+                    <h4 class="modal-title" id="myModalLabel">SETTE STRANIERI SU UN'ISOLA</h4>
+                    <H5 class="modal-title">Interactiva Soft, 2017</H5>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <div class="introPar center " id="iniziaLettura"><button class="btn btn-primary form-control">Inizia la lettura</button></div>
+                    </div>
+
+                    <div class="form-group">
+                        <div class="introPar center " id="iniziaLettura"><button class="btn btn-default form-control">Continua la lettura</button></div>
+
+                    </div>
+
+                    <p>
+                        Questo è un romanzo giallo interattivo. Puoi leggerlo con il tuo smartphone in qualunque occasione leggeresti un romanzo cartaceo: al mare, sul letto, in poltrona, e così via. Ma un romanzo interattivo ha dei <a class="linkIntro">vantaggi</a> rispetto ad un romanzo classico.
+                    </p>
+
+                </div>
+
+            </div>
+        </div>
+    </div>-->
+
+
+
+
+    <div class="modal fade" id="divRegister" tabindex="-1" role="dialog" aria-labelledby="myModalLabel" data-backdrop="static">
+        <div class="modalDialogOuter">
+            <div class="modal-dialog" role="document">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <button type="button" class="close" aria-label="Close"><span aria-hidden="true"><i class="fas fa-times"></i></span></button>
+                        <h4 class="modal-title" id="myModalLabel" my_transl="startNewGame"></h4>
+                    </div>
+                    <div class="modal-body">
+                        <div class="registerLogo">
+                            <div class="registerLogoImg" aria-hidden="true"></div>
+                        </div>
+                        <table class="tableLoginReg">
+                            <tr class="trLoginReg">
+                                <td class="tdLoginReg Left">
+                                    <label for="saveBookmarkEmail" my_transl="chooseAUsername" class="loginUsernameLabelEtc"></label>
+                                </td>
+                                <td class="tdLoginReg Right">
+                                    <input type="text" class="form-control textBoxSide" id="saveBookmarkEmail" placeholder="">
+                                </td>
+
+                            </tr>
+                            <tr class="trLoginReg">
+                                <td class="tdLoginReg Left">
+                                    <label for="saveBookmarkPwd" my_transl="pwd" class="loginUsernameLabelEtc"></label>
+                                </td>
+                                <td class="tdLoginReg Right">
+                                    <input type="password" class="form-control textBoxSide" id="saveBookmarkPwd" placeholder="">
+                                </td>
+
+                            </tr>
+                            <tr class="trLoginReg">
+                                <td class="tdLoginReg Left">
+                                    <label for="saveBookmarkPwd2" my_transl="repeatpwd" class="loginUsernameLabelEtc"></label>
+                                </td>
+                                <td class="tdLoginReg Right">
+                                    <input type="password" class="form-control textBoxSide" id="saveBookmarkPwd2" placeholder="">
+                                </td>
+                            </tr>
+                        </table>
+
+
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal" my_transl="back" id="btnBackRegister">xxxBack</button>
+                        <button type="button" class="btn btn-default" my_transl="loginInstead" id="btnLoginInstead">xxxLoginInstead</button>
+                        <button type="button" class="btn btn-primary" id="btnRegister" my_transl="register" default_button="true">xxxRegister</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+
+
+
+
+    <div class="modal  modalConScrollBar" id="divObjectives" tabindex="-1" role="dialog" aria-labelledby="myModalLabel">
+        <div class="modalDialogOuter">
+            <div class="modal-dialog" role="document">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true"><i class="fas fa-times"></i></span></button>
+                        <h4 class="modal-title" id="myModalLabel" my_transl="thingsToDoAndDiary"></h4>
+                    </div>
+
+
+                    @*<div class="btn scrollUp scrollButtonMio">
+                            <i class="fas fa-caret-up"></i>
+                        </div>*@
+
+                    <div class="modal-body">
+                        <ul class="nav nav-tabs" id="myTabs" role="tablist">
+                            <li role="presentation" class="active">
+                                <a href="#home" id="obiettivi-tab" role="tab" data-toggle="tab" aria-controls="home" aria-expanded="true" my_transl="thingsToDo">__cosedafare</a>
+                            </li>
+                            <li role="presentation">
+                                <a href="#profile" role="tab" id="diario-tab" data-toggle="tab" aria-controls="profile" my_transl="diaryUpper">_diario</a>
+                            </li>
+                            @*<li role="presentation">
+                                    <a href="#brainstorming" role="tab" id="brainstorming-tab" data-toggle="tab" aria-controls="brainstorming" my_transl="yourThoughts">Brainstorming</a>
+                                </li>*@
+                        </ul>
+
+                        <div class="tab-content" id="myTabContent">
+                            <div class="tab-pane fade in active" role="tabpanel" id="home" aria-labelledby="obiettivi-tab">
+                                <div class="obiettiviOuter ">
+
+
+
+                                </div>
+                            </div>
+
+                            <div class="tab-pane fade" role="tabpanel" id="profile" aria-labelledby="diario-tab">
+
+                                <div class="diarioOuter">
+
+                                </div>
+                            </div>
+                            @*<div class="tab-pane fade" role="tabpanel" id="brainstorming" aria-labelledby="brainstorming-tab">
+                                    <button id="btnMescola" my_transl="rimescola" class="btn btn-primary btnMescola"></button>
+                                    <div class="brainstormingOuter">
+
+                                    </div>
+                                </div>*@
+
+                        </div>
+
+                    </div>
+
+                    @*<div class="btn  scrollDown scrollButtonMio">
+
+                            <i class="fas fa-caret-down"></i>
+                        </div>*@
+
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" id="btnChiudiObiettivi" my_transl="close"></button>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+
+
+
+    <div class="modal  modalConScrollBar" id="divModalCredits" tabindex="-1" role="dialog" aria-labelledby="myModalLabelCredits">
+        <div class="modalDialogOuter">
+            <div class="modal-dialog" role="document">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true"><i class="fas fa-times"></i></span></button>
+                        <h4 class="modal-title" id="myModalLabelCredits" my_transl="credits">Credits</h4>
+                    </div>
+
+
+
+                    <div class="modal-body">
+
+
+                        <div class="playtesting">Created by</div>
+                        <div class="thanksItem">the author</div>
+
+
+                        <div class="playtesting">Playtesting</div>
+                        <div class="thanksItem">Zak Phoenix McKracken</div>
+                        <div class="thanksItem">Tasse-tee</div>
+                        <div class="thanksItem">Guga</div>
+                        <div class="thanksItem">Sushi</div>
+                        <div class="thanksItem">Marco Giorgini</div>
+                        <div class="thanksItem">Pietro</div>
+                        <div class="thanksItem">Frenzie</div>
+                        <div class="thanksItem">Gffp</div>
+                        <div class="thanksItem">Bongobrain</div>
+                        <div class="thanksItem">Manuelo</div>
+
+                        <div class="playtesting">English translation</div>
+                        <div class="thanksItem">the author</div>
+                        <div class="thanksItem">Frenzie</div>
+                        <div class="thanksItem">Mathbrush</div>
+                        <div class="thanksItem">Tasse-tee</div>
+                        <div class="thanksItem">Sushi</div>
+
+
+                        <div class="playtesting">Brainstorming</div>
+                        <div class="thanksItem">Lowlevel</div>
+                        <div class="thanksItem">Guga</div>
+                        <div class="thanksItem">Sushi</div>
+                        <div class="thanksItem">Marco Giorgini</div>
+                        <div class="thanksItem">Someone</div>
+                        <div class="thanksItem">Zak Phoenix McKracken</div>
+
+
+                        <div class="playtesting">Inspired by</div>
+                        <div class="thanksItem">classic adventure (classic adventure)</div>
+                        <div class="thanksItem">Eric the Unready (Bob Bates)</div>
+                        <div class="thanksItem">Monkey Island 2 (Ron Gilbert)</div>
+                        <div class="thanksItem">Zak McKracken (David Fox)</div>
+                    </div>
+
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" id="btnChiudiCredits" data-dismiss="modal" my_transl="close"></button>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <!--<div class="modal " id="divSecondObject" tabindex="-1" role="dialog" aria-labelledby="myModalLabel">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+                    <h4 class="modal-title" id="myModalLabel fraseParzialeSenzaSecondObject">Usa per...</h4>
+                </div>
+                <div class="modal-body " id="useForOuter_fraseParzialeSenzaSecondObject">
+
+                    <button class="form-control btn btn-default btnOpt btnGroupedRounded">fare questo...</button>
+
+
+
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-default" id="btnChiudiObiettivi">Annulla</button>
+
+                </div>
+            </div>
+        </div>
+    </div>-->
+
+
+
+    <div class="modal fade" id="divLogin" tabindex="-1" role="dialog" aria-labelledby="myModalLabel" data-backdrop="static">
+        <div class="modalDialogOuter">
+            <div class="modal-dialog" role="document">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <button type="button" class="close" aria-label="Close"><span aria-hidden="true"><i class="fas fa-times"></i></span></button>
+                        <h4 class="modal-title" id="myModalLabel">Login</h4>
+                    </div>
+                    <div class="modal-body">
+                        <div class="registerLogo">
+                            <div class="registerLogoImg" aria-hidden="true"></div>
+                        </div>
+
+
+                        <table class="tableLoginReg">
+                            <tr class="trLoginReg">
+                                <td class="tdLoginReg Left">
+                                    <label for="loginUsername" my_transl="yourUsername" class="loginUsernameLabelEtc"></label>
+                                </td>
+                                <td class="tdLoginReg Right">
+                                    <input type="text" class="form-control" id="loginUsername" placeholder="Username">
+                                </td>
+
+                            </tr>
+                            <tr class="trLoginReg">
+                                <td class="tdLoginReg Left">
+                                    <label for="loginPwd" my_transl="enterPwd" class="loginUsernameLabelEtc">Password</label>
+                                </td>
+                                <td class="tdLoginReg Right">
+                                    <input type="password" class="form-control" id="loginPwd" placeholder="Password">
+                                </td>
+
+                            </tr>
+                        </table>
+
+
+
+
+
+
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal" id="btnBackLogin">Indietro</button>
+                        <button type="button" class="btn btn-default" data-dismiss="modal" my_transl="registerInstead" id="btnRegisterInstead">xxxregister</button>
+                        <button type="button" class="btn btn-primary" id="btnLogin" default_button="true">Login</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+
+
+
+
+</body>
+</html>

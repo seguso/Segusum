@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.AspNetCore.Mvc;
 using Seg;
+using Segusum.WebClient;
 
 namespace Segusum.AspNetCore;
 
@@ -11,6 +12,10 @@ namespace Segusum.AspNetCore;
 public sealed class SegusumOptions
 {
     public Func<string, bool, WorldBase>? WorldFactory { get; set; }
+    public string GameTitle { get; set; } = "Segusum game";
+    public string InventoryIconsPath { get; set; } = "_content/Segusum.WebClient/assets/icons";
+    public string GameAssetPrefix { get; set; } = "";
+    public string Credits { get; set; } = "A game made with Segusum.";
 }
 
 public interface ISegusumWorldFactory
@@ -62,11 +67,12 @@ public static class SegusumServiceCollectionExtensions
 
         services.AddSingleton<ISegusumWorldFactory>(
             new ConfiguredSegusumWorldFactory(options.WorldFactory));
+        services.AddSingleton(options);
         services.AddSingleton<SegusumSessionStore>();
 
         // Il package possiede il controller standard: il gioco non deve
         // conoscere il tipo concreto soltanto per configurare MVC.
-        services.AddControllers()
+        services.AddControllersWithViews()
             .AddNewtonsoftJson()
             .AddApplicationPart(typeof(SegusumController).Assembly);
 
