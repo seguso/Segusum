@@ -60,6 +60,7 @@ public sealed class DslBinder
     private BoundSymbolKind lastKind;
     private string lastCSharpName = "";
     private readonly HashSet<string> currentParameters = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, DslSymbolIdentity> activeDslSymbols = new(StringComparer.Ordinal);
     private readonly HashSet<ISymbol> dslRoomChangedTargets = new(SymbolEqualityComparer.Default);
     private readonly HashSet<DslExpression> nullLiterals = new(ReferenceComparer<DslExpression>.Instance);
     private bool suppressDiagnostics;
@@ -106,7 +107,7 @@ public sealed class DslBinder
     private void AddGlobal(string name, ITypeSymbol? type, SourceSpan span, BoundSymbolKind kind)
     { if (kind == BoundSymbolKind.CycleElementId) { if (!Microsoft.CodeAnalysis.CSharp.SyntaxFacts.IsValidIdentifier(name) || name.Contains('-')) { Report("SEGDSL318", "CycleElementId must be a stable C# identifier and cannot contain '-'.", span); return; } if (cycleElementGlobals.ContainsKey(name)) { Report("SEGDSL314", $"Duplicate CycleElementId '{name}'.", span); return; } if (ResolveCSharpCandidates(name).Count != 0) Report("SEGDSL317", $"CycleElementId '{name}' collides with an existing World member.", span); if (type != null) cycleElementGlobals[name] = type; AddDslIdentity(name, "cycle-element", span); model.References[name] = name; return; } var key = NormalizeKey(name); if (globals.ContainsKey(key)) Report("SEGDSL304", $"Duplicate or normalized-colliding global '{name}'.", span); else if (type != null) { globals[key] = type; globalKinds[key] = kind; model.References[name] = Name(name); } }
     private void BindFunction(FunctionDeclaration f)
-    { var scope = new Dictionary<string, ITypeSymbol>(StringComparer.Ordinal); currentParameters.Clear(); foreach (var p in f.Parameters) { scope[NormalizeKey(p.Name)] = TypeOf(p.Type)!; currentParameters.Add(NormalizeKey(p.Name)); } BindStatements(f.Body, scope, f.ReturnType == null ? null : TypeOf(f.ReturnType)); currentParameters.Clear(); }
+    { var scope = new Dictionary<string, ITypeSymbol>(StringComparer.Ordinal); currentParameters.Clear(); activeDslSymbols.Clear(); foreach (var p in f.Parameters) { scope[NormalizeKey(p.Name)] = TypeOf(p.Type)!; currentParameters.Add(NormalizeKey(p.Name)); AddLocalIdentity(p.Name, "parameter", f.Span); } BindStatements(f.Body, scope, f.ReturnType == null ? null : TypeOf(f.ReturnType)); currentParameters.Clear(); activeDslSymbols.Clear(); }
     private void BindHandler(HandlerDeclaration h)
     {
         var first = BindName(h.First, h.Span); var second = h.Second == null ? null : BindName(h.Second, h.Span); var target = h.Target == null ? null : BindName(h.Target, h.Span);
@@ -131,7 +132,7 @@ public sealed class DslBinder
             switch (statement)
             {
                 case VariableDeclaration v:
-                    var type = BindExpression(v.Initializer, scope); if (type != null) scope[NormalizeKey(v.Name)] = type; break;
+                    var type = BindExpression(v.Initializer, scope); if (type != null) { scope[NormalizeKey(v.Name)] = type; AddLocalIdentity(v.Name, "local", v.Span); } break;
                 case AssignmentStatement a:
                     if (a.Receiver != null)
                     {
@@ -252,11 +253,19 @@ public sealed class DslBinder
         model.DslDefinitions[identity] = span;
         if (!model.DslSymbolsByName.ContainsKey(name)) model.DslSymbolsByName.Add(name, identity);
     }
+    private void AddLocalIdentity(string name, string kind, SourceSpan span)
+    {
+        var identity = new DslSymbolIdentity(name, kind, span);
+        model.DslDefinitions[identity] = span;
+        activeDslSymbols[name] = identity;
+    }
     private void RecordName(string name, SourceSpan span)
     {
         var dslSymbol = lastKind is BoundSymbolKind.CSharpField or BoundSymbolKind.CSharpProperty or BoundSymbolKind.CSharpMethod
             ? null
-            : model.DslSymbolsByName.TryGetValue(name, out var exact) ? exact : model.DslSymbolsByName.Values.FirstOrDefault(x => NormalizeKey(x.Name) == NormalizeKey(name));
+            : activeDslSymbols.TryGetValue(name, out var local) ? local
+            : model.DslSymbolsByName.TryGetValue(name, out var exact) ? exact
+            : model.DslSymbolsByName.Values.FirstOrDefault(x => NormalizeKey(x.Name) == NormalizeKey(name));
         model.SemanticReferenceList.Add(new DslSemanticReference(span.Path, span, lastKind, lastSymbol, dslSymbol, "name"));
     }
     private static string NormalizeSymbolId(string name) => name;

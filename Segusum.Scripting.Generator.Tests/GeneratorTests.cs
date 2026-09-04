@@ -35,7 +35,7 @@ public sealed class GeneratorTests
         Assert.True(referencesToField.Count >= 2, string.Join("; ", referencesToField.Select(x => $"{x.Location.Span.Line}:{x.Location.Span.Column}:{x.DisplayName}:{x.CSharpSymbol?.Name}:{x.DslSymbol?.Name}")));
         Assert.Contains(referencesToField, x => x.Location.Span.Line == 4);
         Assert.Contains(referencesToField, x => x.Location.Span.Line == 6);
-        Assert.DoesNotContain(referencesToField, x => x.Location.Span.Line == 1);
+        Assert.Contains(referencesToField, x => x.Location.Kind == "csharp-definition");
 
         var result = workspace.RenameSymbol("World.cs", 1, csharpColumn, "oliviaNuova");
         Assert.True(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
@@ -81,6 +81,21 @@ public sealed class GeneratorTests
         var functionDefinition = workspace.GetDefinition("Gameplay/Nav.seg", 3, 9);
         Assert.NotNull(functionDefinition);
         Assert.Equal("helper", functionDefinition!.DisplayName);
+    }
+
+    [Fact]
+    public void SemanticWorkspaceKeepsDslLocalIdentityScopedToItsFunction()
+    {
+        const string dslText = "world game\ndef first ret int:\n    var value = 1\n    ret value\nend\ndef second ret int:\n    var value = 2\n    ret value\nend\n";
+        var references = ((string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES"))!.Split(Path.PathSeparator).Select(path => MetadataReference.CreateFromFile(path)).Cast<MetadataReference>().ToList();
+        references.Add(MetadataReference.CreateFromFile(typeof(Seg.WorldBase).Assembly.Location));
+        var tree = CSharpSyntaxTree.ParseText("using Seg; namespace Demo { public partial class Pinco : WorldBase { public Pinco() : base(\"en\") { } } }", path: "World.cs");
+        var compilation = CSharpCompilation.Create("ToolingLocalTest", new[] { tree }, references, new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        var workspace = new DslSemanticWorkspace(compilation, compilation.GetTypeByMetadataName("Demo.Pinco")!, new[] { new DslSource("Gameplay/Locals.seg", dslText) });
+        var result = workspace.RenameSymbol("Gameplay/Locals.seg", 4, 9, "firstValue");
+        Assert.True(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        Assert.Equal(2, result.Edits.Count(x => x.Path == "Gameplay/Locals.seg"));
+        Assert.DoesNotContain(result.Edits, x => x.Span.Line == 7);
     }
     [Fact]
     public void ImplicitInvocationAndRoomChangedAreEmitted()

@@ -3,17 +3,13 @@
     <TargetFramework>netstandard2.0</TargetFramework>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
-    <IsPackable>false</IsPackable>
-    <OutputItemType>Analyzer</OutputItemType>
-    <IncludeBuildOutput>false</IncludeBuildOutput>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Segusum.Scripting.Core\Segusum.Scripting.Core.csproj" />
-    <ProjectReference Include="..\Segusum.Scripting.Semantics\Segusum.Scripting.Semantics.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" PrivateAssets="all" />
-    <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" PrivateAssets="all" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Remove="DslBinder.cs" />
+    <Compile Include="..\Segusum.Scripting.Generator\DslBinder.cs" Link="DslBinder.cs" />
+    <Compile Include="..\Segusum.Scripting.Generator\IsExternalInit.cs" Link="IsExternalInit.cs" />
   </ItemGroup>
 </Project>

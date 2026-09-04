@@ -1,8 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.FindSymbols;
+using Microsoft.CodeAnalysis.Rename;
+using Microsoft.CodeAnalysis.Text;
 using Segusum.Scripting.Core;
 using Segusum.Scripting.Generator;
 
@@ -26,6 +30,8 @@ public sealed class DslSemanticWorkspace
     private readonly BoundModel model;
     private readonly Dictionary<string, DslSource> documents;
     private readonly List<DslDiagnostic> diagnostics = new();
+    private readonly AdhocWorkspace roslynWorkspace;
+    private readonly Solution roslynSolution;
 
     public DslSemanticWorkspace(Compilation compilation, INamedTypeSymbol world, IEnumerable<DslSource> sources)
     {
@@ -42,6 +48,7 @@ public sealed class DslSemanticWorkspace
         var binder = new DslBinder(compilation, world, diagnostics.Add);
         binder.Bind(declarations);
         model = binder.Model;
+        (roslynWorkspace, roslynSolution) = CreateRoslynSolution();
     }
 
     public IReadOnlyList<DslDiagnostic> Diagnostics => diagnostics;
@@ -55,18 +62,25 @@ public sealed class DslSemanticWorkspace
             .ToList();
         if (definition.CSharpSymbol != null)
         {
-            foreach (var tree in compilation.SyntaxTrees)
+            var workspaceSymbol = ResolveWorkspaceSymbol(definition.CSharpSymbol);
+            if (workspaceSymbol != null)
             {
-                var semanticModel = compilation.GetSemanticModel(tree);
-                foreach (var node in tree.GetRoot().DescendantNodes().OfType<IdentifierNameSyntax>())
+                var references = SymbolFinder.FindReferencesAsync(workspaceSymbol, roslynSolution, cancellationToken: CancellationToken.None).GetAwaiter().GetResult();
+                foreach (var reference in references.SelectMany(x => x.Locations))
                 {
-                    var symbol = semanticModel.GetSymbolInfo(node).Symbol;
-                    if (SameSymbol(symbol, definition.CSharpSymbol) && !dsl.Any(x => x.Location.Path == tree.FilePath && x.Location.Span.Start == node.SpanStart))
-                        dsl.Add(new SemanticReference(definition.DisplayName, new SemanticLocation(tree.FilePath, FromLocation(Location.Create(tree, node.Span)), "csharp-reference"), symbol, null));
+                    var location = reference.Location;
+                    var sourcePath = location.SourceTree?.FilePath ?? "";
+                    var semanticReference = new SemanticReference(definition.DisplayName, new SemanticLocation(sourcePath, FromLocation(location), "csharp-reference"), definition.CSharpSymbol, null);
+                    if (!dsl.Any(x => x.Location.Path == sourcePath && x.Location.Span.Start == semanticReference.Location.Span.Start)) dsl.Add(semanticReference);
                 }
             }
+            foreach (var location in definition.CSharpSymbol.Locations.Where(x => x.IsInSource))
+            {
+                var reference = new SemanticReference(definition.DisplayName, new SemanticLocation(location.SourceTree!.FilePath, FromLocation(location), "csharp-definition"), definition.CSharpSymbol, null);
+                if (!dsl.Any(x => x.Location.Path == reference.Location.Path && x.Location.Span.Start == reference.Location.Span.Start)) dsl.Add(reference);
+            }
         }
-        return dsl;
+        return dsl.OrderBy(x => x.Location.Path, StringComparer.Ordinal).ThenBy(x => x.Location.Span.Start).ToArray();
     }
 
     public SemanticDefinition? GetDefinition(string path, int line, int column)
@@ -98,10 +112,21 @@ public sealed class DslSemanticWorkspace
             return new RenameResult(Array.Empty<WorkspaceTextEdit>(), new[] { new DslDiagnostic("SEGTOOL002", "No symbol found at the requested location.", new SourceSpan(path, 0, 0, line, column)) });
         var references = FindReferences(path, line, column);
         var edits = new List<WorkspaceTextEdit>();
-        foreach (var reference in references.Where(x => x.Location.Kind is "name" or "csharp-reference")) edits.Add(new WorkspaceTextEdit(reference.Location.Path, reference.Location.Span, newName));
         if (definition.CSharpSymbol != null)
-            foreach (var location in definition.CSharpSymbol.Locations.Where(x => x.IsInSource)) edits.Add(new WorkspaceTextEdit(location.SourceTree!.FilePath, FromLocation(location), newName));
-        else if (definition.DslSymbol != null && model.DslDefinitions.TryGetValue(definition.DslSymbol, out var declaration)) edits.Add(new WorkspaceTextEdit(declaration.Path, DslNameLocation(definition.DslSymbol.Name, declaration), newName));
+        {
+            var workspaceSymbol = ResolveWorkspaceSymbol(definition.CSharpSymbol);
+            if (workspaceSymbol == null)
+                return new RenameResult(Array.Empty<WorkspaceTextEdit>(), new[] { new DslDiagnostic("SEGTOOL003", "The C# symbol is not available in the Roslyn workspace.", new SourceSpan(path, 0, 0, line, column)) });
+            var renamed = Renamer.RenameSymbolAsync(roslynSolution, workspaceSymbol, newName, null, CancellationToken.None).GetAwaiter().GetResult();
+            foreach (var project in roslynSolution.Projects)
+                foreach (var document in project.Documents)
+                    foreach (var change in document.GetTextChangesAsync(renamed.GetDocument(document.Id)!).GetAwaiter().GetResult())
+                        edits.Add(new WorkspaceTextEdit(document.FilePath ?? "", SourceSpan.From(document.FilePath ?? "", document.GetTextAsync().GetAwaiter().GetResult().ToString(), change.Span.Start, change.Span.Length), newName));
+        }
+        else if (definition.DslSymbol != null && model.DslDefinitions.TryGetValue(definition.DslSymbol, out var declaration))
+            edits.Add(new WorkspaceTextEdit(declaration.Path, DslNameLocation(definition.DslSymbol.Name, declaration), newName));
+        foreach (var reference in references.Where(x => x.Location.Kind == "name"))
+            edits.Add(new WorkspaceTextEdit(reference.Location.Path, reference.Location.Span, newName));
         return new RenameResult(edits.DistinctBy(x => (x.Path, x.Span.Start)).ToArray(), Array.Empty<DslDiagnostic>());
     }
 
@@ -125,6 +150,34 @@ public sealed class DslSemanticWorkspace
             return new SemanticLocation("", new SourceSpan("", 0, 0, 1, 1), "csharp-definition");
         var path = location.SourceTree.FilePath ?? "";
         return new SemanticLocation(path, SourceSpan.From(path, location.SourceTree.GetText().ToString(), location.SourceSpan.Start, location.SourceSpan.Length), "csharp-definition");
+    }
+
+    private (AdhocWorkspace Workspace, Solution Solution) CreateRoslynSolution()
+    {
+        var workspace = new AdhocWorkspace();
+        var projectId = ProjectId.CreateNewId("Segusum.Tooling");
+        var projectInfo = ProjectInfo.Create(projectId, VersionStamp.Create(), "Segusum.Tooling", "Segusum.Tooling", LanguageNames.CSharp,
+            metadataReferences: compilation.References.OfType<PortableExecutableReference>());
+        workspace.AddProject(projectInfo);
+        foreach (var tree in compilation.SyntaxTrees)
+        {
+            var documentId = DocumentId.CreateNewId(projectId, tree.FilePath);
+            var text = TextAndVersion.Create(tree.GetText(), VersionStamp.Create(), tree.FilePath);
+            workspace.AddDocument(DocumentInfo.Create(documentId, System.IO.Path.GetFileName(tree.FilePath), filePath: tree.FilePath, loader: TextLoader.From(text)));
+        }
+        return (workspace, workspace.CurrentSolution);
+    }
+
+    private ISymbol? ResolveWorkspaceSymbol(ISymbol symbol)
+    {
+        var location = symbol.Locations.FirstOrDefault(x => x.IsInSource);
+        if (location?.SourceTree == null) return null;
+        var document = roslynSolution.GetDocumentIdsWithFilePath(location.SourceTree.FilePath).Select(id => roslynSolution.GetDocument(id)).FirstOrDefault(x => x != null);
+        if (document == null) return null;
+        var syntax = document.GetSyntaxRootAsync().GetAwaiter().GetResult();
+        var node = syntax?.FindNode(location.SourceSpan, getInnermostNodeForTie: true);
+        var semanticModel = document.GetSemanticModelAsync().GetAwaiter().GetResult();
+        return node == null || semanticModel == null ? null : semanticModel.GetSymbolInfo(node).Symbol ?? GetDeclaredSymbol(semanticModel, node);
     }
     private static SourceSpan FromLocation(Location location) => SourceSpan.From(location.SourceTree!.FilePath, location.SourceTree.GetText().ToString(), location.SourceSpan.Start, location.SourceSpan.Length);
     private static ISymbol? GetDeclaredSymbol(SemanticModel model, SyntaxNode node)

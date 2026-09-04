@@ -6,7 +6,9 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Segusum.Scripting.Core\Segusum.Scripting.Core.csproj" />
-    <ProjectReference Include="..\Segusum.Scripting.Generator\Segusum.Scripting.Generator.csproj" />
+    <ProjectReference Include="..\Segusum.Scripting.Semantics\Segusum.Scripting.Semantics.csproj" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" />
+    <PackageReference Include="Microsoft.CodeAnalysis.Workspaces.Common" Version="4.14.0" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="4.14.0" />
   </ItemGroup>
 </Project>
