@@ -23,7 +23,7 @@ use token for goal:
 end
 
 var cyc = new-cycle
-add cyc vertical-slice important
+add cyc verticalSlice important
     when it not-seen-recently 5
     active: "Evento del ciclo."
 end

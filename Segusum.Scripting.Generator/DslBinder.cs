@@ -34,6 +34,7 @@ internal sealed class DslBinder
     private readonly INamedTypeSymbol world;
     private readonly Action<DslDiagnostic> report;
     private readonly Dictionary<string, ITypeSymbol> globals = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, ITypeSymbol> cycleElementGlobals = new(StringComparer.Ordinal);
     private readonly Dictionary<string, BoundSymbolKind> globalKinds = new(StringComparer.Ordinal);
     private readonly Dictionary<string, FunctionDeclaration> functions = new(StringComparer.Ordinal);
     private readonly BoundModel model = new();
@@ -47,6 +48,7 @@ internal sealed class DslBinder
     private BoundSymbolKind lastKind;
     private string lastCSharpName = "";
     private readonly HashSet<string> currentParameters = new(StringComparer.Ordinal);
+    private bool suppressDiagnostics;
 
     public BoundModel Model => model;
     public DslBinder(Compilation compilation, INamedTypeSymbol world, Action<DslDiagnostic> report)
@@ -74,11 +76,10 @@ internal sealed class DslBinder
                 case NextCycleDeclaration n: Require(BindExpression(n.Cycle, new()), cycle, n.Cycle.Span, "next requires a Cycle."); break;
             }
         }
-        CheckDuplicateElements(declarations);
         CheckDuplicateCombines(declarations);
     }
     private void AddGlobal(string name, ITypeSymbol? type, SourceSpan span, BoundSymbolKind kind)
-    { var key = NormalizeKey(name); if (globals.ContainsKey(key)) Report("SEGDSL304", $"Duplicate or normalized-colliding global '{name}'.", span); else if (type != null) { if (kind == BoundSymbolKind.CycleElementId && ResolveCSharpCandidates(name).Count != 0) Report("SEGDSL317", $"CycleElementId '{name}' collides with an existing World member.", span); globals[key] = type; globalKinds[key] = kind; model.References[name] = Name(name); } }
+    { if (kind == BoundSymbolKind.CycleElementId) { if (!Microsoft.CodeAnalysis.CSharp.SyntaxFacts.IsValidIdentifier(name) || name.Contains('-')) { Report("SEGDSL318", "CycleElementId must be a stable C# identifier and cannot contain '-'.", span); return; } if (cycleElementGlobals.ContainsKey(name)) { Report("SEGDSL314", $"Duplicate CycleElementId '{name}'.", span); return; } if (ResolveCSharpCandidates(name).Count != 0) Report("SEGDSL317", $"CycleElementId '{name}' collides with an existing World member.", span); if (type != null) cycleElementGlobals[name] = type; model.References[name] = name; return; } var key = NormalizeKey(name); if (globals.ContainsKey(key)) Report("SEGDSL304", $"Duplicate or normalized-colliding global '{name}'.", span); else if (type != null) { globals[key] = type; globalKinds[key] = kind; model.References[name] = Name(name); } }
     private void BindFunction(FunctionDeclaration f)
     { var scope = new Dictionary<string, ITypeSymbol>(StringComparer.Ordinal); currentParameters.Clear(); foreach (var p in f.Parameters) { scope[NormalizeKey(p.Name)] = TypeOf(p.Type)!; currentParameters.Add(NormalizeKey(p.Name)); } BindStatements(f.Body, scope, f.ReturnType == null ? null : TypeOf(f.ReturnType)); currentParameters.Clear(); }
     private void BindHandler(HandlerDeclaration h)
@@ -149,7 +150,7 @@ internal sealed class DslBinder
     }
     private sealed record ParameterInfo(string Name, ITypeSymbol Type, bool Optional, IParameterSymbol? Symbol = null);
     private BoundCall? TryBind(CallExpression call, IMethodSymbol method, Dictionary<string, ITypeSymbol> scope, ITypeSymbol? contextualIt)
-    { var parameters = method.Parameters.Select(p => new ParameterInfo(p.Name, p.Type, p.IsOptional, p)).ToArray(); var bound = BindArgumentList(call, parameters, scope, contextualIt); return bound == null ? null : new BoundCall(method, method.Name, bound, method.ReturnType); }
+    { var parameters = method.Parameters.Select(p => new ParameterInfo(p.Name, p.Type, p.IsOptional, p)).ToArray(); var previous = suppressDiagnostics; suppressDiagnostics = true; try { var bound = BindArgumentList(call, parameters, scope, contextualIt); return bound == null ? null : new BoundCall(method, method.Name, bound, method.ReturnType); } finally { suppressDiagnostics = previous; } }
     private List<BoundArgument>? BindArgumentList(CallExpression call, IReadOnlyList<ParameterInfo> parameters, Dictionary<string, ITypeSymbol> scope, ITypeSymbol? contextualIt = null)
     {
         var result = new List<BoundArgument>(); var used = new HashSet<string>(StringComparer.Ordinal); var namedSeen = false; var positionalIndex = 0;
@@ -168,6 +169,7 @@ internal sealed class DslBinder
         if (name == "it") { lastKind = BoundSymbolKind.ContextualIt; lastCSharpName = "it"; return dateTimeNullable; }
         var key = NormalizeKey(name);
         if (scope != null && scope.TryGetValue(key, out var local)) { lastKind = currentParameters.Contains(key) ? BoundSymbolKind.Parameter : BoundSymbolKind.Local; model.References[name] = Name(name); return local; }
+        if (cycleElementGlobals.TryGetValue(name, out var cycleElement)) { lastKind = BoundSymbolKind.CycleElementId; lastCSharpName = name; model.References[name] = name; return cycleElement; }
         if (globals.TryGetValue(key, out var global)) { lastKind = globalKinds[key]; lastCSharpName = Name(name); model.References[name] = lastCSharpName; return global; }
         var exact = ResolveCSharpMembers(name);
         var candidates = exact.Count != 0 ? exact : DslNames.Candidates(name).Skip(1).SelectMany(AllMembers).ToArray();
@@ -184,9 +186,8 @@ internal sealed class DslBinder
     private ITypeSymbol? TypeOf(string name) => name switch { "int" => compilation.GetSpecialType(SpecialType.System_Int32), "bool" => compilation.GetSpecialType(SpecialType.System_Boolean), "string" => compilation.GetSpecialType(SpecialType.System_String), _ => compilation.GetTypeByMetadataName(name.StartsWith("Seg.", StringComparison.Ordinal) ? name : "Seg." + name) ?? compilation.GetTypeByMetadataName(name) };
     private static string NormalizeKey(string name) => DslNames.Camel(name).ToUpperInvariant();
     private void Require(ITypeSymbol? actual, ITypeSymbol? expected, SourceSpan span, string message) { if (actual == null || expected == null || !Compatible(actual, expected)) Report("SEGDSL313", message, span); }
-    private void Report(string id, string message, SourceSpan span) => report(new DslDiagnostic(id, message, span));
+    private void Report(string id, string message, SourceSpan span) { if (!suppressDiagnostics) report(new DslDiagnostic(id, message, span)); }
     private static string Name(string name) => name.Contains('-') ? DslNames.Camel(name) : name;
-    private void CheckDuplicateElements(IEnumerable<DslDeclaration> declarations) { var ids = declarations.SelectMany(AllElements).GroupBy(x => NormalizeKey(x.Id), StringComparer.Ordinal); foreach (var group in ids.Where(x => x.Count() > 1)) foreach (var item in group.Skip(1)) Report("SEGDSL314", $"Duplicate CycleElementId '{item.Id}'.", item.Span); }
     private void CheckDuplicateCombines(IEnumerable<DslDeclaration> declarations) { var combines = declarations.OfType<HandlerDeclaration>().Where(x => x.Kind == "combine").GroupBy(x => NormalizeKey(x.First) + "\0" + NormalizeKey(x.Second!)); foreach (var group in combines.Where(x => x.Count() > 1)) foreach (var item in group.Skip(1)) Report("SEGDSL315", "Duplicate combine handler.", item.Span); }
     private static IEnumerable<CycleElementDeclaration> FindNestedElements(DslDeclaration declaration) => declaration switch
     { HandlerDeclaration h => FindNested(h.Body), FunctionDeclaration f => FindNested(f.Body), _ => Enumerable.Empty<CycleElementDeclaration>() };
