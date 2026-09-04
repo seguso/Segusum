@@ -195,7 +195,13 @@ internal sealed class DslBinder
     }
     private IReadOnlyList<ISymbol> ResolveCSharpMembers(string name) => AllMembers(name).ToArray();
     private static ITypeSymbol? MemberType(ISymbol symbol) => symbol switch { IFieldSymbol f => f.Type, IPropertySymbol p => p.Type, IMethodSymbol m => m.ReturnType, _ => null };
-    private IEnumerable<ISymbol> AllMembers(string name) { for (INamedTypeSymbol? t = world; t != null; t = t.BaseType) foreach (var member in t.GetMembers(name)) yield return member; }
+    private IEnumerable<ISymbol> AllMembers(string name)
+    {
+        for (INamedTypeSymbol? t = world; t != null; t = t.BaseType)
+            foreach (var member in t.GetMembers(name))
+                if (compilation.IsSymbolAccessibleWithin(member, world))
+                    yield return member;
+    }
     private ITypeSymbol? TypeOf(string name) => name switch { "int" => compilation.GetSpecialType(SpecialType.System_Int32), "bool" => compilation.GetSpecialType(SpecialType.System_Boolean), "string" => compilation.GetSpecialType(SpecialType.System_String), _ => compilation.GetTypeByMetadataName(name.StartsWith("Seg.", StringComparison.Ordinal) ? name : "Seg." + name) ?? compilation.GetTypeByMetadataName(name) };
     private static string NormalizeKey(string name) => DslNames.Camel(name).ToUpperInvariant();
     private void Require(ITypeSymbol? actual, ITypeSymbol? expected, SourceSpan span, string message) { if (actual == null || expected == null || !Compatible(actual, expected)) Report("SEGDSL313", message, span); }

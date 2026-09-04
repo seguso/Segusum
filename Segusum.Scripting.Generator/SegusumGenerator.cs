@@ -128,13 +128,20 @@ public sealed class SegusumGenerator : IIncrementalGenerator
     private static string Emit(DslExpression expression, BoundModel model) => expression switch
     {
         IdentifierExpression i => model.Values.TryGetValue(i, out var value) ? value.CSharpName : Name(i.Name), LiteralExpression l => l.Kind == "cycle" ? "new Cycle()" : l.Value,
-        ParenthesizedExpression p => "(" + Emit(p.Expression, model) + ")", UnaryExpression u => (u.Operator == "not" ? "!" : u.Operator) + Emit(u.Operand, model),
+        ParenthesizedExpression p => "(" + Emit(p.Expression, model) + ")", UnaryExpression u => EmitUnary(u, model),
         BinaryExpression b => Emit(b.Left, model) + " " + (b.Operator == "and" ? "&&" : b.Operator == "or" ? "||" : b.Operator) + " " + Emit(b.Right, model),
         CallExpression c when model.DomainOperations.TryGetValue(c, out var domain) && domain.Kind == BoundDomainOperationKind.NotSeenRecently => Emit(domain.Receiver, model) + ".notSeenRecently(" + Emit(domain.Argument!, model) + ")",
         CallExpression c when model.DomainOperations.TryGetValue(c, out var seen) && seen.Kind == BoundDomainOperationKind.WasSeenAtLeastOnce => "wasSeenAtLeastOnce(" + Emit(seen.Receiver, model) + ")",
         CallExpression c when model.Calls.TryGetValue(c, out var bound) => bound.TargetName + "(" + string.Join(",", bound.Arguments.Select(a => (a.Source.Name == null ? "" : Name(a.ParameterName) + ": ") + Emit(a.Source.Expression, model))) + ")",
         _ => "default"
     };
+    private static string EmitUnary(UnaryExpression expression, BoundModel model)
+    {
+        var operand = Emit(expression.Operand, model);
+        if (expression.Operator == "not" && expression.Operand is BinaryExpression)
+            operand = "(" + operand + ")";
+        return (expression.Operator == "not" ? "!" : expression.Operator) + operand;
+    }
     private static string Name(string name) { var x = name.Contains('-') ? DslNames.Camel(name) : name; return x is "object" or "string" or "int" or "bool" ? "@" + x : x; }
     private static string Type(string type) => type == "int" ? "int" : type == "bool" ? "bool" : type == "string" ? "string" : type == "DateTime" ? "System.DateTime" : type;
     private static IEnumerable<CycleElementDeclaration> AllCycleElements(DslDeclaration declaration) => declaration switch

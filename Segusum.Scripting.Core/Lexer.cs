@@ -20,7 +20,7 @@ public static class DslLexer
    if(c=='"'){i++;while(i<t.Length&&t[i]!='"')i+=t[i]=='\\'&&i+1<t.Length?2:1;if(i>=t.Length){diagnostics.Add(new("SEGDSL100","Unterminated string literal.",SourceSpan.From(source.Path,t,s,1)));break;}i++;r.Add(new(DslTokenKind.String,t.Substring(s,i-s),SourceSpan.From(source.Path,t,s,i-s)));continue;}
    if(char.IsDigit(c)){while(i<t.Length&&(char.IsDigit(t[i])||t[i]=='.'))i++;r.Add(new(DslTokenKind.Number,t.Substring(s,i-s),SourceSpan.From(source.Path,t,s,i-s)));continue;}
    if(char.IsLetter(c)||c=='_'){while(i<t.Length&&(char.IsLetterOrDigit(t[i])||t[i]=='_'||t[i]=='-'))i++;r.Add(new(DslTokenKind.Identifier,t.Substring(s,i-s),SourceSpan.From(source.Path,t,s,i-s)));continue;}
-   var op=c.ToString();i++;if(i<t.Length&&"=+<>".IndexOf(t[i])>=0&&(c=='='||c=='+'||c=='<'||c=='>'))op+=t[i++];r.Add(new(DslTokenKind.Operator,op,SourceSpan.From(source.Path,t,s,i-s)));
+   var op=c.ToString();i++;if(i<t.Length&&"=+<>".IndexOf(t[i])>=0&&(c=='='||c=='+'||c=='<'||c=='>'||c=='!'))op+=t[i++];r.Add(new(DslTokenKind.Operator,op,SourceSpan.From(source.Path,t,s,i-s)));
   }
   r.Add(new(DslTokenKind.EndOfFile,"",SourceSpan.From(source.Path,t,t.Length,0)));return r;
  }

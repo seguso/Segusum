@@ -235,6 +235,60 @@ public NamedCutSceneId ncsMikeStalloneIlBenefattore = null!;
         AssertGeneratedCompilationSucceeds(result);
     }
 
+    [Fact]
+    public void NotPrecedenceIsPreservedInGeneratedCSharp()
+    {
+        var result = Run("var cyc = new-cycle\nadd cyc xww7\n when not it not-seen-recently 5\nend\ndef compare ret bool:\n ret not a == b\nend\ndef compare2 ret bool:\n ret not a != b\nend\ndef compare3 ret bool:\n ret not n < m\nend\ndef seen ret bool:\n ret not xww7 was-seen-at-least-once\nend", "public bool a; public bool b; public int n; public int m;");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL"));
+        var generated = Generated(result);
+        Assert.Contains("return !(a == b);", generated);
+        Assert.Contains("return !(a != b);", generated);
+        Assert.Contains("return !(n < m);", generated);
+        Assert.Contains("!wasSeenAtLeastOnce(xww7)", generated);
+        Assert.Contains("!x.notSeenRecently(5)", generated);
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
+    public void PrivateMemberInTheTargetPartialIsAccessible()
+    {
+        var result = Run("def check ret bool:\n ret ownFlag\nend", "private bool ownFlag;");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL"));
+        Assert.Contains("return ownFlag;", Generated(result));
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
+    public void PrivateBaseMemberIsNotAccessibleButProtectedAndPublicAre()
+    {
+        const string world = "public abstract class BaseWorld : WorldBase { protected BaseWorld() : base(\"en\") { } private bool hiddenBase; protected bool protectedBase; public bool publicBase; } [SegusumWorld(\"game\")] public abstract partial class World : BaseWorld { }";
+        var hidden = RunWithWorld("world game\ndef check ret bool:\n ret hiddenBase\nend", world);
+        Assert.Contains(hidden.Diagnostics, d => d.GetMessage().Contains("Unknown identifier"));
+
+        var accessible = RunWithWorld("world game\ndef check ret bool:\n ret protectedBase and publicBase\nend", world);
+        Assert.DoesNotContain(accessible.Diagnostics, d => d.Id.StartsWith("SEGDSL"));
+        AssertGeneratedCompilationSucceeds(accessible);
+    }
+
+    [Fact]
+    public void InaccessibleExactMemberDoesNotBlockAccessibleNormalizedMember()
+    {
+        const string world = "public abstract class BaseWorld : WorldBase { protected BaseWorld() : base(\"en\") { } private bool fooBar; public bool FooBar; } [SegusumWorld(\"game\")] public abstract partial class World : BaseWorld { }";
+        var result = RunWithWorld("world game\ndef check ret bool:\n ret foo-bar\nend", world);
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL"));
+        Assert.Contains("return FooBar;", Generated(result));
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
+    public void MultipleAccessibleNormalizedMembersRemainAmbiguous()
+    {
+        const string world = "public abstract class BaseWorld : WorldBase { protected BaseWorld() : base(\"en\") { } public bool fooBar; public bool FooBar; } [SegusumWorld(\"game\")] public abstract partial class World : BaseWorld { }";
+        var result = RunWithWorld("world game\ndef check ret bool:\n ret foo-bar\nend", world);
+        Assert.Contains(result.Diagnostics, d => d.GetMessage().Contains("Ambiguous name"));
+        Assert.Empty(result.GeneratedSources);
+    }
+
     private static RunResult Run(string dsl, string additionalMembers = "")
     {
         if (!dsl.StartsWith("world ", StringComparison.Ordinal)) dsl = "world game\n" + dsl;

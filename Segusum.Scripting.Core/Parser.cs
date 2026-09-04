@@ -129,15 +129,28 @@ public static class DslParser
         { var span = Current.Span; if (Current.Kind == DslTokenKind.Identifier && position + 2 < tokens.Count && tokens[position + 1].Kind == DslTokenKind.Colon && tokens[position + 2].Kind != DslTokenKind.NewLine && tokens[position + 2].Kind != DslTokenKind.EndOfFile) { var name = Take().Text; Take(); return new DslArgument(name, Expression(), span); } return new DslArgument(null, Prefix(), span); }
         private DslExpression Expression(int minimumPrecedence = 0)
         {
-            var left = Prefix(); while (true) { ConsumeExpressionContinuation(); var precedence = Precedence(Current.Text); if (precedence <= minimumPrecedence) break; var op = Take().Text; left = new BinaryExpression(op, left, Expression(precedence), left.Span); } return left;
+            var left = Prefix();
+            while (true)
+            {
+                ConsumeExpressionContinuation();
+                var precedence = Precedence(Current.Text);
+                if (precedence <= minimumPrecedence) break;
+                var op = Take().Text;
+                if (IsComparison(op) && ContainsComparison(left))
+                    diagnostics.Add(new DslDiagnostic("SEGDSL105", "Chained comparisons are not supported; use an explicit logical expression.", Current.Span));
+                left = new BinaryExpression(op, left, Expression(precedence), left.Span);
+            }
+            return left;
         }
         private void ConsumeExpressionContinuation()
         { if (Current.Kind != DslTokenKind.NewLine) return; var next = position; while (tokens[next].Kind == DslTokenKind.NewLine) next++; if (Precedence(tokens[next].Text) > 0) while (position < next) Take(); }
-        private static int Precedence(string op) => op switch { "or" => 1, "and" => 2, "==" or "!=" or ">" or ">=" or "<" or "<=" => 3, "+" or "-" => 4, "*" or "/" => 5, _ => 0 };
+        private static int Precedence(string op) => op switch { "or" => 1, "and" => 2, "not" => 3, "==" or "!=" or ">" or ">=" or "<" or "<=" => 4, "+" or "-" => 5, "*" or "/" => 6, _ => 0 };
+        private static bool IsComparison(string op) => op is "==" or "!=" or ">" or ">=" or "<" or "<=";
+        private static bool ContainsComparison(DslExpression expression) => expression is BinaryExpression binary && IsComparison(binary.Operator);
         private DslExpression Prefix()
         {
             while (Current.Kind == DslTokenKind.NewLine) Take(); var span = Current.Span;
-            if (Is("not")) { Take(); return new UnaryExpression("not", Prefix(), span); }
+            if (Is("not")) { Take(); return new UnaryExpression("not", Expression(Precedence("not")), span); }
             if (Is("call")) { Take(); return ParseCallAfterKeyword(span); }
             if (Current.Kind == DslTokenKind.LParen) { Take(); var expression = Expression(); Need(")"); return new ParenthesizedExpression(expression, span); }
             if (Current.Kind == DslTokenKind.String) return new LiteralExpression(Take().Text, "string", span);
