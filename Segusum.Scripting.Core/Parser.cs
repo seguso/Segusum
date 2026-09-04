@@ -123,7 +123,7 @@ public static class DslParser
         private DslExpression ParseCallAfterKeyword(SourceSpan span) { var name = Word(); var args = new List<DslArgument>(); while (CanStartArgument()) args.Add(ParseArgument()); return new CallExpression(name, args, span); }
         private bool CanStartArgument() => Current.Kind is DslTokenKind.Identifier or DslTokenKind.Number or DslTokenKind.String or DslTokenKind.LParen;
         private DslArgument ParseArgument()
-        { var span = Current.Span; if (Current.Kind == DslTokenKind.Identifier && position + 1 < tokens.Count && tokens[position + 1].Kind == DslTokenKind.Colon) { var name = Take().Text; Take(); return new DslArgument(name, Expression(), span); } return new DslArgument(null, Prefix(), span); }
+        { var span = Current.Span; if (Current.Kind == DslTokenKind.Identifier && position + 2 < tokens.Count && tokens[position + 1].Kind == DslTokenKind.Colon && tokens[position + 2].Kind != DslTokenKind.NewLine && tokens[position + 2].Kind != DslTokenKind.EndOfFile) { var name = Take().Text; Take(); return new DslArgument(name, Expression(), span); } return new DslArgument(null, Prefix(), span); }
         private DslExpression Expression(int minimumPrecedence = 0)
         {
             var left = Prefix(); while (true) { ConsumeExpressionContinuation(); var precedence = Precedence(Current.Text); if (precedence <= minimumPrecedence) break; var op = Take().Text; left = new BinaryExpression(op, left, Expression(precedence), left.Span); } return left;

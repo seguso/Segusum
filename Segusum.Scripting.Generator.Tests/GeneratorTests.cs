@@ -6,12 +6,67 @@ using System.IO;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Text;
+using Segusum.Scripting.Core;
 using Segusum.Scripting.Generator;
 
 namespace Segusum.Scripting.Generator.Tests;
 
 public sealed class GeneratorTests
 {
+    private const string MikeAcceptanceDsl = """
+def creaCicloMikeNonRipete ret Cycle:
+    var cyc = new-cycle
+    add cyc cidNonRipete1
+        mikeStallone: "No! Mike Stallone non ripete!"
+        olivia: "Ma che cavolo, Mike Stallone!"
+        mikeStallone: "Voi non capite, bambine! Io sono un eroe leggendario! Ogni pugno che io elargisco è come una piccola poesia! E, come tale, è irripetibile!"
+        camilla: "Tu sei uno psicopatico, Mike Stallone! Fatti curare!"
+    end
+    add cyc cidNonRipete2
+        mikeStallone: "No! Mike Stallone non ripete la stessa impresa due volte!"
+        olivia: "Ma che cavolo, Mike Stallone! Aiutaci!"
+        mikeStallone: "Bambine, voi non capite! Le mie gesta sono uniche e irripetibili!"
+        camilla: "Vai a farti friggere, Mike Stallone!"
+    end
+    ret cyc
+end
+
+use mikeStallone for puAiutareLoScemoDiGuerra:
+    exp exQualcunoRiceveraUnaBottaComeQuellaPrecedente
+    if call namedCutSceneIsSeen ncsMikeStalloneIlBenefattore:
+        olivia: "Mike Stallone! Mi aiuti a far rinsavire lo scemo di guerra dandogli una botta in testa come quella che ha avuto in guerra?"
+        var cyc = call creaCicloMikeNonRipete
+        next cyc
+    else:
+        makes-no-sense
+    end
+end
+""";
+
+    [Fact]
+    public void MikeStalloneAcceptanceCompilesAndBindsRealShape()
+    {
+        var parsed = DslParser.Parse(new DslSource("mike.seg", MikeAcceptanceDsl));
+        Assert.Empty(parsed.Diagnostics);
+        var result = Run(MikeAcceptanceDsl, """
+public Character mikeStallone = null!;
+public Character olivia = null!;
+public Character camilla = null!;
+public Objective puAiutareLoScemoDiGuerra = null!;
+public Explanation exQualcunoRiceveraUnaBottaComeQuellaPrecedente = null!;
+public NamedCutSceneId ncsMikeStalloneIlBenefattore = null!;
+""");
+        Assert.True(result.Diagnostics.Length == 0, string.Join(Environment.NewLine, result.Diagnostics.Select(d => d.ToString())));
+        AssertGeneratedCompilationSucceeds(result);
+        var generated = Generated(result);
+        Assert.Equal(1, Count(generated, "public CycleElemId cidNonRipete1 { get; set; } = new();"));
+        Assert.Equal(1, Count(generated, "public CycleElemId cidNonRipete2 { get; set; } = new();"));
+        Assert.Contains("cyc.addToCycle(cidNonRipete1", generated);
+        Assert.Contains("cyc.addToCycle(cidNonRipete2", generated);
+        Assert.Contains("namedCutSceneIsSeen(ncsMikeStalloneIlBenefattore)", generated);
+        Assert.Contains("execNextInCycle(cyc)", generated);
+        Assert.Contains("e.makesNoSenseAtThisTime = true;", generated);
+    }
     [Fact]
     public void CycleElementIdGeneratesOneExactPropertyAndUsesIt()
     {

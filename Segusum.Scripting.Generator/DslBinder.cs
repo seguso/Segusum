@@ -74,7 +74,7 @@ internal sealed class DslBinder
                 case StateDeclaration s: BindExpression(s.Initializer, new()); break;
                 case FunctionDeclaration f: BindFunction(f); break;
                 case HandlerDeclaration h: BindHandler(h); break;
-                case CycleElementDeclaration c: BindCycle(c.Cycle, c.Repeat, c.Condition, c.Body, c.Span); break;
+                case CycleElementDeclaration c: BindCycle(c.Cycle, c.Repeat, c.Condition, c.Body, c.Span, new()); break;
                 case NextCycleDeclaration n: Require(BindExpression(n.Cycle, new()), cycle, n.Cycle.Span, "next requires a Cycle."); break;
             }
         }
@@ -94,8 +94,8 @@ internal sealed class DslBinder
         if (h.Condition != null) Require(BindExpression(h.Condition, new()), compilation.GetSpecialType(SpecialType.System_Boolean), h.Condition.Span, "possible-when must be bool.");
         BindStatements(h.Body, new(), null);
     }
-    private void BindCycle(string cycleName, string? repeat, DslExpression? condition, IReadOnlyList<DslStatement> body, SourceSpan span)
-    { Require(BindName(cycleName, span), cycle, span, "add requires a Cycle."); if (repeat != null && repeat is not ("once" or "forever")) Report("SEGDSL316", $"Unknown Repeat modifier '{repeat}'.", span); if (condition != null) Require(BindExpression(condition, new(), dateTimeNullable), compilation.GetSpecialType(SpecialType.System_Boolean), condition.Span, "when must be bool."); BindStatements(body, new(), null); }
+    private void BindCycle(string cycleName, string? repeat, DslExpression? condition, IReadOnlyList<DslStatement> body, SourceSpan span, Dictionary<string, ITypeSymbol>? scope = null)
+    { scope ??= new(); Require(BindName(cycleName, span, scope), cycle, span, "add requires a Cycle."); if (repeat != null && repeat is not ("once" or "forever")) Report("SEGDSL316", $"Unknown Repeat modifier '{repeat}'.", span); if (condition != null) Require(BindExpression(condition, scope, dateTimeNullable), compilation.GetSpecialType(SpecialType.System_Boolean), condition.Span, "when must be bool."); BindStatements(body, new(scope), null); }
     private void BindStatements(IEnumerable<DslStatement> statements, Dictionary<string, ITypeSymbol> scope, ITypeSymbol? returnType)
     {
         foreach (var statement in statements)
@@ -109,7 +109,7 @@ internal sealed class DslBinder
                 case ReturnStatement r: Require(BindExpression(r.Expression, scope), returnType, r.Span, "return type mismatch."); break;
                 case CallStatement c: BindExpression(c.Expression, scope); break;
                 case NextCycleStatement n: Require(BindExpression(n.Cycle, scope), cycle, n.Span, "next requires a Cycle."); break;
-                case AddCycleElementStatement a: BindCycle(a.Cycle, a.Repeat, a.Condition, a.Body, a.Span); break;
+                case AddCycleElementStatement a: BindCycle(a.Cycle, a.Repeat, a.Condition, a.Body, a.Span, scope); break;
                 case IfStatement i:
                     foreach (var branch in i.Branches) { Require(BindExpression(branch.Condition, scope), compilation.GetSpecialType(SpecialType.System_Boolean), branch.Condition.Span, "if condition must be bool."); BindStatements(branch.Body, new(scope), returnType); }
                     if (i.ElseBody != null) BindStatements(i.ElseBody, new(scope), returnType); break;
@@ -144,7 +144,8 @@ internal sealed class DslBinder
         if (call.Name == "not-seen-recently") { if (call.Arguments.Count == 2) { var receiver = call.Arguments[0].Expression; Require(BindExpression(receiver, scope, contextualIt), dateTimeNullable, call.Arguments[0].Span, "not-seen-recently receiver must be DateTime?."); Require(BindExpression(call.Arguments[1].Expression, scope), compilation.GetSpecialType(SpecialType.System_Int32), call.Arguments[1].Span, "cooldown must be numeric."); model.DomainOperations[call] = new BoundDomainOperation(BoundDomainOperationKind.NotSeenRecently, receiver, call.Arguments[1].Expression, null); } return compilation.GetSpecialType(SpecialType.System_Boolean); }
         if (call.Name == "was-seen-at-least-once") { if (call.Arguments.Count == 1) { var receiver = call.Arguments[0].Expression; var t = BindExpression(receiver, scope); Require(t, cycleElementId, call.Arguments[0].Span, "was-seen-at-least-once requires CycleElemId."); model.DomainOperations[call] = new BoundDomainOperation(BoundDomainOperationKind.WasSeenAtLeastOnce, receiver, null, null); } return compilation.GetSpecialType(SpecialType.System_Boolean); }
         if (functions.TryGetValue(NormalizeKey(call.Name), out var function)) { var result = BindArgumentList(call, function.Parameters.Select(p => new ParameterInfo(p.Name, TypeOf(p.Type)!, false)).ToArray(), scope, contextualIt); if (result.Call == null) { ReportFailure(call, new[] { result }); return null; } model.Calls[call] = new BoundCall(null, Name(function.Name), result.Call.Arguments, TypeOf(function.ReturnType ?? "void")); return TypeOf(function.ReturnType ?? "void"); }
-        var methods = AllMembers(call.Name).OfType<IMethodSymbol>().Concat(DslNames.Candidates(call.Name).Skip(1).SelectMany(AllMembers).OfType<IMethodSymbol>()).Where(m => NormalizeKey(m.Name) == NormalizeKey(call.Name)).GroupBy(m => m.ToDisplayString()).Select(g => g.First()).ToArray();
+        var exactMethods = AllMembers(call.Name).OfType<IMethodSymbol>().ToArray();
+        var methods = (exactMethods.Length != 0 ? exactMethods : DslNames.Candidates(call.Name).Skip(1).SelectMany(AllMembers).OfType<IMethodSymbol>()).Where(m => NormalizeKey(m.Name) == NormalizeKey(call.Name)).GroupBy(m => m.ToDisplayString()).Select(g => g.First()).ToArray();
         if (methods.Length == 0) { Report("SEGDSL305", $"Unknown function or method '{call.Name}'.", call.Span); return null; }
         var results = methods.Select(m => TryBind(call, m, scope, contextualIt)).ToArray();
         var applicable = results.Where(x => x.Call != null).OrderBy(x => x.Score).ToArray();
