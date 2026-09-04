@@ -1,24 +1,140 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
+
 namespace Segusum.Scripting.Core;
+
 public static class DslParser
 {
- public static (DslDocument Document,IReadOnlyList<DslDiagnostic> Diagnostics) Parse(DslSource s){var d=new List<DslDiagnostic>();var p=new Parser(s,DslLexer.Lex(s,d),d);return(new DslDocument(p.ParseDocument()),d);}
- private sealed class Parser
- {
-  readonly DslSource source;readonly IReadOnlyList<DslToken> tokens;readonly List<DslDiagnostic> diagnostics;int position;
-  public Parser(DslSource s,IReadOnlyList<DslToken> t,List<DslDiagnostic>d){source=s;tokens=t;diagnostics=d;}
-  DslToken Current=>tokens[position];bool Is(string s)=>Current.Text==s;DslToken Take()=>tokens[position++];void Skip(){while(Current.Kind==DslTokenKind.NewLine||Current.Kind==DslTokenKind.Semicolon)Take();}string Word(){if(Current.Kind!=DslTokenKind.Identifier){Error("Expected identifier.");return "_error";}return Take().Text;}void Need(string s){if(Is(s))Take();else Error("Expected '"+s+"'.");}void Error(string s){diagnostics.Add(new("SEGDSL101",s,Current.Span));while(Current.Kind!=DslTokenKind.NewLine&&Current.Kind!=DslTokenKind.Semicolon&&Current.Kind!=DslTokenKind.EndOfFile)Take();}
-  public IReadOnlyList<DslDeclaration> ParseDocument(){var r=new List<DslDeclaration>();Skip();while(Current.Kind!=DslTokenKind.EndOfFile){var s=Current.Span;var w=Word();if(w=="state")r.Add(State(s));else if(w=="def")r.Add(Function(s));else if(w=="combine")r.Add(Handler("combine",s));else if(w=="use")r.Add(Handler("use",s));else if(w=="add")r.Add(Cycle(s));else if(w=="var"){var n=Word();Need("=");Need("new-cycle");r.Add(new CycleDeclaration(n,s));}else if(w=="next")Word();else Error("Unexpected declaration '"+w+"'.");Skip();}return r;}
-  StateDeclaration State(SourceSpan s){var n=Word();Need(":");var ty=Word();Need("=");return new(n,ty,Expression(),s);}
-  FunctionDeclaration Function(SourceSpan s){var n=Word();var p=new List<(string,string)>();while(!Is("ret")&&!Is(":")&&Current.Kind!=DslTokenKind.NewLine){var pn=Word();Need(":");p.Add((pn,Word()));if(Is(","))Take();}string? ret=null;if(Is("ret")){Take();ret=Word();}return new(n,p,ret,Block(),s);}
-  HandlerDeclaration Handler(string kind,SourceSpan s){var first=Word();string? second=null;string? target=null;if(kind=="combine"){Need("with");second=Word();}else if(Is("for")){Take();kind="use-for";target=Word();}else kind="use-here";var b=Block();var phrase=b.OfType<DialogueStatement>().FirstOrDefault(x=>x.Character=="__phrase")?.Text is LiteralExpression l?l.Value:null;var exp=b.OfType<DialogueStatement>().FirstOrDefault(x=>x.Character=="__exp")?.Text is IdentifierExpression e?e.Name:null;var cond=b.OfType<DialogueStatement>().FirstOrDefault(x=>x.Character=="__possible")?.Text;var body=b.Where(x=>x is not DialogueStatement {Character:"__phrase" or "__exp" or "__possible"}).ToArray();return new(kind,first,second,target,phrase,exp,cond,body,s);}
-  CycleElementDeclaration Cycle(SourceSpan s){var c=Word();var id=Word();var im=Is("important");if(im)Take();var b=Block(false);var when=b.OfType<DialogueStatement>().FirstOrDefault(x=>x.Character=="__when")?.Text;return new(c,id,im,when,b.Where(x=>x is not DialogueStatement {Character:"__when"}).ToArray(),s);}
-  IReadOnlyList<DslStatement> Block(bool colon=true){if(colon)Need(":");Skip();var r=new List<DslStatement>();while(!Is("end")&&Current.Kind!=DslTokenKind.EndOfFile){var s=Current.Span;var w=Word();if(w=="if")r.Add(If(s));else if(w=="ret")r.Add(new ReturnStatement(Expression(),s));else if(w=="nar")r.Add(new NarStatement(Expression(),s));else if(w=="call"){position--;r.Add(new CallStatement(Expression(),s));}else if(w=="var"){var n=Word();Need("=");r.Add(new VariableDeclaration(n,Expression(),s));}else if(w=="next")r.Add(new NextCycleStatement(Expression(),s));else if(w=="add")r.Add(Add(s));else if(w=="phrase")r.Add(new DialogueStatement("__phrase",Expression(),s));else if(w=="exp")r.Add(new DialogueStatement("__exp",Expression(),s));else if(w=="possible-when")r.Add(new DialogueStatement("__possible",Expression(),s));else if(w=="when")r.Add(new DialogueStatement("__when",Expression(),s));else if(w=="makes-no-sense")r.Add(new MakesNoSenseStatement(s));else if(w=="finish-game")r.Add(new FinishGameStatement(s));else if(w=="do-not-advance-time")r.Add(new DoNotAdvanceTimeStatement(s));else if(Is(":")){Take();r.Add(new DialogueStatement(w,Expression(),s));}else if(Is("++")){Take();r.Add(new IncrementStatement(w,s));}else if(Is("=")||Is("+=")||Is("-=")){var op=Take().Text;r.Add(new AssignmentStatement(w,op,Expression(),s));}else Error("Unknown statement.");Skip();}Need("end");return r;}
-  AddCycleElementStatement Add(SourceSpan s){var c=Word();var id=Word();var im=Is("important");if(im)Take();return new(c,id,im,null,Block(false),s);}
-  IfStatement If(SourceSpan s){var c=Expression();var b=Block();return new(new[]{(c,b)},null,s);}
-  DslExpression Expression(int min=0){var left=Prefix();while(true){var op=Current.Text;var p=op=="or"?1:op=="and"?2:op is "==" or "!=" or ">" or ">=" or "<" or "<="?3:0;if(p<=min)break;Take();left=new BinaryExpression(op,left,Expression(p),left.Span);}return left;}
-  DslExpression Prefix(){var s=Current.Span;if(Is("not")){Take();return new UnaryExpression("not",Prefix(),s);}if(Is("call")){Take();var n=Word();var a=new List<DslArgument>();while(Current.Kind==DslTokenKind.Identifier||Current.Kind==DslTokenKind.Number||Current.Kind==DslTokenKind.String||Current.Kind==DslTokenKind.LParen){var q=Current.Span;a.Add(new(null,Prefix(),q));}return new CallExpression(n,a,s);}if(Current.Kind==DslTokenKind.LParen){Take();var e=Expression();Need(")");return new ParenthesizedExpression(e,s);}if(Current.Kind==DslTokenKind.String)return new LiteralExpression(Take().Text,"string",s);if(Current.Kind==DslTokenKind.Number)return new LiteralExpression(Take().Text,"number",s);var id=new IdentifierExpression(Word(),s);if(Is("not-seen-recently")){Take();return new CallExpression("not-seen-recently",new[]{new DslArgument(null,id,s),new DslArgument(null,Prefix(),Current.Span)},s);}return id;}
- }
+    public static (DslDocument Document, IReadOnlyList<DslDiagnostic> Diagnostics) Parse(DslSource source)
+    {
+        var diagnostics = new List<DslDiagnostic>();
+        var parser = new Parser(DslLexer.Lex(source, diagnostics), diagnostics);
+        return (new DslDocument(parser.ParseDocument()), diagnostics);
+    }
+
+    private sealed class Parser
+    {
+        private readonly IReadOnlyList<DslToken> tokens;
+        private readonly List<DslDiagnostic> diagnostics;
+        private int position;
+        public Parser(IReadOnlyList<DslToken> tokens, List<DslDiagnostic> diagnostics) { this.tokens = tokens; this.diagnostics = diagnostics; }
+        private DslToken Current => tokens[position];
+        private bool Is(string text) => Current.Text == text;
+        private DslToken Take() => tokens[position++];
+        private void SkipTerminators() { while (Current.Kind is DslTokenKind.NewLine or DslTokenKind.Semicolon) Take(); }
+        private void Need(string text) { if (Is(text)) Take(); else Error($"Expected '{text}'."); }
+        private string Word() { if (Current.Kind != DslTokenKind.Identifier) { Error("Expected identifier."); return "_error"; } return Take().Text; }
+        private void Error(string message) => diagnostics.Add(new DslDiagnostic("SEGDSL101", message, Current.Span));
+        private void RecoverLine() { while (Current.Kind is not (DslTokenKind.NewLine or DslTokenKind.Semicolon or DslTokenKind.EndOfFile)) Take(); }
+
+        public IReadOnlyList<DslDeclaration> ParseDocument()
+        {
+            var result = new List<DslDeclaration>(); SkipTerminators();
+            while (Current.Kind != DslTokenKind.EndOfFile)
+            {
+                var span = Current.Span; var keyword = Word();
+                switch (keyword)
+                {
+                    case "state": result.Add(ParseState(span)); break;
+                    case "def": result.Add(ParseFunction(span)); break;
+                    case "combine": result.Add(ParseHandler("combine", span)); break;
+                    case "use": result.Add(ParseHandler("use", span)); break;
+                    case "add": result.Add(ParseCycleElement(span)); break;
+                    case "var": { var name = Word(); Need("="); Need("new-cycle"); result.Add(new CycleDeclaration(name, span)); break; }
+                    case "next": result.Add(new NextCycleDeclaration(Expression(), span)); break;
+                    default: Error($"Unexpected declaration '{keyword}'."); RecoverLine(); break;
+                }
+                SkipTerminators();
+            }
+            return result;
+        }
+        private StateDeclaration ParseState(SourceSpan span) { var name = Word(); Need(":"); var type = Word(); Need("="); return new(name, type, Expression(), span); }
+        private FunctionDeclaration ParseFunction(SourceSpan span)
+        {
+            var name = Word(); var parameters = new List<(string Name, string Type)>();
+            while (!Is("ret") && !Is(":") && Current.Kind != DslTokenKind.NewLine && Current.Kind != DslTokenKind.EndOfFile)
+            { var parameter = Word(); Need(":"); parameters.Add((parameter, Word())); if (Is(",")) Take(); }
+            string? returnType = null; if (Is("ret")) { Take(); returnType = Word(); }
+            return new(name, parameters, returnType, ParseBody(true), span);
+        }
+        private HandlerDeclaration ParseHandler(string kind, SourceSpan span)
+        {
+            var first = Word(); string? second = null; string? target = null;
+            if (kind == "combine") { Need("with"); second = Word(); }
+            else if (Is("for")) { Take(); kind = "use-for"; target = Word(); }
+            else { Need("here"); kind = "use-here"; }
+            Need(":"); SkipTerminators(); DslExpression? phrase = null, explanation = null, condition = null; var body = new List<DslStatement>();
+            while (!Is("end") && Current.Kind != DslTokenKind.EndOfFile)
+            { var s = Current.Span; var w = Word(); if (w == "phrase") phrase = Expression(); else if (w == "exp") explanation = Expression(); else if (w == "possible-when") condition = Expression(); else body.Add(ParseStatement(w, s)); SkipTerminators(); }
+            Need("end"); return new(kind, first, second, target, phrase, explanation, condition, body, span);
+        }
+        private CycleElementDeclaration ParseCycleElement(SourceSpan span)
+        { var cycle = Word(); var id = Word(); var important = Is("important"); if (important) Take(); var x = ParseBlockWithClause("when"); return new(cycle, id, important, x.Condition, x.Body, span); }
+        private AddCycleElementStatement ParseAdd(SourceSpan span)
+        { var cycle = Word(); var id = Word(); var important = Is("important"); if (important) Take(); var x = ParseBlockWithClause("when"); return new(cycle, id, important, x.Condition, x.Body, span); }
+        private (DslExpression? Condition, IReadOnlyList<DslStatement> Body) ParseBlockWithClause(string clause)
+        {
+            SkipTerminators(); DslExpression? condition = null; var body = new List<DslStatement>();
+            while (!Is("end") && Current.Kind != DslTokenKind.EndOfFile)
+            { var s = Current.Span; var w = Word(); if (w == clause) condition = Expression(); else body.Add(ParseStatement(w, s)); SkipTerminators(); }
+            Need("end"); return (condition, body);
+        }
+        private IReadOnlyList<DslStatement> ParseBody(bool colon)
+        {
+            if (colon) Need(":"); SkipTerminators(); var body = new List<DslStatement>();
+            while (!Is("end") && Current.Kind != DslTokenKind.EndOfFile) { var s = Current.Span; body.Add(ParseStatement(Word(), s)); SkipTerminators(); }
+            Need("end"); return body;
+        }
+        private DslStatement ParseStatement(string keyword, SourceSpan span)
+        {
+            switch (keyword)
+            {
+                case "if": return ParseIf(span); case "ret": return new ReturnStatement(Expression(), span); case "nar": return new NarStatement(Expression(), span);
+                case "nar-room": return new NarRoomStatement(Expression(), span); case "call": return new CallStatement(ParseCallAfterKeyword(span), span);
+                case "var": { var name = Word(); Need("="); return new VariableDeclaration(name, Expression(), span); }
+                case "next": return new NextCycleStatement(Expression(), span); case "add": return ParseAdd(span);
+                case "makes-no-sense": return new MakesNoSenseStatement(span); case "finish-game": return new FinishGameStatement(span); case "do-not-advance-time": return new DoNotAdvanceTimeStatement(span);
+                default:
+                    if (Is(":")) { Take(); return new DialogueStatement(keyword, Expression(), span); }
+                    if (Is("++")) { Take(); return new IncrementStatement(keyword, span); }
+                    if (Is("=") || Is("+=") || Is("-=")) { var op = Take().Text; return new AssignmentStatement(keyword, op, Expression(), span); }
+                    Error($"Unknown statement '{keyword}'."); RecoverLine(); return new CallStatement(new IdentifierExpression("_error", span), span);
+            }
+        }
+        private IfStatement ParseIf(SourceSpan span)
+        {
+            var branches = new List<(DslExpression Condition, IReadOnlyList<DslStatement> Body)>(); var condition = Expression(); Need(":"); branches.Add((condition, ParseUntilBranchBoundary())); IReadOnlyList<DslStatement>? otherwise = null;
+            while (Is("elif")) { Take(); var c = Expression(); Need(":"); branches.Add((c, ParseUntilBranchBoundary())); }
+            if (Is("else")) { Take(); Need(":"); otherwise = ParseUntilEnd(); }
+            Need("end"); return new(branches, otherwise, span);
+        }
+        private IReadOnlyList<DslStatement> ParseUntilBranchBoundary()
+        { SkipTerminators(); var body = new List<DslStatement>(); while (!Is("elif") && !Is("else") && !Is("end") && Current.Kind != DslTokenKind.EndOfFile) { var s = Current.Span; body.Add(ParseStatement(Word(), s)); SkipTerminators(); } return body; }
+        private IReadOnlyList<DslStatement> ParseUntilEnd()
+        { SkipTerminators(); var body = new List<DslStatement>(); while (!Is("end") && Current.Kind != DslTokenKind.EndOfFile) { var s = Current.Span; body.Add(ParseStatement(Word(), s)); SkipTerminators(); } return body; }
+        private DslExpression ParseCallAfterKeyword(SourceSpan span) { var name = Word(); var args = new List<DslArgument>(); while (CanStartArgument()) args.Add(ParseArgument()); return new CallExpression(name, args, span); }
+        private bool CanStartArgument() => Current.Kind is DslTokenKind.Identifier or DslTokenKind.Number or DslTokenKind.String or DslTokenKind.LParen;
+        private DslArgument ParseArgument()
+        { var span = Current.Span; if (Current.Kind == DslTokenKind.Identifier && position + 1 < tokens.Count && tokens[position + 1].Kind == DslTokenKind.Colon) { var name = Take().Text; Take(); return new DslArgument(name, Expression(), span); } return new DslArgument(null, Prefix(), span); }
+        private DslExpression Expression(int minimumPrecedence = 0)
+        {
+            var left = Prefix(); while (true) { ConsumeExpressionContinuation(); var precedence = Precedence(Current.Text); if (precedence <= minimumPrecedence) break; var op = Take().Text; left = new BinaryExpression(op, left, Expression(precedence), left.Span); } return left;
+        }
+        private void ConsumeExpressionContinuation()
+        { if (Current.Kind != DslTokenKind.NewLine) return; var next = position; while (tokens[next].Kind == DslTokenKind.NewLine) next++; if (Precedence(tokens[next].Text) > 0) while (position < next) Take(); }
+        private static int Precedence(string op) => op switch { "or" => 1, "and" => 2, "==" or "!=" or ">" or ">=" or "<" or "<=" => 3, "+" or "-" => 4, "*" or "/" => 5, _ => 0 };
+        private DslExpression Prefix()
+        {
+            while (Current.Kind == DslTokenKind.NewLine) Take(); var span = Current.Span;
+            if (Is("not")) { Take(); return new UnaryExpression("not", Prefix(), span); }
+            if (Is("call")) { Take(); return ParseCallAfterKeyword(span); }
+            if (Current.Kind == DslTokenKind.LParen) { Take(); var expression = Expression(); Need(")"); return new ParenthesizedExpression(expression, span); }
+            if (Current.Kind == DslTokenKind.String) return new LiteralExpression(Take().Text, "string", span);
+            if (Current.Kind == DslTokenKind.Number) return new LiteralExpression(Take().Text, "number", span);
+            var identifier = new IdentifierExpression(Word(), span);
+            if (Is("not-seen-recently")) { Take(); return new CallExpression("not-seen-recently", new[] { new DslArgument(null, identifier, span), new DslArgument(null, Prefix(), Current.Span) }, span); }
+            if (Is("was-seen-at-least-once")) { Take(); return new CallExpression("was-seen-at-least-once", new[] { new DslArgument(null, identifier, span) }, span); }
+            return identifier;
+        }
+    }
 }

@@ -12,8 +12,9 @@ public abstract record DslNode(SourceSpan Span);
 public abstract record DslDeclaration(SourceSpan Span) : DslNode(Span);
 public sealed record StateDeclaration(string Name,string Type,DslExpression Initializer,SourceSpan Span) : DslDeclaration(Span);
 public sealed record FunctionDeclaration(string Name,IReadOnlyList<(string Name,string Type)> Parameters,string? ReturnType,IReadOnlyList<DslStatement> Body,SourceSpan Span) : DslDeclaration(Span);
-public sealed record HandlerDeclaration(string Kind,string First,string? Second,string? Target,string? Phrase,string? Explanation,DslExpression? Condition,IReadOnlyList<DslStatement> Body,SourceSpan Span) : DslDeclaration(Span);
+public sealed record HandlerDeclaration(string Kind,string First,string? Second,string? Target,DslExpression? Phrase,DslExpression? Explanation,DslExpression? Condition,IReadOnlyList<DslStatement> Body,SourceSpan Span) : DslDeclaration(Span);
 public sealed record CycleDeclaration(string Variable,SourceSpan Span) : DslDeclaration(Span);
+public sealed record NextCycleDeclaration(DslExpression Cycle,SourceSpan Span) : DslDeclaration(Span);
 public sealed record CycleElementDeclaration(string Cycle,string Id,bool Important,DslExpression? Condition,IReadOnlyList<DslStatement> Body,SourceSpan Span) : DslDeclaration(Span);
 public sealed record DslDocument(IReadOnlyList<DslDeclaration> Declarations);
 public abstract record DslStatement(SourceSpan Span) : DslNode(Span);
@@ -24,6 +25,7 @@ public sealed record CallStatement(DslExpression Expression,SourceSpan Span) : D
 public sealed record ReturnStatement(DslExpression Expression,SourceSpan Span) : DslStatement(Span);
 public sealed record IfStatement(IReadOnlyList<(DslExpression Condition,IReadOnlyList<DslStatement> Body)> Branches,IReadOnlyList<DslStatement>? ElseBody,SourceSpan Span) : DslStatement(Span);
 public sealed record NarStatement(DslExpression Text,SourceSpan Span) : DslStatement(Span);
+public sealed record NarRoomStatement(DslExpression Text,SourceSpan Span) : DslStatement(Span);
 public sealed record DialogueStatement(string Character,DslExpression Text,SourceSpan Span) : DslStatement(Span);
 public sealed record NextCycleStatement(DslExpression Cycle,SourceSpan Span) : DslStatement(Span);
 public sealed record AddCycleElementStatement(string Cycle,string Id,bool Important,DslExpression? Condition,IReadOnlyList<DslStatement> Body,SourceSpan Span) : DslStatement(Span);
