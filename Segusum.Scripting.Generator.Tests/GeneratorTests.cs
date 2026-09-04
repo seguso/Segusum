@@ -8,11 +8,80 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Text;
 using Segusum.Scripting.Core;
 using Segusum.Scripting.Generator;
+using Segusum.Scripting.Tooling;
 
 namespace Segusum.Scripting.Generator.Tests;
 
 public sealed class GeneratorTests
 {
+    [Fact]
+    public void SemanticWorkspaceRenamesCSharpSymbolAndBoundDslReferencesOnly()
+    {
+        const string worldText = "using Seg; namespace Demo { public partial class Pinco : WorldBase { public Pinco() : base(\"en\") { } public Character olivia = null!; public Character camilla = null!; } }";
+        const string dslText = "world game\nuse olivia here:\n\n    olivia: A raw string mentioning olivia must remain.\n\n    if olivia.isHere:\n        camilla: Ti vedo.\n    end\nend\n";
+        var references = ((string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES"))!.Split(Path.PathSeparator).Select(path => MetadataReference.CreateFromFile(path)).Cast<MetadataReference>().ToList();
+        references.Add(MetadataReference.CreateFromFile(typeof(Seg.WorldBase).Assembly.Location));
+        var tree = CSharpSyntaxTree.ParseText(worldText, path: "World.cs");
+        var compilation = CSharpCompilation.Create("ToolingTest", new[] { tree }, references, new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        var world = compilation.GetTypeByMetadataName("Demo.Pinco")!;
+        var workspace = new DslSemanticWorkspace(compilation, world, new[] { new DslSource("Gameplay/Test.seg", dslText) });
+        Assert.DoesNotContain(workspace.Diagnostics, d => d.Id.StartsWith("SEGDSL", StringComparison.Ordinal));
+
+        var csharpColumn = worldText.IndexOf("olivia", StringComparison.Ordinal) + 1;
+        var dslDefinition = workspace.GetDefinition("World.cs", 1, csharpColumn);
+        Assert.NotNull(dslDefinition);
+        Assert.NotNull(dslDefinition!.CSharpSymbol);
+        var referencesToField = workspace.FindReferences("World.cs", 1, csharpColumn);
+        Assert.True(referencesToField.Count >= 2, string.Join("; ", referencesToField.Select(x => $"{x.Location.Span.Line}:{x.Location.Span.Column}:{x.DisplayName}:{x.CSharpSymbol?.Name}:{x.DslSymbol?.Name}")));
+        Assert.Contains(referencesToField, x => x.Location.Span.Line == 4);
+        Assert.Contains(referencesToField, x => x.Location.Span.Line == 6);
+        Assert.DoesNotContain(referencesToField, x => x.Location.Span.Line == 1);
+
+        var result = workspace.RenameSymbol("World.cs", 1, csharpColumn, "oliviaNuova");
+        Assert.True(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        Assert.Contains(result.Edits, x => x.Path == "World.cs");
+        Assert.Contains(result.Edits, x => x.Path == "Gameplay/Test.seg" && x.Span.Line == 4);
+        Assert.Contains(result.Edits, x => x.Path == "Gameplay/Test.seg" && x.Span.Line == 6);
+        Assert.DoesNotContain(result.Edits, x => x.Path == "Gameplay/Test.seg" && x.Span.Line == 4 && x.NewText == "oliviaNuova" && x.Span.Length > "olivia".Length);
+    }
+
+    [Fact]
+    public void SemanticWorkspaceRenamesDslFunctionBySemanticReferences()
+    {
+        const string dslText = "world game\ndef helper ret bool:\n    ret true\nend\ndef caller ret bool:\n    ret helper\nend\n";
+        var references = ((string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES"))!.Split(Path.PathSeparator).Select(path => MetadataReference.CreateFromFile(path)).Cast<MetadataReference>().ToList();
+        references.Add(MetadataReference.CreateFromFile(typeof(Seg.WorldBase).Assembly.Location));
+        var tree = CSharpSyntaxTree.ParseText("using Seg; namespace Demo { public partial class Pinco : WorldBase { public Pinco() : base(\"en\") { } } }", path: "World.cs");
+        var compilation = CSharpCompilation.Create("ToolingDslTest", new[] { tree }, references, new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        var workspace = new DslSemanticWorkspace(compilation, compilation.GetTypeByMetadataName("Demo.Pinco")!, new[] { new DslSource("Gameplay/Functions.seg", dslText) });
+        Assert.DoesNotContain(workspace.Diagnostics, d => d.Id.StartsWith("SEGDSL", StringComparison.Ordinal));
+        var result = workspace.RenameSymbol("Gameplay/Functions.seg", 6, 10, "helperNuovo");
+        Assert.True(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        Assert.Contains(result.Edits, x => x.Path == "Gameplay/Functions.seg" && x.NewText == "helperNuovo");
+    }
+
+    [Fact]
+    public void SemanticWorkspaceProvidesDefinitionReferencesAndCompletions()
+    {
+        const string worldText = "using Seg; namespace Demo { public partial class Pinco : WorldBase { public Pinco() : base(\"en\") { } public Character olivia = null!; public bool helper() => true; } }";
+        const string dslText = "world game\ndef localHelper ret bool:\n    ret helper\nend\nuse olivia here:\n    if olivia.isHere:\n        olivia: Ciao\n    end\nend\n";
+        var references = ((string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES"))!.Split(Path.PathSeparator).Select(path => MetadataReference.CreateFromFile(path)).Cast<MetadataReference>().ToList();
+        references.Add(MetadataReference.CreateFromFile(typeof(Seg.WorldBase).Assembly.Location));
+        var tree = CSharpSyntaxTree.ParseText(worldText, path: "World.cs");
+        var compilation = CSharpCompilation.Create("ToolingNavigationTest", new[] { tree }, references, new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        var workspace = new DslSemanticWorkspace(compilation, compilation.GetTypeByMetadataName("Demo.Pinco")!, new[] { new DslSource("Gameplay/Nav.seg", dslText) });
+
+        var definition = workspace.GetDefinition("Gameplay/Nav.seg", 6, 8);
+        Assert.NotNull(definition);
+        Assert.Equal("olivia", definition!.DisplayName);
+        Assert.Equal("World.cs", definition.Location.Path);
+        Assert.Contains(workspace.FindReferences("Gameplay/Nav.seg", 6, 8), x => x.Location.Path == "Gameplay/Nav.seg");
+        Assert.Contains("olivia", workspace.GetCompletions("Gameplay/Nav.seg", 6, 14));
+
+        var functionDefinition = workspace.GetDefinition("Gameplay/Nav.seg", 3, 9);
+        Assert.NotNull(functionDefinition);
+        Assert.Equal("helper", functionDefinition!.DisplayName);
+    }
     [Fact]
     public void ImplicitInvocationAndRoomChangedAreEmitted()
     {
