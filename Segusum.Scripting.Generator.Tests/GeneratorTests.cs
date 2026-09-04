@@ -43,6 +43,11 @@ public sealed class GeneratorTests
         Assert.Contains(result.Edits, x => x.Path == "Gameplay/Test.seg" && x.Span.Line == 4);
         Assert.Contains(result.Edits, x => x.Path == "Gameplay/Test.seg" && x.Span.Line == 6);
         Assert.DoesNotContain(result.Edits, x => x.Path == "Gameplay/Test.seg" && x.Span.Line == 4 && x.NewText == "oliviaNuova" && x.Span.Length > "olivia".Length);
+        var finalWorld = ApplyEdits(worldText, result.Edits.Where(x => x.Path == "World.cs"));
+        var finalDsl = ApplyEdits(dslText, result.Edits.Where(x => x.Path == "Gameplay/Test.seg"));
+        Assert.Contains("Character oliviaNuova", finalWorld, StringComparison.Ordinal);
+        Assert.Contains("oliviaNuova: A raw string mentioning olivia must remain.", finalDsl, StringComparison.Ordinal);
+        Assert.Contains("if oliviaNuova.isHere", finalDsl, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -78,6 +83,10 @@ public sealed class GeneratorTests
         Assert.Contains(workspace.FindReferences("Gameplay/Nav.seg", 6, 8), x => x.Location.Path == "Gameplay/Nav.seg");
         Assert.Contains("olivia", workspace.GetCompletions("Gameplay/Nav.seg", 6, 14));
 
+        var methodFromDsl = workspace.FindReferences("Gameplay/Nav.seg", 3, 9).Select(x => (x.Location.Path, x.Location.Span.Start, x.Location.Kind)).ToArray();
+        var methodFromCSharp = workspace.FindReferences("World.cs", 1, worldText.IndexOf("helper", StringComparison.Ordinal) + 1).Select(x => (x.Location.Path, x.Location.Span.Start, x.Location.Kind)).ToArray();
+        Assert.Equal(methodFromCSharp, methodFromDsl);
+
         var functionDefinition = workspace.GetDefinition("Gameplay/Nav.seg", 3, 9);
         Assert.NotNull(functionDefinition);
         Assert.Equal("helper", functionDefinition!.DisplayName);
@@ -96,6 +105,40 @@ public sealed class GeneratorTests
         Assert.True(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
         Assert.Equal(2, result.Edits.Count(x => x.Path == "Gameplay/Locals.seg"));
         Assert.DoesNotContain(result.Edits, x => x.Span.Line == 7);
+    }
+
+    [Fact]
+    public void SemanticWorkspaceRejectsCSharpAndDslRenameCollisionsAtomically()
+    {
+        var references = ((string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES"))!.Split(Path.PathSeparator).Select(path => MetadataReference.CreateFromFile(path)).Cast<MetadataReference>().ToList();
+        references.Add(MetadataReference.CreateFromFile(typeof(Seg.WorldBase).Assembly.Location));
+        const string worldText = "using Seg; namespace Demo { public partial class Pinco : WorldBase { public Pinco() : base(\"en\") { } public Character olivia = null!; public Character camilla = null!; } }";
+        var tree = CSharpSyntaxTree.ParseText(worldText, path: "World.cs");
+        var compilation = CSharpCompilation.Create("ToolingCollisionTest", new[] { tree }, references, new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        var workspace = new DslSemanticWorkspace(compilation, compilation.GetTypeByMetadataName("Demo.Pinco")!, new[] { new DslSource("Gameplay/Collision.seg", "world game\nstate foo: int = 1\nstate bar: int = 2\n") });
+        var csharp = workspace.RenameSymbol("World.cs", 1, worldText.IndexOf("olivia", StringComparison.Ordinal) + 1, "camilla");
+        Assert.False(csharp.Succeeded);
+        Assert.Empty(csharp.Edits);
+        var dsl = workspace.RenameSymbol("Gameplay/Collision.seg", 3, 7, "foo");
+        Assert.False(dsl.Succeeded);
+        Assert.Empty(dsl.Edits);
+    }
+
+    [Fact]
+    public void SemanticWorkspaceAppliesManyCSharpEditsInOneDocument()
+    {
+        const string worldText = "using Seg;\nnamespace Demo;\npublic abstract partial class Pinco : WorldBase\n{\n    protected Pinco() : base(\"en\") { }\n    public Character olivia = null!;\n    public void Use(Character value) { }\n    public void Run()\n    {\n        Use(olivia);\n        Use(olivia);\n    }\n}\n";
+        var references = ((string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES"))!.Split(Path.PathSeparator).Select(path => MetadataReference.CreateFromFile(path)).Cast<MetadataReference>().ToList();
+        references.Add(MetadataReference.CreateFromFile(typeof(Seg.WorldBase).Assembly.Location));
+        var tree = CSharpSyntaxTree.ParseText(worldText, path: "World.cs");
+        var compilation = CSharpCompilation.Create("ToolingManyReferences", new[] { tree }, references, new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        var workspace = new DslSemanticWorkspace(compilation, compilation.GetTypeByMetadataName("Demo.Pinco")!, new[] { new DslSource("Gameplay/Many.seg", "world game\nuse olivia here:\n    olivia: Ciao\nend\n") });
+        var declarationColumn = worldText.Split('\n')[5].IndexOf("olivia", StringComparison.Ordinal) + 1;
+        var result = workspace.RenameSymbol("World.cs", 6, declarationColumn, "oliviaNuova");
+        Assert.True(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        var finalWorld = ApplyEdits(worldText, result.Edits.Where(x => x.Path == "World.cs"));
+        Assert.Equal(3, Count(finalWorld, "oliviaNuova"));
+        Assert.DoesNotContain("olivia)", finalWorld, StringComparison.Ordinal);
     }
     [Fact]
     public void ImplicitInvocationAndRoomChangedAreEmitted()
@@ -611,6 +654,12 @@ public NamedCutSceneId ncsMikeStalloneIlBenefattore = null!;
         Assert.Equal(line - 1, span.StartLinePosition.Line);
     }
     private static int Count(string text, string value) => text.Split(value, StringSplitOptions.None).Length - 1;
+    private static string ApplyEdits(string text, IEnumerable<WorkspaceTextEdit> edits)
+    {
+        foreach (var edit in edits.OrderByDescending(x => x.Span.Start))
+            text = text.Remove(edit.Span.Start, edit.Span.Length).Insert(edit.Span.Start, edit.NewText);
+        return text;
+    }
     private sealed record RunResult(ImmutableArray<Diagnostic> Diagnostics, ImmutableArray<GeneratedSourceResult> GeneratedSources, Compilation Compilation);
 
     private sealed class InMemoryAdditionalText(string path, string text) : AdditionalText

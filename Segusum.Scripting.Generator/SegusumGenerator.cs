@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 using Microsoft.CodeAnalysis;
 using Segusum.Scripting.Core;
+using Segusum.Scripting.Semantics;
 
 namespace Segusum.Scripting.Generator;
 

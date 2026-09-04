@@ -6,7 +6,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Segusum.Scripting.Core;
 
-namespace Segusum.Scripting.Generator;
+namespace Segusum.Scripting.Semantics;
 
 public enum BoundSymbolKind { Local, Parameter, State, Function, Cycle, CycleElementId, CSharpField, CSharpProperty, CSharpMethod, ContextualIt }
 public sealed record BoundValue(ITypeSymbol? Type, string CSharpName, ISymbol? Symbol, BoundSymbolKind Kind);
