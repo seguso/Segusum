@@ -91,6 +91,7 @@ public sealed class SegusumGenerator : IIncrementalGenerator
         EmitLine(sb, handler.Span);
         if (handler.Kind == "combine") sb.Append("  addHandlerCombine(").Append(EmitIdentifier(handler.First, model)).Append(',').Append(EmitIdentifier(handler.Second!, model)).Append(',').Append(Emit(handler.Phrase ?? new LiteralExpression("\"\"", "string", handler.Span), model));
         else if (handler.Kind == "use-for") sb.Append("  addHandlerUseFor(").Append(EmitIdentifier(handler.First, model)).Append(',').Append(EmitIdentifier(handler.Target!, model));
+        else if (handler.Kind == "room-changed") sb.Append("  addRoomChangedHandler(").Append(EmitIdentifier(handler.First, model));
         else sb.Append("  addHandlerUseHere(").Append(EmitIdentifier(handler.First, model));
         if (handler.Explanation != null && handler.Kind == "use-for") sb.Append(", ").Append(Emit(handler.Explanation, model));
         else if (handler.Explanation != null && handler.Kind == "combine") sb.Append(", explanation: ").Append(Emit(handler.Explanation, model));
@@ -117,7 +118,7 @@ public sealed class SegusumGenerator : IIncrementalGenerator
         switch (statement)
         {
             case VariableDeclaration v: sb.Append(indent).Append("var ").Append(Name(v.Name)).Append(" = ").Append(Emit(v.Initializer, model)).AppendLine(";"); break;
-            case AssignmentStatement a: sb.Append(indent).Append(Name(a.Name)).Append(a.Operator).Append(Emit(a.Value, model)).AppendLine(";"); break;
+            case AssignmentStatement a: sb.Append(indent).Append(a.Receiver == null ? Name(a.Name) : Emit(a.Receiver, model) + "." + Name(a.MemberName ?? a.Name)).Append(a.Operator).Append(Emit(a.Value, model)).AppendLine(";"); break;
             case IncrementStatement i: sb.Append(indent).Append(Name(i.Name)).AppendLine("++;"); break;
             case ReturnStatement r: sb.Append(indent).Append("return ").Append(Emit(r.Expression, model)).AppendLine(";"); break;
             case CallStatement c: sb.Append(indent).Append(Emit(c.Expression, model)).AppendLine(";"); break;
@@ -142,12 +143,14 @@ public sealed class SegusumGenerator : IIncrementalGenerator
     private static string EmitIdentifier(string name, BoundModel model) => model.References.TryGetValue(name, out var resolved) ? resolved : Name(name);
     private static string Emit(DslExpression expression, BoundModel model) => expression switch
     {
-        IdentifierExpression i => model.Values.TryGetValue(i, out var value) ? value.CSharpName : Name(i.Name), LiteralExpression l => l.Kind == "cycle" ? "new Cycle()" : l.Value,
+        IdentifierExpression i => model.Values.TryGetValue(i, out var value) ? (value.Kind is BoundSymbolKind.CSharpMethod or BoundSymbolKind.Function ? value.CSharpName + "()" : value.CSharpName) : Name(i.Name), LiteralExpression l => l.Kind == "cycle" ? "new Cycle()" : l.Kind == "raw-string" ? "\"" + EscapeString(l.Value) + "\"" : l.Value,
         ParenthesizedExpression p => "(" + Emit(p.Expression, model) + ")", UnaryExpression u => EmitUnary(u, model),
         BinaryExpression b => Emit(b.Left, model) + " " + (b.Operator == "and" ? "&&" : b.Operator == "or" ? "||" : b.Operator) + " " + Emit(b.Right, model),
         CallExpression c when model.DomainOperations.TryGetValue(c, out var domain) && domain.Kind == BoundDomainOperationKind.NotSeenRecently => Emit(domain.Receiver, model) + ".notSeenRecently(" + Emit(domain.Argument!, model) + ")",
         CallExpression c when model.DomainOperations.TryGetValue(c, out var seen) && seen.Kind == BoundDomainOperationKind.WasSeenAtLeastOnce => "wasSeenAtLeastOnce(" + Emit(seen.Receiver, model) + ")",
-        CallExpression c when model.Calls.TryGetValue(c, out var bound) => bound.TargetName + "(" + string.Join(",", bound.Arguments.Select(a => (a.Source.Name == null ? "" : Name(a.ParameterName) + ": ") + Emit(a.Source.Expression, model))) + ")",
+        MemberAccessExpression m when model.Values.TryGetValue(m, out var member) && member.Kind == BoundSymbolKind.CSharpMethod => Emit(m.Receiver, model) + "." + member.CSharpName + "()",
+        MemberAccessExpression m when model.Values.TryGetValue(m, out var property) => Emit(m.Receiver, model) + "." + property.CSharpName,
+        CallExpression c when model.Calls.TryGetValue(c, out var bound) => (bound.Receiver == null ? bound.TargetName : Emit(bound.Receiver, model) + "." + bound.TargetName) + "(" + string.Join(",", bound.Arguments.Select(a => (a.Source.Name == null ? "" : Name(a.ParameterName) + ": ") + Emit(a.Source.Expression, model))) + ")",
         _ => "default"
     };
     private static string EmitUnary(UnaryExpression expression, BoundModel model)
@@ -158,6 +161,7 @@ public sealed class SegusumGenerator : IIncrementalGenerator
         return (expression.Operator == "not" ? "!" : expression.Operator) + operand;
     }
     private static string Name(string name) { var x = name.Contains('-') ? DslNames.Camel(name) : name; return x is "object" or "string" or "int" or "bool" ? "@" + x : x; }
+    private static string EscapeString(string value) => value.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", "\\r").Replace("\n", "\\n");
     private static string Type(string type) => type == "int" ? "int" : type == "bool" ? "bool" : type == "string" ? "string" : type == "DateTime" ? "System.DateTime" : type;
     private static IEnumerable<CycleElementDeclaration> AllCycleElements(DslDeclaration declaration) => declaration switch
     {

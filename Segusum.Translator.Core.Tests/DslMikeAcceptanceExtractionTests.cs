@@ -27,7 +27,7 @@ def creaCicloMikeNonRipete ret Cycle:
 end
 use mikeStallone for puAiutareLoScemoDiGuerra:
     exp explanation
-    if call namedCutSceneIsSeen ncs:
+    if namedCutSceneIsSeen ncs:
         olivia: "Mike Stallone! Mi aiuti a far rinsavire lo scemo di guerra dandogli una botta in testa come quella che ha avuto in guerra?"
         makes-no-sense
     end

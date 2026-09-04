@@ -19,7 +19,11 @@ public sealed record CycleElementDeclaration(string Cycle,string Id,bool Importa
 public sealed record DslDocument(string? WorldId, IReadOnlyList<DslDeclaration> Declarations);
 public abstract record DslStatement(SourceSpan Span) : DslNode(Span);
 public sealed record VariableDeclaration(string Name,DslExpression Initializer,SourceSpan Span) : DslStatement(Span);
-public sealed record AssignmentStatement(string Name,string Operator,DslExpression Value,SourceSpan Span) : DslStatement(Span);
+public sealed record AssignmentStatement(string Name,string Operator,DslExpression Value,SourceSpan Span) : DslStatement(Span)
+{
+    public DslExpression? Receiver { get; init; }
+    public string? MemberName { get; init; }
+}
 public sealed record IncrementStatement(string Name,SourceSpan Span) : DslStatement(Span);
 public sealed record CallStatement(DslExpression Expression,SourceSpan Span) : DslStatement(Span);
 public sealed record ReturnStatement(DslExpression Expression,SourceSpan Span) : DslStatement(Span);
@@ -37,7 +41,12 @@ public sealed record IdentifierExpression(string Name,SourceSpan Span) : DslExpr
 public sealed record LiteralExpression(string Value,string Kind,SourceSpan Span) : DslExpression(Span);
 public sealed record UnaryExpression(string Operator,DslExpression Operand,SourceSpan Span) : DslExpression(Span);
 public sealed record BinaryExpression(string Operator,DslExpression Left,DslExpression Right,SourceSpan Span) : DslExpression(Span);
-public sealed record CallExpression(string Name,IReadOnlyList<DslArgument> Arguments,SourceSpan Span) : DslExpression(Span);
+public sealed record CallExpression(string Name,IReadOnlyList<DslArgument> Arguments,SourceSpan Span) : DslExpression(Span)
+{
+    public DslExpression? Receiver { get; init; }
+}
+public sealed record MemberAccessExpression(DslExpression Receiver,string MemberName,SourceSpan Span) : DslExpression(Span);
+public sealed record FunctionReferenceExpression(string Name,SourceSpan Span) : DslExpression(Span);
 public sealed record ParenthesizedExpression(DslExpression Expression,SourceSpan Span) : DslExpression(Span);
 public sealed record DslArgument(string? Name,DslExpression Expression,SourceSpan Span);
 public static class DslNames

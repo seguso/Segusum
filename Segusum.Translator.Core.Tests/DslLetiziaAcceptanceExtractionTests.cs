@@ -12,8 +12,8 @@ world game
 combine travestitiDa with letiziaDeVille:
     phrase "travestiti da Letizia De Ville per farti vedere da Dracula"
     exp exDaDracula
-    if call objectiveIsCurrent puFaiInModoCheDraculaTiAccolga:
-        if call namedCutSceneIsSeen ncsLetteraDiDraculaAllaZiaEdwige:
+    if objectiveIsCurrent puFaiInModoCheDraculaTiAccolga:
+        if namedCutSceneIsSeen ncsLetteraDiDraculaAllaZiaEdwige:
             olivia: "Ho una grande idea, Camilla! Dracula vuole essere famoso!"
             camilla: "Cosa?"
             olivia: "Presto, Letizia! Si spogli!"
@@ -23,7 +23,7 @@ combine travestitiDa with letiziaDeVille:
         else:
             olivia: "Non capisco che senso ha!"
         end
-    elif call draculaAdessoETuoAmico:
+    elif draculaAdessoETuoAmico:
         olivia: "Ho un'idea! Mi travesto da Letizia De Ville!"
         camilla: "Che dici, Olivia?"
         olivia: "Ah, già! È vero! Scusa!"

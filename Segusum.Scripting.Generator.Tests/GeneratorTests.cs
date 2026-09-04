@@ -13,13 +13,72 @@ namespace Segusum.Scripting.Generator.Tests;
 
 public sealed class GeneratorTests
 {
+    [Fact]
+    public void ImplicitInvocationAndRoomChangedAreEmitted()
+    {
+        var result = Run("room-changed roomA:\n nar: Una stanza silenziosa.\nend\ndef check ret bool:\n ret helper\nend", "public Room roomA = null!; public bool helper() => true;");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL"));
+        var generated = Generated(result);
+        Assert.Contains("addRoomChangedHandler(roomA", generated);
+        Assert.Contains("narText(\"Una stanza silenziosa.\")", generated);
+        Assert.Contains("return helper();", generated);
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
+    public void DuplicateRoomChangedIsDiagnostic()
+    {
+        var result = Run("room-changed roomA:\n nar: uno\nend\nroom-changed roomA:\n nar: due\nend", "public Room roomA = null!; protected override void configureActionHandlers() { }");
+        Assert.Contains(result.Diagnostics, d => d.GetMessage().Contains("Duplicate room-changed"));
+        Assert.Empty(result.GeneratedSources);
+    }
+
+    [Fact]
+    public void RoomChangedAlreadyRegisteredByCSharpIsDiagnostic()
+    {
+        var world = "[SegusumWorld(\"game\")] public abstract partial class World : WorldBase { protected World() : base(\"en\") { } public Room roomA = null!; protected override void configureActionHandlers() { addRoomChangedHandler(roomA, e => { }); } }";
+        var result = RunWithWorld("world game\nroom-changed roomA:\n nar: duplicato\nend", world);
+        Assert.Contains(result.Diagnostics, d => d.GetMessage().Contains("already registered by C#"));
+        Assert.Empty(result.GeneratedSources);
+    }
+
+    [Fact]
+    public void MemberAccessAndNullAssignmentAreBound()
+    {
+        var result = Run("def clear:\n olivia.Aspect = null\n olivia.removeFromWorld\nend", "public Character olivia = null!;");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL"));
+        Assert.Contains("olivia.Aspect=null", Generated(result));
+        Assert.Contains("olivia.removeFromWorld();", Generated(result));
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
+    public void RawDialogueAndNarrativeTextPreserveQuotesAndMarkup()
+    {
+        var result = Run("use olivia here:\n olivia: Ho detto \"ciao\" a Camilla![[we wear whatever we want]]\n nar: Con grande destrezza sfuggite a Dracula.\n nar-room: La stanza è immersa nel silenzio.\nend", "public Character olivia = null!;");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL"));
+        var generated = Generated(result);
+        Assert.Contains("Ho detto \\\"ciao\\\" a Camilla![[we wear whatever we want]]", generated);
+        Assert.Contains("narText(\"Con grande destrezza sfuggite a Dracula.\")", generated);
+        Assert.Contains("narRoom(\"La stanza è immersa nel silenzio.\", curRoom", generated);
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
+    public void RefIsReservedForFutureFunctionReferences()
+    {
+        var result = Run("def f:\n var callback = ref helper\nend");
+        Assert.Contains(result.Diagnostics, d => d.GetMessage().Contains("Function references are reserved"));
+        Assert.Empty(result.GeneratedSources);
+    }
+
     private const string LetiziaAcceptanceDsl = """
 world game
 combine travestitiDa with letiziaDeVille:
     phrase "travestiti da Letizia De Ville per farti vedere da Dracula"
     exp exDaDracula
-    if (call objectiveIsCurrent puFaiInModoCheDraculaTiAccolga):
-        if (call namedCutSceneIsSeen ncsLetteraDiDraculaAllaZiaEdwige):
+    if objectiveIsCurrent puFaiInModoCheDraculaTiAccolga:
+        if namedCutSceneIsSeen ncsLetteraDiDraculaAllaZiaEdwige:
             olivia: "Ho una grande idea, Camilla! Dracula vuole essere famoso! Allora mi travestirò da giornalista, così mi accoglierà!"
             camilla: "Cosa?"
             olivia: "Presto, Letizia! Si spogli! Mi servono dei vestiti da giornalista!"
@@ -29,7 +88,7 @@ combine travestitiDa with letiziaDeVille:
         else:
             olivia: "Non capisco che senso ha!"
         end
-    elif (call draculaAdessoETuoAmico):
+    elif draculaAdessoETuoAmico:
         olivia: "Ho un'idea! Mi travesto da Letizia De Ville e mi faccio vedere da Dracula!"
         camilla: "Che dici, Olivia? Dracula crede già che tu sia una giornalista!"
         olivia: "Ah, già! È vero! Scusa, non stavo seguendo!"
@@ -88,9 +147,9 @@ end
 
 use mikeStallone for puAiutareLoScemoDiGuerra:
     exp exQualcunoRiceveraUnaBottaComeQuellaPrecedente
-    if call namedCutSceneIsSeen ncsMikeStalloneIlBenefattore:
+    if namedCutSceneIsSeen ncsMikeStalloneIlBenefattore:
         olivia: "Mike Stallone! Mi aiuti a far rinsavire lo scemo di guerra dandogli una botta in testa come quella che ha avuto in guerra?"
-        var cyc = call creaCicloMikeNonRipete
+        var cyc = creaCicloMikeNonRipete
         next cyc
     else:
         makes-no-sense
@@ -173,7 +232,7 @@ public NamedCutSceneId ncsMikeStalloneIlBenefattore = null!;
     [Fact]
     public void MultipleFilesForOneWorldShareDslScope()
     {
-        var result = RunWithWorldFiles("[SegusumWorld(\"game\")] public abstract partial class GameWorld : WorldBase { }", ("Mike.seg", "world game\ndef helper:\nend"), ("Dracula.seg", "world game\ndef main:\n call helper\nend"));
+        var result = RunWithWorldFiles("[SegusumWorld(\"game\")] public abstract partial class GameWorld : WorldBase { }", ("Mike.seg", "world game\ndef helper:\nend"), ("Dracula.seg", "world game\ndef main:\n helper\nend"));
         Assert.DoesNotContain(result.Diagnostics, d => d.Id == "SEGDSL200");
         Assert.Contains("private void helper", Generated(result));
         Assert.Contains("private void main", Generated(result));
@@ -223,7 +282,7 @@ public NamedCutSceneId ncsMikeStalloneIlBenefattore = null!;
     [Fact]
     public void ForwardCycleElementReferenceResolvesToTheGeneratedProperty()
     {
-        var result = Run("def use id: CycleElemId:\n call helper id\nend\ndef main:\n call use xww7\nend\nvar cyc = new-cycle\nadd cyc xww7\nend");
+        var result = Run("def use id: CycleElemId:\n helper id\nend\ndef main:\n use xww7\nend\nvar cyc = new-cycle\nadd cyc xww7\nend");
         Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL"));
         Assert.Contains("use(xww7)", Generated(result));
         Assert.Contains("helper(id)", Generated(result));
@@ -233,7 +292,7 @@ public NamedCutSceneId ncsMikeStalloneIlBenefattore = null!;
     [Fact]
     public void NamedKebabArgumentUsesTheRealParameterName()
     {
-        var result = Run("def main:\n call helper nome-parametro: 1\nend");
+        var result = Run("def main:\n helper nome-parametro: 1\nend");
         Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL"));
         Assert.Contains("helper(nomeParametro: 1)", Generated(result));
         AssertGeneratedCompilationSucceeds(result);
@@ -242,7 +301,7 @@ public NamedCutSceneId ncsMikeStalloneIlBenefattore = null!;
     [Fact]
     public void UnknownIdentifierHasDslDiagnosticAndNoGeneratedSource()
     {
-        var result = Run("def main:\n call missing\nend");
+        var result = Run("def main:\n missing\nend");
         Assert.Contains(result.Diagnostics, d => d.GetMessage().Contains("Unknown function or method"));
         Assert.Empty(result.GeneratedSources);
     }
@@ -366,7 +425,7 @@ public NamedCutSceneId ncsMikeStalloneIlBenefattore = null!;
         var dialogueError = CompileGeneratedMutation(dialogue, "dial(olivia,\"hello\");", "missingDial(olivia,\"hello\");");
         AssertMappedTo(dialogueError, "test.seg", 3);
 
-        var handler = Run("use olivia here:\n call helper\nend", "public Character olivia = null!; public void helper() { }");
+        var handler = Run("use olivia here:\n helper\nend", "public Character olivia = null!; public void helper() { }");
         var handlerError = CompileGeneratedMutation(handler, "helper();", "missingHelper();");
         AssertMappedTo(handlerError, "test.seg", 3);
     }
@@ -411,7 +470,7 @@ public NamedCutSceneId ncsMikeStalloneIlBenefattore = null!;
     private static void AssertGeneratedCompilationSucceeds(RunResult result)
     {
         var errors = result.Compilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).ToArray();
-        Assert.True(errors.Length == 0, string.Join(Environment.NewLine, errors.Select(x => x.ToString())));
+        Assert.True(errors.Length == 0, string.Join(Environment.NewLine, errors.Select(x => x.ToString())) + Environment.NewLine + Generated(result));
     }
     private static Diagnostic CompileGeneratedMutation(RunResult result, string original, string replacement)
     {

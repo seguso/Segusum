@@ -14,9 +14,9 @@ end
 
 combine token with token:
     phrase "usa il token con il token"
-    possible-when (call puo-ripararla token)
+    possible-when puo-ripararla token
     active: "Funziona."
-    call fai-esperimento object:token
+    fai-esperimento object:token
 end
 
 use token for goal:

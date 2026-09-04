@@ -3,6 +3,7 @@
     <TargetFramework>netstandard2.0</TargetFramework>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
-    <IsPackable>false</IsPackable>
+    <PackageId>Segusum.Scripting.Core</PackageId>
   </PropertyGroup>
+  <Import Project="../Segusum.Package.props" />
 </Project>
