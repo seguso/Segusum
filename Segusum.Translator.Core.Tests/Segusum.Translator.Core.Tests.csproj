@@ -7,6 +7,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Segusum.Translator.Core\Segusum.Translator.Core.csproj" />
+    <ProjectReference Include="..\Segusum.Scripting.Core\Segusum.Scripting.Core.csproj" />
     <ProjectReference Include="..\Segusum.WebClient\Segusum.WebClient.csproj" />
   </ItemGroup>
   <ItemGroup><Using Include="Xunit" /></ItemGroup>

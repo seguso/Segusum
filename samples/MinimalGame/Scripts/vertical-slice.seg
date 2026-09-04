@@ -1,0 +1,30 @@
+state numero-tentativi: int = 0
+state caffettiera-rotta: bool = false
+
+def puo-ripararla object: LogicObj ret bool:
+    ret not caffettiera-rotta and numero-tentativi < 3
+end
+
+def fai-esperimento object: LogicObj:
+    nar "Olivia collega l'oggetto alla macchina."
+    numero-tentativi++
+end
+
+combine token with token:
+    phrase "usa il token con il token"
+    possible-when (call puo-ripararla token)
+    active: "Funziona."
+    call fai-esperimento token
+end
+
+use token for goal:
+    exp token
+    active: "Lo uso per l'obiettivo."
+end
+
+var cyc = new-cycle
+add cyc vertical-slice important
+    when it not-seen-recently 5
+    active: "Evento del ciclo."
+end
+next cyc

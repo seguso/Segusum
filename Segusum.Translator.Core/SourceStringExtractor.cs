@@ -44,6 +44,11 @@ public sealed class SourceStringExtractor
             visitor.Visit(tree.GetRoot());
             result.AddRange(visitor.Results);
         }
+        // DSL sources are extracted from their AST, never from generated C#.
+        if (relativeFiles is null)
+            result.AddRange(new DslSourceStringExtractor().Extract(repositoryRoot));
+        else
+            result.AddRange(new DslSourceStringExtractor().Extract(repositoryRoot, files.Where(x => x.EndsWith(".seg", StringComparison.OrdinalIgnoreCase))));
         return result.GroupBy(x => x.Value, StringComparer.Ordinal).Select(x => x.First()).ToList();
     }
 

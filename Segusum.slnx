@@ -13,4 +13,6 @@
   <Project Path="Segusum.Translator.Cli/Segusum.Translator.Cli.csproj" />
   <Project Path="Segusum.Translator.Web/Segusum.Translator.Web.csproj" />
   <Project Path="samples/MinimalGame/MinimalGame.csproj" />
+  <Project Path="Segusum.Scripting.Core/Segusum.Scripting.Core.csproj" />
+  <Project Path="Segusum.Scripting.Generator/Segusum.Scripting.Generator.csproj" />
 </Solution>

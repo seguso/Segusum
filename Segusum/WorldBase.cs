@@ -1704,6 +1704,13 @@ namespace Seg
         {
         }
 
+        // Generated DSL handlers are registered after handwritten handlers.
+        // This separate hook keeps the consumer free of boilerplate while
+        // preserving the existing handwritten configuration contract.
+        protected virtual void configureGeneratedActionHandlers()
+        {
+        }
+
         protected virtual void configureRoomHandlers()
         {
         }
@@ -1730,6 +1737,7 @@ namespace Seg
             }
 
             configureActionHandlers();
+            configureGeneratedActionHandlers();
             configureRoomHandlers();
             configureGameRestrictions();
             configureCycles();

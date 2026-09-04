@@ -2,11 +2,12 @@ using Seg;
 
 namespace MinimalGame;
 
-public sealed class World : WorldBase
+public sealed partial class World : WorldBase
 {
     private readonly Character active = new() { loId = "active", name = "active" };
     private readonly Room room = new() { roomId = "room" };
     private readonly LogicObj token = new() { loId = "token", name = "token" };
+    private readonly Objective goal = new() { serId = "goal", nameReadable = "goal" };
 
     public World(string language) : base(language)
     {
