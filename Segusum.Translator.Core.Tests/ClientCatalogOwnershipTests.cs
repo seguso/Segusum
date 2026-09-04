@@ -39,6 +39,23 @@ public sealed class ClientCatalogOwnershipTests
         finally { Directory.Delete(root, recursive: true); }
     }
 
+    [Fact]
+    public void ConsumerOverrideFallsBackFromGermanToItalianBeforeItsSource()
+    {
+        var root = CreateConsumer("class World { void Configure() { options.OverrideClientString(\"saveGame\", \"Store your progress\"); } }\n");
+        try
+        {
+            File.WriteAllText(Path.Combine(root, "transl_de.xml"), "<root><str orig=\"Store your progress\" transl=\"+\" /></root>");
+            File.WriteAllText(Path.Combine(root, "transl_it.xml"), "<root><str orig=\"Store your progress\" transl=\"Salva i progressi\" /></root>");
+
+            var resolved = SegusumClientCatalog.Resolve("de",
+                new Dictionary<string, string> { ["saveGame"] = "Store your progress" }, root);
+
+            Assert.Equal("Salva i progressi", resolved["saveGame"]);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
     private static string CreateConsumer(string source)
     {
         var root = Path.Combine(Path.GetTempPath(), "segusum-consumer-" + Guid.NewGuid().ToString("N"));
