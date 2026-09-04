@@ -52,6 +52,7 @@ internal sealed class DslBinder
     private string lastCSharpName = "";
     private readonly HashSet<string> currentParameters = new(StringComparer.Ordinal);
     private readonly HashSet<ISymbol> dslRoomChangedTargets = new(SymbolEqualityComparer.Default);
+    private readonly HashSet<DslExpression> nullLiterals = new(ReferenceComparer<DslExpression>.Instance);
     private bool suppressDiagnostics;
 
     public BoundModel Model => model;
@@ -117,11 +118,11 @@ internal sealed class DslBinder
                     if (a.Receiver != null)
                     {
                         var receiver = BindExpression(a.Receiver, scope);
-                        var target = receiver == null ? null : MembersOf(receiver, a.MemberName ?? a.Name).FirstOrDefault(Accessible);
+                        var target = receiver == null ? null : MembersOf(receiver, a.MemberName ?? a.Name).FirstOrDefault(x => Accessible(x, receiver));
                         if (target is not IPropertySymbol { SetMethod: not null } && target is not IFieldSymbol { IsReadOnly: false }) Report("SEGDSL321", $"Member '{a.MemberName ?? a.Name}' is not writable.", a.Span);
-                        Require(BindExpression(a.Value, scope), target is IPropertySymbol p ? p.Type : target is IFieldSymbol f ? f.Type : null, a.Value.Span, "assignment type mismatch.");
+                        RequireExpression(a.Value, BindExpression(a.Value, scope), target is IPropertySymbol p ? p.Type : target is IFieldSymbol f ? f.Type : null, "assignment type mismatch.");
                     }
-                    else Require(BindName(a.Name, a.Span, scope), BindExpression(a.Value, scope), a.Span, "assignment type mismatch.");
+                    else { var targetType = BindName(a.Name, a.Span, scope); RequireExpression(a.Value, BindExpression(a.Value, scope), targetType, "assignment type mismatch."); }
                     break;
                 case IncrementStatement i: Require(BindName(i.Name, i.Span, scope), compilation.GetSpecialType(SpecialType.System_Int32), i.Span, "++ requires int."); break;
                 case ReturnStatement r: Require(BindExpression(r.Expression, scope), returnType, r.Span, "return type mismatch."); break;
@@ -141,7 +142,7 @@ internal sealed class DslBinder
     {
         switch (expression)
         {
-            case LiteralExpression l: return l.Kind is "string" or "raw-string" ? compilation.GetSpecialType(SpecialType.System_String) : l.Kind == "bool" ? compilation.GetSpecialType(SpecialType.System_Boolean) : l.Kind == "cycle" ? cycle : l.Kind == "null" ? compilation.GetSpecialType(SpecialType.System_Object) : compilation.GetSpecialType(SpecialType.System_Int32);
+            case LiteralExpression l: if (l.Kind == "null") { nullLiterals.Add(l); return null; } return l.Kind is "string" or "raw-string" ? compilation.GetSpecialType(SpecialType.System_String) : l.Kind == "bool" ? compilation.GetSpecialType(SpecialType.System_Boolean) : l.Kind == "cycle" ? cycle : compilation.GetSpecialType(SpecialType.System_Int32);
             case IdentifierExpression i:
                 if (i.Name == "it" && contextualIt != null) { model.Values[i] = new BoundValue(contextualIt, "x", null, BoundSymbolKind.ContextualIt); return contextualIt; }
                 if (functions.TryGetValue(NormalizeKey(i.Name), out var function) && function.Parameters.Count == 0) { var functionType = TypeOf(function.ReturnType ?? "void"); model.Values[i] = new BoundValue(functionType, Name(function.Name), null, BoundSymbolKind.Function); return functionType; }
@@ -156,7 +157,7 @@ internal sealed class DslBinder
                 return b.Operator is "==" or "!=" or ">" or ">=" or "<" or "<=" ? compilation.GetSpecialType(SpecialType.System_Boolean) : lt;
             case MemberAccessExpression m:
                 var receiverType = BindExpression(m.Receiver, scope, contextualIt);
-                var member = receiverType == null ? null : MembersOf(receiverType, m.MemberName).FirstOrDefault(Accessible);
+                var member = receiverType == null ? null : MembersOf(receiverType, m.MemberName).FirstOrDefault(x => Accessible(x, receiverType));
                 if (member == null) { Report("SEGDSL312", $"Unknown or inaccessible member '{m.MemberName}'.", m.Span); return null; }
                 var memberType = MemberType(member); model.Values[m] = new BoundValue(memberType, m.MemberName, member, member is IMethodSymbol ? BoundSymbolKind.CSharpMethod : BoundSymbolKind.CSharpProperty); return memberType;
             case FunctionReferenceExpression r: Report("SEGDSL320", "Function references are reserved but not implemented yet.", r.Span); return null;
@@ -170,8 +171,8 @@ internal sealed class DslBinder
         if (call.Name == "was-seen-at-least-once") { if (call.Arguments.Count == 1) { var receiver = call.Arguments[0].Expression; var t = BindExpression(receiver, scope); Require(t, cycleElementId, call.Arguments[0].Span, "was-seen-at-least-once requires CycleElemId."); model.DomainOperations[call] = new BoundDomainOperation(BoundDomainOperationKind.WasSeenAtLeastOnce, receiver, null, null); } return compilation.GetSpecialType(SpecialType.System_Boolean); }
         if (functions.TryGetValue(NormalizeKey(call.Name), out var function)) { var result = BindArgumentList(call, function.Parameters.Select(p => new ParameterInfo(p.Name, TypeOf(p.Type)!, false)).ToArray(), scope, contextualIt); if (result.Call == null) { ReportFailure(call, new[] { result }); return null; } model.Calls[call] = new BoundCall(null, Name(function.Name), result.Call.Arguments, TypeOf(function.ReturnType ?? "void")); return TypeOf(function.ReturnType ?? "void"); }
         var receiverType = call.Receiver == null ? null : BindExpression(call.Receiver, scope, contextualIt);
-        var exactMethods = (receiverType == null ? AllMembers(call.Name) : MembersOf(receiverType, call.Name).Where(Accessible)).OfType<IMethodSymbol>().ToArray();
-        var fallbackMembers = receiverType == null ? DslNames.Candidates(call.Name).Skip(1).SelectMany(AllMembers) : MembersOf(receiverType).Where(x => Accessible(x) && NormalizeKey(x.Name) == NormalizeKey(call.Name));
+        var exactMethods = (receiverType == null ? AllMembers(call.Name) : MembersOf(receiverType, call.Name).Where(x => Accessible(x, receiverType))).OfType<IMethodSymbol>().ToArray();
+        var fallbackMembers = receiverType == null ? DslNames.Candidates(call.Name).Skip(1).SelectMany(AllMembers) : MembersOf(receiverType).Where(x => Accessible(x, receiverType) && NormalizeKey(x.Name) == NormalizeKey(call.Name));
         var methods = (exactMethods.Length != 0 ? exactMethods : fallbackMembers.OfType<IMethodSymbol>()).Where(m => NormalizeKey(m.Name) == NormalizeKey(call.Name)).GroupBy(m => m.ToDisplayString()).Select(g => g.First()).ToArray();
         if (methods.Length == 0) { Report("SEGDSL305", $"Unknown function or method '{call.Name}'.", call.Span); return null; }
         var results = methods.Select(m => TryBind(call, m, scope, contextualIt)).ToArray();
@@ -189,8 +190,8 @@ internal sealed class DslBinder
         var result = new List<BoundArgument>(); var used = new HashSet<string>(StringComparer.Ordinal); var namedSeen = false; var positionalIndex = 0; var score = 0;
         foreach (var argument in call.Arguments)
         {
-            if (argument.Name != null) { namedSeen = true; var exact = parameters.Where(p => string.Equals(p.Name, argument.Name, StringComparison.Ordinal)).ToArray(); var normalized = exact.Length == 0 ? parameters.Where(p => NormalizeKey(p.Name) == NormalizeKey(argument.Name)).ToArray() : exact; if (normalized.Length > 1) return Failure(CallFailureKind.UnknownNamedArgument, argument.Span, $"Ambiguous named argument '{argument.Name}'."); var parameter = normalized.SingleOrDefault(); if (parameter == null) return Failure(CallFailureKind.UnknownNamedArgument, argument.Span, $"Unknown named argument '{argument.Name}'."); if (!used.Add(parameter.Name)) return Failure(CallFailureKind.DuplicateNamedArgument, argument.Span, $"Duplicate named argument '{argument.Name}'."); var actual = BindExpression(argument.Expression, scope, contextualIt); var conversion = Classify(actual, parameter.Type); if (!conversion.IsImplicit) return Failure(CallFailureKind.IncompatibleArgument, argument.Expression.Span, $"Argument '{argument.Name}' has incompatible type."); score += ConversionScore(conversion); result.Add(new BoundArgument(argument, parameter.Symbol, parameter.Name)); }
-            else { if (namedSeen) return Failure(CallFailureKind.PositionalAfterNamed, argument.Span, "Positional arguments cannot follow a named argument."); if (positionalIndex >= parameters.Count) return Failure(CallFailureKind.TooManyArguments, argument.Span, "Too many arguments."); var parameter = parameters[positionalIndex++]; used.Add(parameter.Name); var conversion = Classify(BindExpression(argument.Expression, scope, contextualIt), parameter.Type); if (!conversion.IsImplicit) return Failure(CallFailureKind.IncompatibleArgument, argument.Expression.Span, "Argument has incompatible type."); score += ConversionScore(conversion); result.Add(new BoundArgument(argument, parameter.Symbol, parameter.Name)); }
+            if (argument.Name != null) { namedSeen = true; var exact = parameters.Where(p => string.Equals(p.Name, argument.Name, StringComparison.Ordinal)).ToArray(); var normalized = exact.Length == 0 ? parameters.Where(p => NormalizeKey(p.Name) == NormalizeKey(argument.Name)).ToArray() : exact; if (normalized.Length > 1) return Failure(CallFailureKind.UnknownNamedArgument, argument.Span, $"Ambiguous named argument '{argument.Name}'."); var parameter = normalized.SingleOrDefault(); if (parameter == null) return Failure(CallFailureKind.UnknownNamedArgument, argument.Span, $"Unknown named argument '{argument.Name}'."); if (!used.Add(parameter.Name)) return Failure(CallFailureKind.DuplicateNamedArgument, argument.Span, $"Duplicate named argument '{argument.Name}'."); var actual = BindExpression(argument.Expression, scope, contextualIt); var conversion = Classify(actual, parameter.Type); if (!IsCompatible(argument.Expression, actual, parameter.Type)) return Failure(CallFailureKind.IncompatibleArgument, argument.Expression.Span, $"Argument '{argument.Name}' has incompatible type."); score += ConversionScore(conversion); result.Add(new BoundArgument(argument, parameter.Symbol, parameter.Name)); }
+            else { if (namedSeen) return Failure(CallFailureKind.PositionalAfterNamed, argument.Span, "Positional arguments cannot follow a named argument."); if (positionalIndex >= parameters.Count) return Failure(CallFailureKind.TooManyArguments, argument.Span, "Too many arguments."); var parameter = parameters[positionalIndex++]; used.Add(parameter.Name); var actual = BindExpression(argument.Expression, scope, contextualIt); var conversion = Classify(actual, parameter.Type); if (!IsCompatible(argument.Expression, actual, parameter.Type)) return Failure(CallFailureKind.IncompatibleArgument, argument.Expression.Span, "Argument has incompatible type."); score += ConversionScore(conversion); result.Add(new BoundArgument(argument, parameter.Symbol, parameter.Name)); }
         }
         var missing = parameters.FirstOrDefault(p => !p.Optional && !used.Contains(p.Name)); if (missing != null) return Failure(CallFailureKind.MissingRequiredArgument, call.Span, $"Required argument '{missing.Name}' is missing.");
         score += parameters.Count(p => p.Optional && !used.Contains(p.Name)) * 10;
@@ -202,7 +203,9 @@ internal sealed class DslBinder
     private void ReportFailure(CallExpression call, IReadOnlyList<CandidateResult> results)
     { var failure = results.Where(x => x.Call == null).OrderBy(x => FailurePriority(x.FailureKind)).FirstOrDefault(); if (failure == null) { Report("SEGDSL306", $"No overload of '{call.Name}' accepts these arguments.", call.Span); return; } Report(failure.FailureKind switch { CallFailureKind.UnknownNamedArgument => "SEGDSL307", CallFailureKind.DuplicateNamedArgument => "SEGDSL308", CallFailureKind.PositionalAfterNamed => "SEGDSL310", CallFailureKind.IncompatibleArgument => "SEGDSL309", CallFailureKind.MissingRequiredArgument => "SEGDSL306", _ => "SEGDSL306" }, failure.FailureDetail, failure.FailureSpan); }
     private static int FailurePriority(CallFailureKind kind) => kind switch { CallFailureKind.UnknownNamedArgument => 0, CallFailureKind.DuplicateNamedArgument => 1, CallFailureKind.PositionalAfterNamed => 2, CallFailureKind.IncompatibleArgument => 3, CallFailureKind.MissingRequiredArgument => 4, _ => 5 };
-    private bool Compatible(ITypeSymbol? actual, ITypeSymbol expected) => actual != null && ((actual.SpecialType == SpecialType.System_Object && (expected.IsReferenceType || expected.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T)) || Microsoft.CodeAnalysis.CSharp.CSharpExtensions.ClassifyConversion(compilation, actual, expected).IsImplicit);
+    private bool Compatible(ITypeSymbol? actual, ITypeSymbol expected) => actual != null && Microsoft.CodeAnalysis.CSharp.CSharpExtensions.ClassifyConversion(compilation, actual, expected).IsImplicit;
+    private bool IsCompatible(DslExpression expression, ITypeSymbol? actual, ITypeSymbol? expected) => expected != null && ((nullLiterals.Contains(expression) && (expected.IsReferenceType || expected.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T)) || Compatible(actual, expected));
+    private void RequireExpression(DslExpression expression, ITypeSymbol? actual, ITypeSymbol? expected, string message) { if (!IsCompatible(expression, actual, expected)) Report("SEGDSL313", message, expression.Span); }
     private ITypeSymbol? BindName(string name, SourceSpan span, Dictionary<string, ITypeSymbol>? scope = null)
     {
         lastSymbol = null; lastKind = BoundSymbolKind.Local; lastCSharpName = Name(name);
@@ -234,8 +237,19 @@ internal sealed class DslBinder
                 if (Accessible(member))
                     yield return member;
     }
-    private bool Accessible(ISymbol member) => compilation.IsSymbolAccessibleWithin(member, world, world) ||
-        member.DeclaredAccessibility != Accessibility.Private;
+    private bool Accessible(ISymbol member) => compilation.IsSymbolAccessibleWithin(member, world, world);
+    private bool Accessible(ISymbol member, ITypeSymbol receiverType)
+    {
+        if (!Accessible(member)) return false;
+        if (member.DeclaredAccessibility is not (Accessibility.Protected or Accessibility.ProtectedAndInternal or Accessibility.ProtectedOrInternal)) return true;
+        return IsSameOrDerived(receiverType, world);
+    }
+    private static bool IsSameOrDerived(ITypeSymbol candidate, INamedTypeSymbol baseType)
+    {
+        for (var type = candidate as INamedTypeSymbol; type != null; type = type.BaseType)
+            if (SymbolEqualityComparer.Default.Equals(type, baseType)) return true;
+        return false;
+    }
     private static bool IsDerivedFrom(INamedTypeSymbol type, INamedTypeSymbol baseType) { for (var t = type.BaseType; t != null; t = t.BaseType) if (SymbolEqualityComparer.Default.Equals(t, baseType)) return true; return false; }
     private static IEnumerable<ISymbol> MembersOf(ITypeSymbol type, string? name = null) { for (var t = type as INamedTypeSymbol; t != null; t = t.BaseType) foreach (var member in name == null ? t.GetMembers() : t.GetMembers(name)) yield return member; }
     private ITypeSymbol? TypeOf(string name) => name switch { "int" => compilation.GetSpecialType(SpecialType.System_Int32), "bool" => compilation.GetSpecialType(SpecialType.System_Boolean), "string" => compilation.GetSpecialType(SpecialType.System_String), _ => compilation.GetTypeByMetadataName(name.StartsWith("Seg.", StringComparison.Ordinal) ? name : "Seg." + name) ?? compilation.GetTypeByMetadataName(name) };

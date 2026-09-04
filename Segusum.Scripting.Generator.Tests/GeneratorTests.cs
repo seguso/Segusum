@@ -72,6 +72,42 @@ public sealed class GeneratorTests
         Assert.Empty(result.GeneratedSources);
     }
 
+    [Fact]
+    public void NullLiteralIsNotAnObjectValue()
+    {
+        var valid = Run("def clear:\n refObj = null\nend", "public string? refObj = null;");
+        Assert.DoesNotContain(valid.Diagnostics, d => d.Id.StartsWith("SEGDSL"));
+        AssertGeneratedCompilationSucceeds(valid);
+
+        var objectValue = Run("def clear:\n refObj = objectValue\nend", "public string? refObj = null!; public object objectValue = null!;");
+        Assert.Contains(objectValue.Diagnostics, d => d.GetMessage().Contains("assignment type mismatch"));
+
+        var valueType = Run("def clear:\n number = null\nend", "public int number;");
+        Assert.Contains(valueType.Diagnostics, d => d.GetMessage().Contains("assignment type mismatch"));
+    }
+
+    [Fact]
+    public void RoslynAccessibilityRejectsPrivateBaseButAllowsProtectedReceiverRule()
+    {
+        var privateBase = RunWithWorld("world game\ndef check ret bool:\n ret hidden\nend", "[SegusumWorld(\"game\")] public abstract partial class World : Base { protected World() : base() { } protected override void configureActionHandlers() { } } public class Base : WorldBase { protected Base() : base(\"en\") { } private bool hidden; protected bool visible; }");
+        Assert.Contains(privateBase.Diagnostics, d => d.GetMessage().Contains("Unknown identifier 'hidden'"));
+
+        var protectedReceiver = Run("def check ret bool:\n ret self.visible\nend", "public World self => this; protected bool visible;");
+        Assert.DoesNotContain(protectedReceiver.Diagnostics, d => d.Id.StartsWith("SEGDSL"));
+        AssertGeneratedCompilationSucceeds(protectedReceiver);
+
+        var invalidReceiver = RunWithWorld("world game\ndef check ret bool:\n ret baseObj.visible\nend", "public class Base : WorldBase { protected Base() : base(\"en\") { } protected bool visible; } [SegusumWorld(\"game\")] public abstract partial class World : Base { protected World() : base() { } public Base baseObj = null!; protected override void configureActionHandlers() { } }");
+        Assert.Contains(invalidReceiver.Diagnostics, d => d.GetMessage().Contains("Unknown or inaccessible member 'visible'"));
+    }
+
+    [Fact]
+    public void PrivateSamePartialAndInternalSameAssemblyRemainAccessible()
+    {
+        var result = Run("def check ret bool:\n ret privateValue and internalValue\nend", "private bool privateValue; internal bool internalValue;");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL"));
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
     private const string LetiziaAcceptanceDsl = """
 world game
 combine travestitiDa with letiziaDeVille:
