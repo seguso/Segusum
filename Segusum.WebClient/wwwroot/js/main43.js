@@ -1,5 +1,34 @@
 let thisVersion = "54"; // 52 = sushi, tasse , yrface , milan, someone, etc. 54: matt
-const gClientScriptVersion = "88";
+const gClientScriptVersion = "89";
+
+// The page bootstrap is the sole runtime source for generic client UI text.
+// Keep the lookup here with the gameplay runtime so there is no separate
+// client translation data file to load or cache.
+(function () {
+    const bootstrapElement = document.getElementById("segusum-bootstrap");
+    let bootstrap = { language: "en", strings: {} };
+    try {
+        if (bootstrapElement) bootstrap = JSON.parse(bootstrapElement.textContent || "{}");
+    }
+    catch (error) {
+        console.error("Segusum client string bootstrap is invalid", error);
+    }
+    window.segusumBootstrap = bootstrap;
+    window.segusumClientStrings = bootstrap.strings || {};
+})();
+
+function segusumTranslate(key) {
+    const value = window.segusumClientStrings?.[key];
+    if (value == null) {
+        console.error("Missing Segusum client string: " + key);
+        return key;
+    }
+    return value;
+}
+
+String.prototype.tr = function () {
+    return segusumTranslate(String(this));
+};
 
 function replaceTargetPossessive(text, target, templateSource) {
     if (text == null || !text.includes("{targetPossessive}")) return text;
@@ -245,7 +274,7 @@ let g_tutorialMode = false;
 let g_afterTutorialPrompt = null;
 function setTutorialMode(mode) {
     g_tutorialMode = mode === true;
-    $("#btnPlayTutorial").text(g_tutorialMode ? "Esci dal tutorial" : "Gioca tutorial");
+    $("#btnPlayTutorial").text((g_tutorialMode ? "exitTutorial" : "playTutorial").tr());
     if (localStorage[credentialsId]) {
         const c = JSON.parse(localStorage[credentialsId]);
         c.tutorialMode = g_tutorialMode;
@@ -3278,10 +3307,10 @@ function setGameModeOnServer(casualMode) {
 async function chooseGameModeThenRun(ar) {
     return new Promise(resolve => {
         const room = ar?.room || {};
-        const proTitle = room.grrProInterfaceTitle || "Interfaccia Pro";
-        const proSubtitle = room.grrProInterfaceSubtitle || "Il gioco ti chiede di spiegare cosa pensi succederà, così non rischi di risolvere puzzle per caso mentre sperimenti. Adatta ai puristi dei puzzle.";
-        const casualTitle = room.grrCasualInterfaceTitle || "Interfaccia casual";
-        const casualSubtitle = room.grrCasualInterfaceSubtitle || "Simile alle interfacce tradizionali. Scegli questa se ti interessa soprattutto la storia e non ti importa se risolverai dei puzzle per caso mentre sperimenti.";
+        const proTitle = room.grrProInterfaceTitle || "proInterfaceTitle".tr();
+        const proSubtitle = room.grrProInterfaceSubtitle || "proInterfaceSubtitle".tr();
+        const casualTitle = room.grrCasualInterfaceTitle || "casualInterfaceTitle".tr();
+        const casualSubtitle = room.grrCasualInterfaceSubtitle || "casualInterfaceSubtitle".tr();
 
         let completed = false;
         let dialog;
@@ -3312,7 +3341,7 @@ async function chooseGameModeThenRun(ar) {
                 .text(subtitle)
                 .appendTo(card);
             $("<button type='button' class='btn btn-primary gameModeChooseButton'>")
-                .text("Scegli questa")
+                .text("chooseThis".tr())
                 .css({ width: "100%" })
                 .on("click", () => choose(casualMode))
                 .appendTo(card);
@@ -3329,20 +3358,20 @@ async function chooseGameModeThenRun(ar) {
                 callStartNewGame(true, casualMode);
         };
         $("<button type='button' class='btn btn-default'>")
-            .text("Gioca tutorial in modalità Normale")
+            .text("playTutorialNormal".tr())
             .css({ width: "100%", marginBottom: "7px" })
             .on("click", () => startTutorial(false))
             .appendTo(tutorialButtons);
         $("<button type='button' class='btn btn-default'>")
-            .text("Gioca tutorial in modalità Casual")
+            .text("playTutorialCasual".tr())
             .css({ width: "100%" })
             .on("click", () => startTutorial(true))
             .appendTo(tutorialButtons);
 
         dialog = BootstrapDialog.show({
-            title: "Scegli l'interfaccia",
+            title: "chooseInterface".tr(),
             message: $("<div>")
-                .append($("<p>").text("Scegli come vuoi giocare:"))
+                .append($("<p>").text("chooseHowPlay".tr()))
                 .append(modeDescriptions)
                 .append(tutorialButtons),
             closable: false
@@ -9301,6 +9330,29 @@ async function onCanceledTextInput(ar) {
 
 $(function () {
 
+    $(`[my_transl]`).each((i, el0) => {
+        const el = $(el0);
+        el.text(String(el.attr("my_transl")).tr());
+    });
+
+    // The restart action is available only while the tutorial is running.
+    $("#btnPlayTutorial").closest(".form-group").hide();
+    if ($("#btnRestartTutorial").length === 0) {
+        $("<div class='form-group' id='restartTutorialGroup'>")
+            .append($("<button id='btnRestartTutorial' type='button' class='form-control btn btn-default btnOpt'>")
+                .text("restartTutorial".tr()))
+            .insertAfter($("#btnNewGame").closest(".form-group"));
+    }
+    const updateRestartTutorialButton = () => $("#restartTutorialGroup").toggle(g_tutorialMode === true);
+    updateRestartTutorialButton();
+    $("#options").on("show.bs.modal", updateRestartTutorialButton);
+    $("#btnRestartTutorial").off("click").on("click", async function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        $("#options").modal("hide");
+        await callStartNewGame(true, g_last_room_desc?.grrCasualMode === true);
+    });
+
     $("#clientDiagnosticsReload").click(() => window.location.reload());
     $("#clientDiagnosticsCopy").click(async () => {
         const text = $("#clientDiagnosticsText").text();
@@ -10416,7 +10468,7 @@ $(function () {
     });
 
     function mostraDialogOpzioni(e) {
-        $("#btnPlayTutorial").text(g_tutorialMode ? "Esci dal tutorial" : "Gioca tutorial");
+        $("#btnPlayTutorial").text((g_tutorialMode ? "exitTutorial" : "playTutorial").tr());
         $("#options").modal("show");
 
         if (localStorage[credentialsId]) {

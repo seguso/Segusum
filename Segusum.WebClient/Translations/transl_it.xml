@@ -137,4 +137,12 @@
   <str key="chooseThis" orig="Choose this" transl="Scegli questa" />
   <str key="chooseInterface" orig="Choose the interface" transl="Scegli l&apos;interfaccia" />
   <str key="chooseHowPlay" orig="Choose how you want to play:" transl="Scegli come vuoi giocare:" />
+  <str key="proInterfaceTitle" orig="Pro interface" transl="Interfaccia Pro" />
+  <str key="proInterfaceSubtitle" orig="The game asks you to explain what you think will happen, so you do not accidentally solve puzzles while experimenting. Best for puzzle purists." transl="Il gioco ti chiede di spiegare cosa pensi succederà, così non rischi di risolvere puzzle per caso mentre sperimenti. Adatta ai puristi dei puzzle." />
+  <str key="casualInterfaceTitle" orig="Casual interface" transl="Interfaccia Casual" />
+  <str key="casualInterfaceSubtitle" orig="Similar to traditional interfaces. Choose this if you care mostly about the story and do not mind accidentally solving puzzles while experimenting." transl="Simile alle interfacce tradizionali. Scegli questa se ti interessa soprattutto la storia e non ti importa se risolverai dei puzzle per caso mentre sperimenti." />
+  <str key="playTutorialNormal" orig="Play the tutorial in Pro mode" transl="Gioca il tutorial in modalità Pro" />
+  <str key="playTutorialCasual" orig="Play the tutorial in Casual mode" transl="Gioca il tutorial in modalità Casual" />
+  <str key="exitTutorial" orig="Exit tutorial" transl="Esci dal tutorial" />
+  <str key="playTutorial" orig="Play tutorial" transl="Gioca tutorial" />
 </root>

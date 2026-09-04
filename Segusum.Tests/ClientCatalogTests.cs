@@ -37,6 +37,16 @@ public sealed class ClientCatalogTests
     }
 
     [Fact]
+    public void TranslationRuntimeLivesInMainScriptOnly()
+    {
+        var root = FindRepositoryRoot();
+        Assert.False(File.Exists(Path.Combine(root, "Segusum.WebClient", "wwwroot", "js", "clientTransl8.js")));
+        var main = File.ReadAllText(Path.Combine(root, "Segusum.WebClient", "wwwroot", "js", "main43.js"));
+        Assert.Contains("segusumTranslate", main, StringComparison.Ordinal);
+        Assert.DoesNotContain("stringheClient", main, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void BootstrapSerializationEscapesUntrustedStringContent()
     {
         var json = JsonSerializer.Serialize(new

@@ -40,14 +40,19 @@ public static class SegusumClientCatalog
         var engine = Load(language);
         var italian = language == "de" ? Load("it") : engine;
         var consumer = LoadConsumerCatalogue(language, consumerRoot);
+        var consumerItalian = language == "de" ? LoadConsumerCatalogue("it", consumerRoot) : consumer;
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var (key, definition) in engine)
         {
             if (overrides.TryGetValue(key, out var overrideSource))
             {
                 var consumerSource = ToCatalogOriginal(overrideSource);
-                result[key] = consumer.TryGetValue(consumerSource, out var translated) && translated != "+"
-                    ? translated.Replace("''", "\"", StringComparison.Ordinal) : overrideSource;
+                var translated = consumer.TryGetValue(consumerSource, out var localized)
+                    && localized != "+" ? localized : null;
+                if (translated is null && language == "de")
+                    translated = consumerItalian.TryGetValue(consumerSource, out localized)
+                        && localized != "+" ? localized : null;
+                result[key] = translated?.Replace("''", "\"", StringComparison.Ordinal) ?? overrideSource;
                 continue;
             }
             var selected = definition.Translation != "+"
