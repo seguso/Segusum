@@ -8,6 +8,7 @@ public sealed partial class World : WorldBase
     private readonly Room room = new() { roomId = "room" };
     private readonly LogicObj token = new() { loId = "token", name = "token" };
     private readonly Objective goal = new() { serId = "goal", nameReadable = "goal" };
+    private readonly Explanation exQualcosa = new("ex-qualcosa", "Qualcosa");
 
     public World(string language) : base(language)
     {

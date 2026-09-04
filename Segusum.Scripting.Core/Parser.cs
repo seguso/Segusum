@@ -1,64 +1,24 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-
 namespace Segusum.Scripting.Core;
-
 public static class DslParser
 {
-    public static (DslDocument Document, IReadOnlyList<DslDiagnostic> Diagnostics) Parse(DslSource source)
-    {
-        var lines = source.Text.Replace("\r", "").Split('\n');
-        var declarations = new List<DslDeclaration>();
-        var diagnostics = new List<DslDiagnostic>();
-        for (var i = 0; i < lines.Length; i++)
-        {
-            var raw = lines[i].Trim();
-            if (raw.Length == 0 || raw.StartsWith("#")) continue;
-            if (raw.StartsWith("state "))
-            {
-                var match = System.Text.RegularExpressions.Regex.Match(raw, @"^state\s+([^:]+):\s*([A-Za-z0-9_]+)\s*=\s*(.+)$");
-                if (!match.Success) { diagnostics.Add(Error("SEGDSL001", "Invalid state declaration.", source.Path, i)); continue; }
-                declarations.Add(new StateDeclaration(match.Groups[1].Value.Trim(), match.Groups[2].Value, match.Groups[3].Value.Trim(), source.Path, i + 1));
-                continue;
-            }
-            if (raw.StartsWith("var ") || raw is "next") continue;
-            if (raw.StartsWith("def "))
-            {
-                var header = raw.TrimEnd(':');
-                var match = System.Text.RegularExpressions.Regex.Match(header, @"^def\s+([^\s]+)(?:\s+(.+?))?\s+ret\s+([A-Za-z0-9_]+)$");
-                if (!match.Success) match = System.Text.RegularExpressions.Regex.Match(header, @"^def\s+([^\s]+)(?:\s+(.+))?$" );
-                if (!match.Success) { diagnostics.Add(Error("SEGDSL002", "Invalid def declaration.", source.Path, i)); continue; }
-                var body = new List<string>(); var j = i + 1;
-                while (j < lines.Length && lines[j].Trim() != "end") { body.Add(lines[j].Trim()); j++; }
-                var parameters = ParseParameters(match.Groups[2].Value);
-                var ret = match.Groups.Count > 3 && match.Groups[3].Success ? match.Groups[3].Value : null;
-                declarations.Add(new FunctionDeclaration(match.Groups[1].Value, parameters, ret, body, source.Path, i + 1)); i = j; continue;
-            }
-            if (raw.StartsWith("combine ") || raw.StartsWith("use "))
-            {
-                var kind = raw.StartsWith("combine ") ? "combine" : raw.Contains(" for ") ? "use-for" : "use-here";
-                var header = raw.TrimEnd(':');
-                var match = kind == "combine"
-                    ? System.Text.RegularExpressions.Regex.Match(header, @"^combine\s+(\S+)\s+with\s+(\S+)")
-                    : System.Text.RegularExpressions.Regex.Match(header, @"^use\s+(\S+)(?:\s+for\s+(\S+)|\s+here)");
-                if (!match.Success) { diagnostics.Add(Error("SEGDSL003", "Invalid handler declaration.", source.Path, i)); continue; }
-                var body = new List<string>(); var j = i + 1; while (j < lines.Length && lines[j].Trim() != "end") { body.Add(lines[j].Trim()); j++; }
-                var phrase = body.FirstOrDefault(x => x.StartsWith("phrase "))?.Substring(7).Trim();
-                var exp = body.FirstOrDefault(x => x.StartsWith("exp "))?.Substring(4).Trim();
-                var cond = body.FirstOrDefault(x => x.StartsWith("possible-when "))?.Substring(14).Trim();
-                declarations.Add(new HandlerDeclaration(kind, match.Groups[1].Value, kind == "combine" ? match.Groups[2].Value : null, kind == "use-for" ? match.Groups[2].Value : null, phrase, exp, cond, body, source.Path, i + 1)); i = j; continue;
-            }
-            if (raw.StartsWith("new-cycle")) { declarations.Add(new CycleDeclaration("cyc", source.Path, i + 1)); continue; }
-            if (raw.StartsWith("add "))
-            {
-                var m = System.Text.RegularExpressions.Regex.Match(raw, @"^add\s+(\S+)\s+(\S+)(?:\s+(important))?");
-                if (!m.Success) diagnostics.Add(Error("SEGDSL004", "Cycle element ID is required.", source.Path, i));
-                else { var body = new List<string>(); var j = i + 1; while (j < lines.Length && lines[j].Trim() != "end") { body.Add(lines[j].Trim()); j++; } declarations.Add(new CycleElementDeclaration(m.Groups[1].Value, m.Groups[2].Value, m.Groups[3].Success, body.FirstOrDefault(x => x.StartsWith("when "))?.Substring(5), body, source.Path, i + 1)); i = j; }
-            }
-        }
-        return (new DslDocument(declarations), diagnostics);
-    }
-    private static IReadOnlyList<(string Name, string Type)> ParseParameters(string value) => value.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries).Select(x => { var text = x.Trim(); var index = text.IndexOf(':'); return (index < 0 ? text : text.Substring(0, index).Trim(), index < 0 ? "object" : text.Substring(index + 1).Trim()); }).ToArray();
-    private static DslDiagnostic Error(string id, string message, string path, int line) => new(id, message, path, line + 1, 1);
+ public static (DslDocument Document,IReadOnlyList<DslDiagnostic> Diagnostics) Parse(DslSource s){var d=new List<DslDiagnostic>();var p=new Parser(s,DslLexer.Lex(s,d),d);return(new DslDocument(p.ParseDocument()),d);}
+ private sealed class Parser
+ {
+  readonly DslSource source;readonly IReadOnlyList<DslToken> tokens;readonly List<DslDiagnostic> diagnostics;int position;
+  public Parser(DslSource s,IReadOnlyList<DslToken> t,List<DslDiagnostic>d){source=s;tokens=t;diagnostics=d;}
+  DslToken Current=>tokens[position];bool Is(string s)=>Current.Text==s;DslToken Take()=>tokens[position++];void Skip(){while(Current.Kind==DslTokenKind.NewLine||Current.Kind==DslTokenKind.Semicolon)Take();}string Word(){if(Current.Kind!=DslTokenKind.Identifier){Error("Expected identifier.");return "_error";}return Take().Text;}void Need(string s){if(Is(s))Take();else Error("Expected '"+s+"'.");}void Error(string s){diagnostics.Add(new("SEGDSL101",s,Current.Span));while(Current.Kind!=DslTokenKind.NewLine&&Current.Kind!=DslTokenKind.Semicolon&&Current.Kind!=DslTokenKind.EndOfFile)Take();}
+  public IReadOnlyList<DslDeclaration> ParseDocument(){var r=new List<DslDeclaration>();Skip();while(Current.Kind!=DslTokenKind.EndOfFile){var s=Current.Span;var w=Word();if(w=="state")r.Add(State(s));else if(w=="def")r.Add(Function(s));else if(w=="combine")r.Add(Handler("combine",s));else if(w=="use")r.Add(Handler("use",s));else if(w=="add")r.Add(Cycle(s));else if(w=="var"){var n=Word();Need("=");Need("new-cycle");r.Add(new CycleDeclaration(n,s));}else if(w=="next")Word();else Error("Unexpected declaration '"+w+"'.");Skip();}return r;}
+  StateDeclaration State(SourceSpan s){var n=Word();Need(":");var ty=Word();Need("=");return new(n,ty,Expression(),s);}
+  FunctionDeclaration Function(SourceSpan s){var n=Word();var p=new List<(string,string)>();while(!Is("ret")&&!Is(":")&&Current.Kind!=DslTokenKind.NewLine){var pn=Word();Need(":");p.Add((pn,Word()));if(Is(","))Take();}string? ret=null;if(Is("ret")){Take();ret=Word();}return new(n,p,ret,Block(),s);}
+  HandlerDeclaration Handler(string kind,SourceSpan s){var first=Word();string? second=null;string? target=null;if(kind=="combine"){Need("with");second=Word();}else if(Is("for")){Take();kind="use-for";target=Word();}else kind="use-here";var b=Block();var phrase=b.OfType<DialogueStatement>().FirstOrDefault(x=>x.Character=="__phrase")?.Text is LiteralExpression l?l.Value:null;var exp=b.OfType<DialogueStatement>().FirstOrDefault(x=>x.Character=="__exp")?.Text is IdentifierExpression e?e.Name:null;var cond=b.OfType<DialogueStatement>().FirstOrDefault(x=>x.Character=="__possible")?.Text;var body=b.Where(x=>x is not DialogueStatement {Character:"__phrase" or "__exp" or "__possible"}).ToArray();return new(kind,first,second,target,phrase,exp,cond,body,s);}
+  CycleElementDeclaration Cycle(SourceSpan s){var c=Word();var id=Word();var im=Is("important");if(im)Take();var b=Block(false);var when=b.OfType<DialogueStatement>().FirstOrDefault(x=>x.Character=="__when")?.Text;return new(c,id,im,when,b.Where(x=>x is not DialogueStatement {Character:"__when"}).ToArray(),s);}
+  IReadOnlyList<DslStatement> Block(bool colon=true){if(colon)Need(":");Skip();var r=new List<DslStatement>();while(!Is("end")&&Current.Kind!=DslTokenKind.EndOfFile){var s=Current.Span;var w=Word();if(w=="if")r.Add(If(s));else if(w=="ret")r.Add(new ReturnStatement(Expression(),s));else if(w=="nar")r.Add(new NarStatement(Expression(),s));else if(w=="call"){position--;r.Add(new CallStatement(Expression(),s));}else if(w=="var"){var n=Word();Need("=");r.Add(new VariableDeclaration(n,Expression(),s));}else if(w=="next")r.Add(new NextCycleStatement(Expression(),s));else if(w=="add")r.Add(Add(s));else if(w=="phrase")r.Add(new DialogueStatement("__phrase",Expression(),s));else if(w=="exp")r.Add(new DialogueStatement("__exp",Expression(),s));else if(w=="possible-when")r.Add(new DialogueStatement("__possible",Expression(),s));else if(w=="when")r.Add(new DialogueStatement("__when",Expression(),s));else if(w=="makes-no-sense")r.Add(new MakesNoSenseStatement(s));else if(w=="finish-game")r.Add(new FinishGameStatement(s));else if(w=="do-not-advance-time")r.Add(new DoNotAdvanceTimeStatement(s));else if(Is(":")){Take();r.Add(new DialogueStatement(w,Expression(),s));}else if(Is("++")){Take();r.Add(new IncrementStatement(w,s));}else if(Is("=")||Is("+=")||Is("-=")){var op=Take().Text;r.Add(new AssignmentStatement(w,op,Expression(),s));}else Error("Unknown statement.");Skip();}Need("end");return r;}
+  AddCycleElementStatement Add(SourceSpan s){var c=Word();var id=Word();var im=Is("important");if(im)Take();return new(c,id,im,null,Block(false),s);}
+  IfStatement If(SourceSpan s){var c=Expression();var b=Block();return new(new[]{(c,b)},null,s);}
+  DslExpression Expression(int min=0){var left=Prefix();while(true){var op=Current.Text;var p=op=="or"?1:op=="and"?2:op is "==" or "!=" or ">" or ">=" or "<" or "<="?3:0;if(p<=min)break;Take();left=new BinaryExpression(op,left,Expression(p),left.Span);}return left;}
+  DslExpression Prefix(){var s=Current.Span;if(Is("not")){Take();return new UnaryExpression("not",Prefix(),s);}if(Is("call")){Take();var n=Word();var a=new List<DslArgument>();while(Current.Kind==DslTokenKind.Identifier||Current.Kind==DslTokenKind.Number||Current.Kind==DslTokenKind.String||Current.Kind==DslTokenKind.LParen){var q=Current.Span;a.Add(new(null,Prefix(),q));}return new CallExpression(n,a,s);}if(Current.Kind==DslTokenKind.LParen){Take();var e=Expression();Need(")");return new ParenthesizedExpression(e,s);}if(Current.Kind==DslTokenKind.String)return new LiteralExpression(Take().Text,"string",s);if(Current.Kind==DslTokenKind.Number)return new LiteralExpression(Take().Text,"number",s);var id=new IdentifierExpression(Word(),s);if(Is("not-seen-recently")){Take();return new CallExpression("not-seen-recently",new[]{new DslArgument(null,id,s),new DslArgument(null,Prefix(),Current.Span)},s);}return id;}
+ }
 }

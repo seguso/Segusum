@@ -18,7 +18,7 @@ combine token with token:
 end
 
 use token for goal:
-    exp token
+    exp exQualcosa
     active: "Lo uso per l'obiettivo."
 end
 
