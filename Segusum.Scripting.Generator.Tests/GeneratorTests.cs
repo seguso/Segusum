@@ -13,6 +13,60 @@ namespace Segusum.Scripting.Generator.Tests;
 
 public sealed class GeneratorTests
 {
+    private const string LetiziaAcceptanceDsl = """
+world game
+combine travestitiDa with letiziaDeVille:
+    phrase "travestiti da Letizia De Ville per farti vedere da Dracula"
+    exp exDaDracula
+    if (call objectiveIsCurrent puFaiInModoCheDraculaTiAccolga):
+        if (call namedCutSceneIsSeen ncsLetteraDiDraculaAllaZiaEdwige):
+            olivia: "Ho una grande idea, Camilla! Dracula vuole essere famoso! Allora mi travestirò da giornalista, così mi accoglierà!"
+            camilla: "Cosa?"
+            olivia: "Presto, Letizia! Si spogli! Mi servono dei vestiti da giornalista!"
+            letiziaDeVille: "Ma che stai dicendo, bambina? Non esistono i vestiti da giornalista!"
+            olivia: "Ah, già! È vero! Quello che ho detto è senza senso!"
+            camilla: "Ma forse sei vicina alla soluzione, Olivia! Non mollare!"
+        else:
+            olivia: "Non capisco che senso ha!"
+        end
+    elif (call draculaAdessoETuoAmico):
+        olivia: "Ho un'idea! Mi travesto da Letizia De Ville e mi faccio vedere da Dracula!"
+        camilla: "Che dici, Olivia? Dracula crede già che tu sia una giornalista!"
+        olivia: "Ah, già! È vero! Scusa, non stavo seguendo!"
+    else:
+        olivia: "Ho un'idea! Mi travesto da Letizia De Ville e mi faccio vedere da Dracula! Qualcosa succederà, no?"
+        camilla: "Certo! Succederà che Dracula ti ammazza!"
+        olivia: "Ehm, giusto, giusto! Forse è meglio di no!"
+    end
+end
+""";
+
+    [Fact]
+    public void LetiziaDeVilleAcceptanceCompilesAndBindsRealShape()
+    {
+        var parsed = DslParser.Parse(new DslSource("letizia.seg", LetiziaAcceptanceDsl));
+        Assert.Empty(parsed.Diagnostics);
+        var result = Run(LetiziaAcceptanceDsl, """
+public Character travestitiDa = null!;
+public Character letiziaDeVille = null!;
+public Character olivia = null!;
+public Character camilla = null!;
+public Explanation exDaDracula = null!;
+public Objective puFaiInModoCheDraculaTiAccolga = null!;
+public NamedCutSceneId ncsLetteraDiDraculaAllaZiaEdwige = null!;
+public bool draculaAdessoETuoAmico() => true;
+""");
+        Assert.True(result.Diagnostics.Length == 0, string.Join(Environment.NewLine, result.Diagnostics.Select(d => d.ToString())));
+        AssertGeneratedCompilationSucceeds(result);
+        var generated = Generated(result);
+        Assert.Contains("addHandlerCombine(travestitiDa,letiziaDeVille", generated);
+        Assert.Contains("exDaDracula", generated);
+        Assert.Contains("objectiveIsCurrent(puFaiInModoCheDraculaTiAccolga)", generated);
+        Assert.Contains("namedCutSceneIsSeen(ncsLetteraDiDraculaAllaZiaEdwige)", generated);
+        Assert.Contains("draculaAdessoETuoAmico()", generated);
+        Assert.Contains("#line 2 \"test.seg\"", generated);
+    }
+
     private const string MikeAcceptanceDsl = """
 world game
 def creaCicloMikeNonRipete ret Cycle:

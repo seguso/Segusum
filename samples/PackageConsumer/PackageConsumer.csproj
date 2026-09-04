@@ -9,6 +9,6 @@
     <CompilerGeneratedFilesOutputPath>$(BaseIntermediateOutputPath)generated</CompilerGeneratedFilesOutputPath>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Segusum.AspNetCore" Version="0.1.28" />
+    <PackageReference Include="Segusum.AspNetCore" Version="0.1.29" />
   </ItemGroup>
 </Project>
