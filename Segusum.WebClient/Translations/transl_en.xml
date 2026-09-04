@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <str key="remember" orig="Remember" transl="Remember" />
+  <str key="nienteDaRacQui" orig="Nothing to pick up here" transl="Nothing to pick up here" />
+  <str key="nienteDaRicQui" orig="Nothing to remember here" transl="Nothing to remember here" />
+  <str key="startNewGame" orig="Start new game" transl="Start new game" />
+  <str key="deduciChe1Puntini" orig="Deduce that {1} ..." transl="Deduce that {1} ..." />
+  <str key="thingsToDoAndDiary" orig="To-do list and diary" transl="To-do list and diary" />
+  <str key="Nientedispeciale" orig="Nothing special" transl="Nothing special" />
+  <str key="raccogliPuntini" orig="Pick up" transl="Pick up" />
+  <str key="quiVedi" orig="Here you see:" transl="Here you see:" />
+  <str key="objectsInRoom" orig="Objects in the room:" transl="Objects in the room:" />
+  <str key="azioniPossibili" orig="Possible actions:" transl="Possible actions:" />
+  <str key="inmodoche" orig="What will happen then?" transl="What will happen then?" />
+  <str key="hoUnIdea" orig="I&apos;ve got an idea" transl="I&apos;ve got an idea" />
+  <str key="use1For" orig="I can use {1} in order to ..." transl="I can use {1} in order to ..." />
+  <str key="haicomposto" orig="You have chosen:" transl="You have chosen:" />
+  <str key="cosasucced" orig="What will happen after your action?" transl="What will happen after your action?" />
+  <str key="nextHint" orig="Show the next hint" transl="Show the next hint" />
+  <str key="scegliEnigmaSuCuiHint" orig="Which puzzle do you need a hint for?" transl="Which puzzle do you need a hint for?" />
+  <str key="hintsystem" orig="Hint system" transl="Hint system" />
+  <str key="correlateTo" orig="find a link between &quot;{1}&quot; and {2}" transl="find a link between &quot;{1}&quot; and {2}" />
+  <str key="saySomethingTo" orig="Tell something to {1}" transl="Tell something to {1}" />
+  <str key="talkTo" orig="talk to {1}" transl="talk to {1}" />
+  <str key="deduceSomethingAbout" orig="deduce something about {1}" transl="deduce something about {1}" />
+  <str key="deduce" orig="deduce" transl="deduce" />
+  <str key="sayThatYouAre" orig="Say that you are..." transl="Say that you are..." />
+  <str key="egli" orig="he" transl="he" />
+  <str key="ella" orig="she" transl="she" />
+  <str key="essoSogg" orig="it" transl="it" />
+  <str key="essiSogg" orig="they" transl="they" />
+  <str key="lui" orig="him" transl="him" />
+  <str key="lei" orig="her" transl="her" />
+  <str key="essoOgg" orig="it" transl="it" />
+  <str key="essiOgg" orig="them" transl="them" />
+  <str key="lookat" orig="look at" transl="look at" />
+  <str key="lookatUpper" orig="Look at" transl="Look at" />
+  <str key="hideInsideUpper" orig="Hide inside" transl="Hide inside" />
+  <str key="climbUpper" orig="Climb" transl="Climb" />
+  <str key="dressUpAsUpper" orig="Disguise as" transl="Disguise as" />
+  <str key="pickup" orig="pick up" transl="pick up" />
+  <str key="walk" orig="walk" transl="walk" />
+  <str key="talk" orig="talk" transl="talk" />
+  <str key="walkUpper" orig="Walk" transl="Walk" />
+  <str key="talkUpper" orig="Talk" transl="Talk" />
+  <str key="talkToUpper" orig="Talk to" transl="Talk to" />
+  <str key="pickupUpper" orig="Pick up" transl="Pick up" />
+  <str key="useUpper" orig="Use" transl="Use" />
+  <str key="useForUpper" orig="Use for" transl="Use for" />
+  <str key="deduceUpper" orig="Deduce that" transl="Deduce that" />
+  <str key="diary" orig="diary" transl="diary" />
+  <str key="diaryUpper" orig="Diary" transl="Diary" />
+  <str key="howToUseIt" orig="How do you want to use it?" transl="How do you want to use it?" />
+  <str key="usewith12" orig="use {1} with {2}" transl="use {1} with {2}" />
+  <str key="use1" orig="use {1}" transl="use {1}" />
+  <str key="you_have_advanced_on_other_dev" orig="You have advanced the game on another device. Click &quot;Refresh&quot; to continue from the point reached on the other device." transl="You have advanced the game on another device. Click &quot;Refresh&quot; to continue from the point reached on the other device." />
+  <str key="pleaseRefresh" orig="Please refresh" transl="Please refresh" />
+  <str key="logOut" orig="Log out" transl="Log out" />
+  <str key="restart" orig="Restart" transl="Restart" />
+  <str key="toStartOver" orig="To start a new game" transl="To start a new game" />
+  <str key="toLoginAsAno" orig="To log in as another user" transl="To log in as another user" />
+  <str key="error" orig="Error" transl="Error" />
+  <str key="cantContactServer" orig="The server does not respond. Please check your internet connection." transl="The server does not respond. Please check your internet connection." />
+  <str key="tooFar" orig="Too far" transl="Too far" />
+  <str key="youCanOnlyMove" orig="You can only move to locations you already visited, or that are close to locations you already visited." transl="You can only move to locations you already visited, or that are close to locations you already visited." />
+  <str key="pressToCont" orig="Press to continue" transl="Press to continue" />
+  <str key="savegameInvalid" orig="Savegame invalid" transl="Savegame invalid" />
+  <str key="yourSaveg" orig="Your savegame is too old and is now invalid. Please clear the browser cache and start over." transl="Your savegame is too old and is now invalid. Please clear the browser cache and start over." />
+  <str key="refresh" orig="Refresh" transl="Refresh" />
+  <str key="userNotFound" orig="Your user was not found or the password is wrong." transl="Your user was not found or the password is wrong." />
+  <str key="questoNomeUt" orig="This username is already in use. Please specify a different one." transl="This username is already in use. Please specify a different one." />
+  <str key="youHaventSpec" orig="You haven&apos;t specified all the values." transl="You haven&apos;t specified all the values." />
+  <str key="passwordsNotEq" orig="The two passwords are not equal." transl="The two passwords are not equal." />
+  <str key="registered" orig="Registered" transl="Registered" />
+  <str key="seiReg" orig="You are now registered." transl="You are now registered." />
+  <str key="loggedIn" orig="Logged in" transl="Logged in" />
+  <str key="yourGameProgress" orig="Your game progress has been restored." transl="Your game progress has been restored." />
+  <str key="restoreSave" orig="Restore savegame and lose the current progress?" transl="Restore savegame and lose the current progress?" />
+  <str key="savegamNotFou" orig="Savegame not found." transl="Savegame not found." />
+  <str key="thingsToDo" orig="Things to do" transl="Things to do" />
+  <str key="areYouStuck" orig="Are you stuck?" transl="Are you stuck?" />
+  <str key="quickActions" orig="Quick actions" transl="Quick actions" />
+  <str key="rereadClues" orig="Remember the past" transl="Remember the past" />
+  <str key="yourIqLevel" orig="Your current IQ score is:" transl="Your current IQ score is:" />
+  <str key="other" orig="Other:" transl="Other:" />
+  <str key="rememberAnObject" orig="Remember an object" transl="Remember an object" />
+  <str key="saveGame" orig="Save game" transl="Save game" />
+  <str key="loadGame" orig="Load game" transl="Load game" />
+  <str key="options" orig="Options" transl="Options" />
+  <str key="optionsLower" orig="options" transl="options" />
+  <str key="previousLine" orig="Previous line" transl="Previous line" />
+  <str key="skip" orig="Skip" transl="Skip" />
+  <str key="pleaseWaitPuntini" orig="Please wait..." transl="Please wait..." />
+  <str key="back" orig="Back" transl="Back" />
+  <str key="answer" orig="Answer" transl="Answer" />
+  <str key="solvePuzzle" orig="Solve puzzle" transl="Solve puzzle" />
+  <str key="chooseObj" orig="Objects in this place:" transl="Objects in this place:" />
+  <str key="chooseVerb" orig="Choose a verb:" transl="Choose a verb:" />
+  <str key="chooseHowtoCont" orig="Choose how to continue the sentence:" transl="Choose how to continue the sentence:" />
+  <str key="explainWhy" orig="Explain why this makes sense:" transl="Explain why this makes sense:" />
+  <str key="backOne" orig="Back one step" transl="Back one step" />
+  <str key="close" orig="Close" transl="Close" />
+  <str key="inv" orig="Inventory" transl="Inventory" />
+  <str key="hereAreTheoBjectswithyou" orig="Here are the objects you are carrying or that are in the current location." transl="Here are the objects you are carrying or that are in the current location." />
+  <str key="youcanclickano" orig="Click an object to remember what it is." transl="Click an object to remember what it is." />
+  <str key="pastScenes" orig="Past scenes" transl="Past scenes" />
+  <str key="oftencontain" orig="Past scenes often contain clues to move forward." transl="Past scenes often contain clues to move forward." />
+  <str key="savegameas" orig="Save game as" transl="Save game as" />
+  <str key="save" orig="Save" transl="Save" />
+  <str key="typename" orig="Type the name:" transl="Type the name:" />
+  <str key="existingSavegames" orig="Existing savegames (most recent first):" transl="Existing savegames (most recent first):" />
+  <str key="overwriteSave" orig="The savegame &quot;{1}&quot; already exists. Do you want to overwrite it?" transl="The savegame &quot;{1}&quot; already exists. Do you want to overwrite it?" />
+  <str key="savegameAlreadyExists" orig="This name already exists: saving will overwrite that savegame." transl="This name already exists: saving will overwrite that savegame." />
+  <str key="register" orig="Register" transl="Register" />
+  <str key="login" orig="Log in" transl="Log in" />
+  <str key="startnewgame" orig="New game" transl="New game" />
+  <str key="yourUsername" orig="Your username" transl="Your username" />
+  <str key="chooseAUsername" orig="Choose a username" transl="Choose a username" />
+  <str key="pwd" orig="Password" transl="Password" />
+  <str key="repeatpwd" orig="Repeat password" transl="Repeat password" />
+  <str key="retry" orig="Retry" transl="Retry" />
+  <str key="objectsInThisPlace" orig="Objects in this place:" transl="Objects in this place:" />
+  <str key="objectsYouAreCarrying" orig="Objects you are carrying:" transl="Objects you are carrying:" />
+  <str key="loginInstead" orig="I already have an account, I want to login" transl="I already have an account, I want to login" />
+  <str key="registerInstead" orig="I don&apos;t have an account, I want to register" transl="I don&apos;t have an account, I want to register" />
+  <str key="nonHaiSalv" orig="You have no saved games." transl="You have no saved games." />
+  <str key="enterPwd" orig="Your password" transl="Your password" />
+  <str key="pickup1" orig="pick up {1}" transl="pick up {1}" />
+  <str key="look1" orig="look at {1}" transl="look at {1}" />
+  <str key="restartTutorial" orig="Restart tutorial" transl="Restart tutorial" />
+  <str key="chooseTutorialQuestion" orig="Would you like to play the interface tutorial?" transl="Would you like to play the interface tutorial?" />
+  <str key="tutorialStronglyRecommendedLabel" orig="Strongly recommended:" transl="Strongly recommended:" />
+  <str key="tutorialStronglyRecommendedText" orig="It is a short minigame designed to teach you the interface before starting the game." transl="It is a short minigame designed to teach you the interface before starting the game." />
+  <str key="tutorialInterfaceTitle" orig="Interface tutorial" transl="Interface tutorial" />
+  <str key="yesPlayTutorial" orig="Yes, play the tutorial" transl="Yes, play the tutorial" />
+  <str key="noStartGame" orig="No, start the game" transl="No, start the game" />
+  <str key="chooseThis" orig="Choose this" transl="Choose this" />
+  <str key="chooseInterface" orig="Choose the interface" transl="Choose the interface" />
+  <str key="chooseHowPlay" orig="Choose how you want to play:" transl="Choose how you want to play:" />
+</root>

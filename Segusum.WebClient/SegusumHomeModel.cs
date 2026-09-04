@@ -9,4 +9,6 @@ public sealed class SegusumHomeModel
     public string GameAssetPrefix { get; init; } = "";
     public string Title { get; init; } = "Segusum game";
     public string Credits { get; init; } = "A game made with Segusum.";
+    public IReadOnlyDictionary<string, string> ClientStrings { get; init; } =
+        new Dictionary<string, string>(StringComparer.Ordinal);
 }

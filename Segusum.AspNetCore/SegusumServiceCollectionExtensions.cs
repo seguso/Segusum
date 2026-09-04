@@ -16,6 +16,19 @@ public sealed class SegusumOptions
     public string InventoryIconsPath { get; set; } = "_content/Segusum.WebClient/assets/icons";
     public string GameAssetPrefix { get; set; } = "";
     public string Credits { get; set; } = "A game made with Segusum.";
+    private readonly Dictionary<string, string> clientStringOverrides = new(StringComparer.Ordinal);
+
+    public void OverrideClientString(string key, string source)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        ArgumentNullException.ThrowIfNull(source);
+        if (!SegusumClientCatalog.Load("en").ContainsKey(key))
+            throw new ArgumentException($"Unknown Segusum client string key: {key}", nameof(key));
+        if (!clientStringOverrides.TryAdd(key, source))
+            throw new ArgumentException($"Client string key already overridden: {key}", nameof(key));
+    }
+
+    internal IReadOnlyDictionary<string, string> ClientStringOverrides => clientStringOverrides;
 }
 
 public interface ISegusumWorldFactory

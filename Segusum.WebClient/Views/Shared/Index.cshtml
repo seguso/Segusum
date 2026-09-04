@@ -2,6 +2,8 @@
 
 @{
     Layout = null;
+    var bootstrapJson = System.Text.Json.JsonSerializer.Serialize(
+        new { language = Model.Language, strings = Model.ClientStrings });
 }
 <!DOCTYPE html>
 <html>
@@ -49,7 +51,8 @@
 
     </script>
 
-    <script src="~/_content/Segusum.WebClient/js/clientTransl8.js"></script>
+    <script type="application/json" id="segusum-bootstrap">@Html.Raw(bootstrapJson)</script>
+    <script src="~/_content/Segusum.WebClient/js/clientTransl8.js?ver=2"></script>
     <script src="~/_content/Segusum.WebClient/js/main43.js"></script>
 
     <link href="~/_content/Segusum.WebClient/css/segusum.css" rel="stylesheet" />
@@ -240,7 +243,7 @@
 
                         <button class="btn btn-default btnVerbObject form-control btnGroupedRounded primoFiglio btnSalvaPartita0 scrollingItem" my_transl="saveGame">xxSave game</button>
                         <button class="btn btn-default btnVerbObject form-control btnGroupedRounded btnCaricaPartita0 scrollingItem" my_transl="loadGame">xxLoad game</button>
-                        <button class="btn btn-default btnVerbObject form-control btnGroupedRounded btnOptMio scrollingItem" my_transl="Options">xxxOptions</button>
+                <button class="btn btn-default btnVerbObject form-control btnGroupedRounded btnOptMio scrollingItem" my_transl="options">xxxOptions</button>
 
                         <div class="sepRoom scrollingItem" my_transl="yourIqLevel">xxIl tuo livello di intelligenza attuale è:</div>
 
@@ -1467,9 +1470,6 @@
                             <li role="presentation">
                                 <a href="#profile" role="tab" id="diario-tab" data-toggle="tab" aria-controls="profile" my_transl="diaryUpper">_diario</a>
                             </li>
-                            @*<li role="presentation">
-                                    <a href="#brainstorming" role="tab" id="brainstorming-tab" data-toggle="tab" aria-controls="brainstorming" my_transl="yourThoughts">Brainstorming</a>
-                                </li>*@
                         </ul>
 
                         <div class="tab-content" id="myTabContent">
@@ -1487,12 +1487,6 @@
 
                                 </div>
                             </div>
-                            @*<div class="tab-pane fade" role="tabpanel" id="brainstorming" aria-labelledby="brainstorming-tab">
-                                    <button id="btnMescola" my_transl="rimescola" class="btn btn-primary btnMescola"></button>
-                                    <div class="brainstormingOuter">
-
-                                    </div>
-                                </div>*@
 
                         </div>
 

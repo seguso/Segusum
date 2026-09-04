@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../Segusum/Segusum.csproj" />
+    <ProjectReference Include="../Segusum.WebClient/Segusum.WebClient.csproj" />
   </ItemGroup>
 
   <ItemGroup>

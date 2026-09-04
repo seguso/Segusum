@@ -79,6 +79,11 @@ public sealed class SourceStringExtractor
         {
             if (node.Expression is MemberAccessExpressionSyntax member && member.Name.Identifier.ValueText == "translatable")
                 Add(member.Expression);
+            else if (node.Expression is MemberAccessExpressionSyntax clientOverride &&
+                     clientOverride.Name.Identifier.ValueText == "OverrideClientString")
+                Add(node.ArgumentList.Arguments.FirstOrDefault(x =>
+                    x.NameColon?.Name.Identifier.ValueText == "source")?.Expression
+                    ?? node.ArgumentList.Arguments.ElementAtOrDefault(1)?.Expression);
             else if (node.Expression is IdentifierNameSyntax identifier)
             {
                 var argument = identifier.Identifier.ValueText switch

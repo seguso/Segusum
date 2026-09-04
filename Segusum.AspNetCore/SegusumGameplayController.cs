@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Segusum.WebClient;
 
@@ -7,8 +8,13 @@ namespace Segusum.AspNetCore;
 public sealed class SegusumGameplayController : Controller
 {
     private readonly SegusumOptions options;
+    private readonly IWebHostEnvironment environment;
 
-    public SegusumGameplayController(SegusumOptions options) => this.options = options;
+    public SegusumGameplayController(SegusumOptions options, IWebHostEnvironment environment)
+    {
+        this.options = options;
+        this.environment = environment;
+    }
 
     [HttpGet("")]
     [HttpGet("{language:regex(^en|it|de$)}")]
@@ -23,7 +29,8 @@ public sealed class SegusumGameplayController : Controller
             InventoryIconsPath = options.InventoryIconsPath,
             GameAssetPrefix = options.GameAssetPrefix,
             Title = options.GameTitle,
-            Credits = options.Credits
+            Credits = options.Credits,
+            ClientStrings = SegusumClientCatalog.Resolve(lang, options.ClientStringOverrides, environment.ContentRootPath)
         });
     }
 }
