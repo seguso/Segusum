@@ -35,6 +35,8 @@ public sealed class SegusumGenerator : IIncrementalGenerator
         sb.Append("partial class ").Append(worlds[0].Name).AppendLine("\n{");
         foreach (var state in declarations.OfType<StateDeclaration>()) sb.Append(" private ").Append(Type(state.Type)).Append(' ').Append(Name(state.Name)).Append(" = ").Append(Emit(state.Initializer, binder.Model)).AppendLine(";");
         foreach (var cycle in declarations.OfType<CycleDeclaration>()) sb.Append(" private readonly Cycle ").Append(Name(cycle.Variable)).AppendLine(" = new Cycle();");
+        foreach (var element in declarations.SelectMany(AllCycleElements).GroupBy(x => Name(x.Id), StringComparer.Ordinal).Select(x => x.First()))
+            sb.Append(" public CycleElemId ").Append(Name(element.Id)).AppendLine(" { get; set; } = new();");
         foreach (var function in declarations.OfType<FunctionDeclaration>()) EmitFunction(sb, function, binder.Model);
         sb.AppendLine(" protected override void configureGeneratedActionHandlers()\n {");
         foreach (var handler in declarations.OfType<HandlerDeclaration>()) EmitHandler(sb, handler, sp, binder.Model);
@@ -64,11 +66,11 @@ public sealed class SegusumGenerator : IIncrementalGenerator
     { EmitAdd(sb, element.Cycle, element.Id, element.Important, element.Repeat, element.Condition, element.Body, sp, indent, model); }
     private static void EmitAdd(StringBuilder sb, string cycle, string id, bool important, string? repeat, DslExpression? condition, IReadOnlyList<DslStatement> body, SourceProductionContext sp, string indent, BoundModel model)
     {
-        sb.Append(indent).Append(EmitIdentifier(cycle, model)).Append(".addToCycle(\"").Append(id.Replace("\"", "\\\"")).Append('"');
+        sb.Append(indent).Append(EmitIdentifier(cycle, model)).Append(".addToCycle(").Append(EmitIdentifier(id, model));
         if (important) sb.Append(", Importance.Important");
+        if (repeat is "once" or "forever") sb.Append(", Repeat.").Append(repeat == "once" ? "OnlyOnce" : "Forever");
         if (condition != null) sb.Append(", x => ").Append(Emit(condition, model));
         sb.Append(", x => {\n"); foreach (var statement in body) EmitStatement(sb, statement, indent + "  ", null, model); sb.Append(indent).AppendLine("});");
-        if (repeat is "once" or "forever") sb.Append(indent).Append(Name(cycle)).Append("[" ).Append(Name(cycle)).AppendLine(".Count - 1].repeat = Repeat." + (repeat == "once" ? "OnlyOnce" : "Forever") + ";");
     }
     private static void EmitStatement(StringBuilder sb, DslStatement statement, string indent, string? input, BoundModel model)
     {
@@ -93,17 +95,30 @@ public sealed class SegusumGenerator : IIncrementalGenerator
             default: sb.Append(indent).AppendLine("/* SEGDSL: unsupported statement */"); break;
         }
     }
-    private static string EmitIdentifier(string name, BoundModel model) => Name(name);
+    private static string EmitIdentifier(string name, BoundModel model) => model.References.TryGetValue(name, out var resolved) ? resolved : Name(name);
     private static string Emit(DslExpression expression, BoundModel model) => expression switch
     {
         IdentifierExpression i => model.Values.TryGetValue(i, out var value) ? value.CSharpName : Name(i.Name), LiteralExpression l => l.Kind == "cycle" ? "new Cycle()" : l.Value,
         ParenthesizedExpression p => "(" + Emit(p.Expression, model) + ")", UnaryExpression u => (u.Operator == "not" ? "!" : u.Operator) + Emit(u.Operand, model),
         BinaryExpression b => Emit(b.Left, model) + " " + (b.Operator == "and" ? "&&" : b.Operator == "or" ? "||" : b.Operator) + " " + Emit(b.Right, model),
-        CallExpression c when model.Values.TryGetValue(c, out var domain) && domain.CSharpName == "DOMAIN_NOT_SEEN" => Emit(c.Arguments[0].Expression, model) + ".notSeenRecently(" + Emit(c.Arguments[1].Expression, model) + ")",
-        CallExpression c when model.Values.TryGetValue(c, out var seen) && seen.CSharpName == "DOMAIN_WAS_SEEN" => "wasSeenAtLeastOnce(" + Emit(c.Arguments[0].Expression, model) + ")",
+        CallExpression c when model.DomainOperations.TryGetValue(c, out var domain) && domain.Kind == BoundDomainOperationKind.NotSeenRecently => Emit(domain.Receiver, model) + ".notSeenRecently(" + Emit(domain.Argument!, model) + ")",
+        CallExpression c when model.DomainOperations.TryGetValue(c, out var seen) && seen.Kind == BoundDomainOperationKind.WasSeenAtLeastOnce => "wasSeenAtLeastOnce(" + Emit(seen.Receiver, model) + ")",
         CallExpression c when model.Calls.TryGetValue(c, out var bound) => bound.TargetName + "(" + string.Join(",", bound.Arguments.Select(a => (a.Source.Name == null ? "" : Name(a.ParameterName) + ": ") + Emit(a.Source.Expression, model))) + ")",
         _ => "default"
     };
     private static string Name(string name) { var x = name.Contains('-') ? DslNames.Camel(name) : name; return x is "object" or "string" or "int" or "bool" ? "@" + x : x; }
     private static string Type(string type) => type == "int" ? "int" : type == "bool" ? "bool" : type == "string" ? "string" : type == "DateTime" ? "System.DateTime" : type;
+    private static IEnumerable<CycleElementDeclaration> AllCycleElements(DslDeclaration declaration) => declaration switch
+    {
+        CycleElementDeclaration e => new[] { e }.Concat(FindNested(e.Body)),
+        HandlerDeclaration h => FindNested(h.Body),
+        FunctionDeclaration f => FindNested(f.Body),
+        _ => Enumerable.Empty<CycleElementDeclaration>()
+    };
+    private static IEnumerable<CycleElementDeclaration> FindNested(IEnumerable<DslStatement> statements) => statements.SelectMany(s => s switch
+    {
+        AddCycleElementStatement a => new[] { new CycleElementDeclaration(a.Cycle, a.Id, a.Important, a.Repeat, a.Condition, a.Body, a.Span) }.Concat(FindNested(a.Body)),
+        IfStatement i => i.Branches.SelectMany(x => FindNested(x.Body)).Concat(i.ElseBody == null ? Enumerable.Empty<CycleElementDeclaration>() : FindNested(i.ElseBody)),
+        _ => Enumerable.Empty<CycleElementDeclaration>()
+    });
 }
