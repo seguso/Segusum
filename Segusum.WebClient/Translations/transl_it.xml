@@ -145,4 +145,11 @@
   <str key="playTutorialCasual" orig="Play the tutorial in Casual mode" transl="Gioca il tutorial in modalità Casual" />
   <str key="exitTutorial" orig="Exit tutorial" transl="Esci dal tutorial" />
   <str key="playTutorial" orig="Play tutorial" transl="Gioca tutorial" />
+  <str key="gameModeCasualLabel" orig="Mode: Casual" transl="Modalità: Casual" />
+  <str key="gameModeNormalLabel" orig="Mode: Pro" transl="Modalità: Pro" />
+  <str key="gameModeDialogTitle" orig="Game mode" transl="Modalità di gioco" />
+  <str key="gameModeCurrentCasual" orig="You are playing in Casual mode." transl="Stai giocando in modalità Casual." />
+  <str key="gameModeCurrentNormal" orig="You are playing in Pro mode." transl="Stai giocando in modalità Pro." />
+  <str key="gameModeNormal" orig="Pro" transl="Pro" />
+  <str key="gameModeCasual" orig="Casual" transl="Casual" />
 </root>

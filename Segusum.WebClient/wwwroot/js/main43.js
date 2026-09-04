@@ -7587,7 +7587,7 @@ async function rebuildRoom(roomDesc, doGraphics, doInv) {
 
 
     g_last_room_desc = roomDesc;
-    $("#btnGameMode").text(roomDesc.grrCasualMode === true ? "Modalità: casual" : "Modalità: normale");
+    $("#btnGameMode").text((roomDesc.grrCasualMode === true ? "gameModeCasualLabel" : "gameModeNormalLabel").tr());
 
 
 
@@ -10514,15 +10514,15 @@ $(function () {
         e.stopPropagation();
         const currentlyCasual = g_last_room_desc?.grrCasualMode === true;
         BootstrapDialog.show({
-            title: "Modalità di gioco",
-            message: currentlyCasual ? "Stai giocando in modalità Casual." : "Stai giocando in modalità Normale.",
+            title: "gameModeDialogTitle".tr(),
+            message: (currentlyCasual ? "gameModeCurrentCasual" : "gameModeCurrentNormal").tr(),
             buttons: [
-                { label: "Normale", action: async dlg => {
+                { label: "gameModeNormal".tr(), action: async dlg => {
                     dlg.close();
                     const data = await setGameModeOnServer(false);
                     if (handleErrorsPost(data)) await handleAr(data.ret);
                 }},
-                { label: "Casual", action: async dlg => {
+                { label: "gameModeCasual".tr(), action: async dlg => {
                     dlg.close();
                     const data = await setGameModeOnServer(true);
                     if (handleErrorsPost(data)) await handleAr(data.ret);
