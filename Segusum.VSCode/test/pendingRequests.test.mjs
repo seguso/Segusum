@@ -61,4 +61,16 @@ for (let iteration = 0; iteration < 50; iteration++) {
   void rejectRequest;
 }
 
-console.log('pending request cancellation stress: 50/50 passed; pre-cancel and late-response cases passed; pending=0');
+{
+  const registry = new PendingRequestRegistry();
+  const first = new Promise((resolve, reject) => registry.add(5, { resolve, reject }));
+  const second = new Promise((resolve, reject) => registry.add(6, { resolve, reject }));
+  registry.clear(new Error('host exited'));
+  await assert.rejects(first, /host exited/);
+  await assert.rejects(second, /host exited/);
+  assert.equal(registry.size, 0);
+  assert.equal(registry.resolve(5, 'late after host exit'), false);
+  assert.equal(registry.resolve(6, 'late after host exit'), false);
+}
+
+console.log('pending request cancellation stress: 50/50 passed; pre-cancel, late-response, host-exit cases passed; pending=0');

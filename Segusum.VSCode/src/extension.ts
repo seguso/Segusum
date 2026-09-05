@@ -3,9 +3,12 @@ import { spawn, ChildProcessWithoutNullStreams } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import { PendingRequestRegistry } from './pendingRequests';
+import { InvalidationScheduler, isGeneratedPath } from './invalidation';
 
 type RpcResponse = { id: number; result?: any; error?: { code: string; message: string } };
-const BUILD_ID = 'extension build = completion-cancellation-2026-09-05';
+const BUILD_ID = 'extension build = invalidation-lifecycle-2026-09-05';
+const INTERACTIVE_RPC_TIMEOUT_MS = 15_000;
+const interactiveMethods = new Set(['definition', 'completion', 'references', 'rename']);
 let output: vscode.OutputChannel;
 let status: vscode.StatusBarItem;
 function log(message: string) { output?.appendLine(`[${new Date().toISOString()}] ${message}`); }
@@ -14,11 +17,19 @@ class HostClient {
   private child?: ChildProcessWithoutNullStreams;
   private next = 1;
   private pending = new PendingRequestRegistry<any>();
+  private dead = false;
+  private invalidation: InvalidationScheduler;
   get pendingCount(): number { return this.pending.size; }
   public worlds: any[] = [];
   private startTask?: Promise<void>;
-  public get isReady(): boolean { return this.worlds.length > 0; }
-  constructor(public readonly projectPath: string, private readonly workspacePath: string) {}
+  public get isReady(): boolean { return !this.dead && !!this.child && this.worlds.length > 0; }
+  public get isDead(): boolean { return this.dead; }
+  constructor(public readonly projectPath: string, private readonly workspacePath: string, private readonly onDead: (client: HostClient, error: Error) => void) {
+    this.invalidation = new InvalidationScheduler({
+      send: () => this.request('invalidate', {}),
+      log: message => log(`${message} project=${this.projectPath} pending=${this.pendingCount}`),
+    });
+  }
   async start(): Promise<void> {
     if (!this.startTask) this.startTask = this.startCore();
     return this.startTask;
@@ -29,19 +40,60 @@ class HostClient {
     const dll = configured || path.join(this.workspacePath, 'Segusum.Tooling.Host', 'bin', 'Debug', 'net8.0', 'Segusum.Tooling.Host.dll');
     log(`${BUILD_ID}`); log(`Starting host=${dll} project=${this.projectPath}`);
     if (!fs.existsSync(dll)) throw new Error(`Tooling host not found: ${dll}`);
+    this.dead = false;
     this.child = spawn('dotnet', [dll], { cwd: this.workspacePath, stdio: ['pipe', 'pipe', 'pipe'] });
+    this.child.on('error', error => this.markDead(error));
+    this.child.on('exit', (code, signal) => this.markDead(new Error(`Tooling host exited (code=${code ?? 'null'}, signal=${signal ?? 'null'})`)));
+    this.child.on('close', (code, signal) => this.markDead(new Error(`Tooling host closed (code=${code ?? 'null'}, signal=${signal ?? 'null'})`)));
     log(`host process spawned project=${this.projectPath} elapsed=${Date.now() - started}ms`);
     let buffer = '';
     this.child.stdout.on('data', data => { buffer += data.toString(); let end: number; while ((end = buffer.indexOf('\n')) >= 0) { const line = buffer.slice(0, end); buffer = buffer.slice(end + 1); if (!line.trim()) continue; try { const response = JSON.parse(line) as RpcResponse; const settled = response.error ? this.pending.reject(response.id, new Error(response.error.message)) : this.pending.resolve(response.id, response.result); if (!settled) log(`RPC response ignored #${response.id} (late) pending=${this.pendingCount}`); } catch (e) { log(`Invalid host response: ${e}`); } } });
     this.child.stderr.on('data', data => log(`host stderr: ${data.toString().trim()}`));
     const initialized = await this.request('initialize', { projectPath: this.projectPath });
+    if (this.dead) throw new Error('Tooling host stopped during initialization.');
     this.worlds = initialized?.worlds ?? [];
     log(`Host initialized project=${initialized?.projectPath ?? this.projectPath} worlds=${this.worlds.map((x:any)=>x.id).join(',')} elapsed=${Date.now() - started}ms`);
   }
-  request(method: string, params: any, token?: vscode.CancellationToken): Promise<any> { const id = this.next++; log(`RPC start #${id} ${method} project=${this.projectPath} pending=${this.pendingCount + 1}`); return new Promise((resolve, reject) => { if (token?.isCancellationRequested) { log(`RPC cancelled locally #${id} before send pending=${this.pendingCount}`); reject(new Error('Request cancelled')); return; } let subscription: vscode.Disposable | undefined; this.pending.add(id, { resolve: value => { log(`RPC end #${id} ${method} pending=${this.pendingCount}`); resolve(value); }, reject: error => { log(`RPC error #${id} ${method}: ${error} pending=${this.pendingCount}`); reject(error); }, dispose: () => subscription?.dispose() }); subscription = token?.onCancellationRequested(() => this.cancel(id)); if (!this.pending.has(id)) { subscription?.dispose(); return; } if (token?.isCancellationRequested) { this.cancel(id); return; } this.child?.stdin.write(JSON.stringify({ id, method, params }) + '\n'); }); }
-  cancel(id: number): void { const cancelled = this.pending.reject(id, new Error('Request cancelled')); if (cancelled) log(`RPC cancelled locally #${id} pending=${this.pendingCount}`); try { this.child?.stdin.write(JSON.stringify({ id: this.next++, method: 'cancel', params: { requestId: id } }) + '\n'); } catch (e) { log(`RPC cancel send failed #${id}: ${e}`); } }
-  invalidate(): void { log(`Invalidating project=${this.projectPath}`); void this.request('invalidate', {}).catch(e => log(`invalidate failed: ${e}`)); }
-  dispose(): void { this.child?.kill(); this.child = undefined; this.pending.clear(new Error('Host stopped')); }
+  request(method: string, params: any, token?: vscode.CancellationToken): Promise<any> {
+    const id = this.next++;
+    log(`RPC start #${id} ${method} project=${this.projectPath} pending=${this.pendingCount + 1}`);
+    return new Promise((resolve, reject) => {
+      if (this.dead || !this.child) { reject(new Error('Tooling host is not running.')); return; }
+      if (token?.isCancellationRequested) { log(`RPC cancelled locally #${id} before send pending=${this.pendingCount}`); reject(new Error('Request cancelled')); return; }
+      let subscription: vscode.Disposable | undefined;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      this.pending.add(id, {
+        resolve: value => { log(`RPC end #${id} ${method} pending=${this.pendingCount}`); resolve(value); },
+        reject: error => { log(`RPC error #${id} ${method}: ${error} pending=${this.pendingCount}`); reject(error); },
+        dispose: () => { subscription?.dispose(); if (timer) clearTimeout(timer); },
+      });
+      subscription = token?.onCancellationRequested(() => this.cancel(id));
+      if (!this.pending.has(id)) return;
+      if (token?.isCancellationRequested) { this.cancel(id); return; }
+      if (interactiveMethods.has(method)) {
+        timer = setTimeout(() => {
+          if (this.pending.reject(id, new Error(`RPC '${method}' timed out after ${INTERACTIVE_RPC_TIMEOUT_MS}ms`))) {
+            log(`RPC timeout #${id} ${method}; host marked unhealthy pending=${this.pendingCount}`);
+            this.markDead(new Error(`RPC '${method}' timed out`));
+          }
+        }, INTERACTIVE_RPC_TIMEOUT_MS);
+      }
+      try { this.child.stdin.write(JSON.stringify({ id, method, params }) + '\n'); }
+      catch (error) { this.pending.reject(id, error); this.markDead(error instanceof Error ? error : new Error(String(error))); }
+    });
+  }
+  cancel(id: number): void { const cancelled = this.pending.reject(id, new Error('Request cancelled')); if (cancelled) log(`RPC cancelled locally #${id} pending=${this.pendingCount}`); try { if (!this.dead) this.child?.stdin.write(JSON.stringify({ id: this.next++, method: 'cancel', params: { requestId: id } }) + '\n'); } catch (e) { log(`RPC cancel send failed #${id}: ${e}`); } }
+  invalidate(): void { this.invalidation.request(); }
+  private markDead(error: Error): void {
+    if (this.dead) return;
+    this.dead = true;
+    this.worlds = [];
+    this.invalidation.dispose();
+    this.pending.clear(error);
+    log(`host exited/stopped project=${this.projectPath}; pending rejected; pending=${this.pendingCount}`);
+    this.onDead(this, error);
+  }
+  dispose(): void { this.invalidation.dispose(); this.markDead(new Error('Host stopped')); this.child?.kill(); this.child = undefined; }
 }
 
 let requestCts: vscode.CancellationTokenSource | undefined;
@@ -71,10 +123,12 @@ async function clientFor(document: vscode.TextDocument): Promise<HostClient> {
   if (!projectPath) throw new Error(`No consumer .csproj containing .seg files found under ${folder.uri.fsPath}`);
   const discoveryMs = Date.now() - started;
   const key = path.normalize(projectPath).toLowerCase(); let client = clients.get(key);
-  if (!client) { client = new HostClient(projectPath, folder.uri.fsPath); clients.set(key, client); status.text = 'Segusum: Loading'; status.tooltip = `Project: ${projectPath}\nLoading semantic workspace...`; status.show(); try { await client.start(); } catch (e) { clients.delete(key); client.dispose(); status.text = 'Segusum: Error'; status.tooltip = `Project: ${projectPath}\n${e}`; status.show(); throw e; } }
+  if (client?.isDead) { clients.delete(key); client = undefined; }
+  if (!client) { client = new HostClient(projectPath, folder.uri.fsPath, (deadClient, error) => { if (clients.get(key) === deadClient) clients.delete(key); status.text = 'Segusum: Error'; status.tooltip = `Project: ${projectPath}\n${error.message}`; status.show(); }); clients.set(key, client); status.text = 'Segusum: Loading'; status.tooltip = `Project: ${projectPath}\nLoading semantic workspace...`; status.show(); try { await client.start(); } catch (e) { clients.delete(key); client.dispose(); status.text = 'Segusum: Error'; status.tooltip = `Project: ${projectPath}\n${e}`; status.show(); throw e; } }
   log(`project discovery=${discoveryMs}ms client=${Date.now() - started}ms`);
   const selectedWorld = document.languageId === 'segusum' ? worldId(document) : '(C# target from source)';
   log(`selection document=${document.uri.fsPath} workspace=${folder.uri.fsPath} project=${projectPath} world=${selectedWorld}`);
+  if (!client.isReady) throw new Error('Segusum host is not ready.');
   status.text = 'Segusum: Ready'; status.tooltip = `Project: ${projectPath}\nWorld: ${selectedWorld}`; status.show();
   return client;
 }
@@ -110,7 +164,7 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(vscode.commands.registerCommand('segusum.renameSymbol', async () => { try { const query = await savedPosition(); const name = await vscode.window.showInputBox({ prompt: 'New symbol name' }); if (!name) return; const client = await clientFor(query.editor.document); const result = await client.request('rename', { path: query.path, line: query.line, column: query.column, newName: name }); if (!result.succeeded) { vscode.window.showErrorMessage((result.diagnostics ?? []).map((d: any) => `${d.id}: ${d.message}`).join('\n')); return; } const edit = new vscode.WorkspaceEdit(); for (const item of result.edits) edit.replace(vscode.Uri.file(item.path), new vscode.Range(item.line - 1, item.column - 1, item.line - 1, item.column - 1 + item.length), item.newText); if (await vscode.workspace.applyEdit(edit)) client.invalidate(); } catch (e) { log(`Rename failed: ${e}`); output.show(true); vscode.window.showErrorMessage(`Segusum rename failed: ${e}`); } }));
   context.subscriptions.push(vscode.commands.registerCommand('segusum.openReference', async (item: any) => { const document = await vscode.workspace.openTextDocument(vscode.Uri.file(item.path)); const editor = await vscode.window.showTextDocument(document); editor.selection = new vscode.Selection(item.line - 1, item.column - 1, item.line - 1, item.column - 1 + item.length); editor.revealRange(editor.selection); }));
   context.subscriptions.push(vscode.window.registerTreeDataProvider('segusum.referencesView', referenceProvider));
-  const invalidate = (uri: vscode.Uri, kind: string) => { log(`File ${kind} ${uri.fsPath}; invalidating clients.`); if (uri.fsPath.toLowerCase().endsWith('.csproj')) projectByFolder.clear(); for (const client of clients.values()) client.invalidate(); };
+  const invalidate = (uri: vscode.Uri, kind: string) => { if (isGeneratedPath(uri.fsPath)) return; log(`File ${kind} ${uri.fsPath}; invalidating clients.`); if (uri.fsPath.toLowerCase().endsWith('.csproj')) projectByFolder.clear(); for (const client of clients.values()) client.invalidate(); };
   const watcher = vscode.workspace.createFileSystemWatcher('**/*.{seg,cs,csproj}'); watcher.onDidChange(uri => invalidate(uri, 'changed')); watcher.onDidCreate(uri => invalidate(uri, 'created')); watcher.onDidDelete(uri => invalidate(uri, 'deleted')); context.subscriptions.push(watcher);
   context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(() => {
     projectByFolder.clear();
