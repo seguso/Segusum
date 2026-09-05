@@ -31,6 +31,15 @@ internal sealed class ToolingHost
             catch (Exception ex) { await ErrorAsync(null, "Invalid JSON: " + ex.Message); continue; }
             if (request == null) continue;
             if (request.Method == "cancel") { Cancel(request.Params?.RequestId); continue; }
+            // Completion is deliberately handled inline.  Its warm query is synchronous and
+            // cheap; keeping it on the reader avoids thread-pool continuation delays while
+            // the workspace is being used by the interactive editor.  The cancellation token
+            // still reaches the request and the completion gate protects the semantic cache.
+            if (request.Method == "completion")
+            {
+                await ProcessAsync(request, Stopwatch.GetTimestamp());
+                continue;
+            }
             work.Add(ProcessAsync(request, Stopwatch.GetTimestamp()));
         }
         await Task.WhenAll(work);

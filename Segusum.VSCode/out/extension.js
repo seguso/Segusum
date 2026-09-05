@@ -281,6 +281,10 @@ async function activate(context) {
     watcher.onDidCreate(uri => invalidate(uri, 'created'));
     watcher.onDidDelete(uri => invalidate(uri, 'deleted'));
     context.subscriptions.push(watcher);
+    context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(() => {
+        projectByFolder.clear();
+        log('Workspace folders changed; cleared project discovery cache.');
+    }));
     context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(editor => { if (editor)
         void clientFor(editor.document).catch(e => log(`Active document selection failed: ${e}`)); }));
 }
