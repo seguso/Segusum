@@ -51,6 +51,7 @@ class HostClient {
     pending = new Map();
     worlds = [];
     startTask;
+    get isReady() { return this.worlds.length > 0; }
     constructor(projectPath, workspacePath) {
         this.projectPath = projectPath;
         this.workspacePath = workspacePath;
@@ -154,12 +155,18 @@ async function clientFor(document) {
     if (!client) {
         client = new HostClient(projectPath, folder.uri.fsPath);
         clients.set(key, client);
+        status.text = 'Segusum: Loading';
+        status.tooltip = `Project: ${projectPath}\nLoading semantic workspace...`;
+        status.show();
         try {
             await client.start();
         }
         catch (e) {
             clients.delete(key);
             client.dispose();
+            status.text = 'Segusum: Error';
+            status.tooltip = `Project: ${projectPath}\n${e}`;
+            status.show();
             throw e;
         }
     }
@@ -186,7 +193,8 @@ async function activate(context) {
     output = vscode.window.createOutputChannel('Segusum');
     context.subscriptions.push(output);
     status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-    status.text = 'Segusum: Starting';
+    status.text = 'Segusum: Idle';
+    status.tooltip = 'No Segusum project is loading.';
     status.show();
     context.subscriptions.push(status);
     if (!vscode.workspace.workspaceFolders?.length) {
@@ -300,6 +308,14 @@ async function activate(context) {
         status.show();
         log(`Active document selected document=${editor.document.uri.fsPath}; semantic host start deferred.`);
     } }));
+    const active = vscode.window.activeTextEditor;
+    if (active && (active.document.languageId === 'segusum' || active.document.uri.fsPath.toLowerCase().endsWith('.cs'))) {
+        status.text = 'Segusum: Loading';
+        status.tooltip = `Document: ${active.document.uri.fsPath}\nPrewarming its consumer project...`;
+        status.show();
+        log(`Prewarm started document=${active.document.uri.fsPath}`);
+        void clientFor(active.document).then(() => log(`Prewarm complete document=${active.document.uri.fsPath}`)).catch(e => { status.text = 'Segusum: Error'; status.tooltip = String(e); status.show(); log(`Prewarm failed: ${e}`); });
+    }
 }
 function deactivate() { for (const client of clients.values())
     client.dispose(); requestCts?.dispose(); for (const cts of completionCts.values())

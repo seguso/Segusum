@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -129,9 +130,12 @@ public sealed class DslSemanticWorkspace
 
     public RenameResult RenameSymbol(string path, int line, int column, string newName)
     {
+        var renameTimer = Stopwatch.StartNew();
+        var definitionTimer = Stopwatch.StartNew();
         if (string.IsNullOrWhiteSpace(newName) || !Microsoft.CodeAnalysis.CSharp.SyntaxFacts.IsValidIdentifier(newName))
             return new RenameResult(Array.Empty<WorkspaceTextEdit>(), new[] { new DslDiagnostic("SEGTOOL001", "The new name is not a valid identifier.", new SourceSpan(path, 0, 0, line, column)) });
         var definition = GetDefinition(path, line, column);
+        definitionTimer.Stop();
         if (definition == null)
             return new RenameResult(Array.Empty<WorkspaceTextEdit>(), new[] { new DslDiagnostic("SEGTOOL002", "No symbol found at the requested location.", new SourceSpan(path, 0, 0, line, column)) });
         if (definition.CSharpSymbol?.ContainingType is INamedTypeSymbol containingType &&
@@ -139,7 +143,9 @@ public sealed class DslSemanticWorkspace
             return new RenameResult(Array.Empty<WorkspaceTextEdit>(), new[] { new DslDiagnostic("SEGTOOL005", $"The rename collides with an existing C# member '{newName}'.", definition.Location.Span) });
         if (definition.DslSymbol != null && model.DslDefinitions.Keys.Any(x => !Equals(x, definition.DslSymbol) && string.Equals(x.Name, newName, StringComparison.Ordinal)))
             return new RenameResult(Array.Empty<WorkspaceTextEdit>(), new[] { new DslDiagnostic("SEGTOOL006", $"The rename collides with an existing DSL symbol '{newName}'.", definition.Location.Span) });
-        var references = FindReferences(path, line, column);
+        var dslReferenceTimer = Stopwatch.StartNew();
+        var references = GetDslReferences(definition);
+        dslReferenceTimer.Stop();
         var edits = new List<WorkspaceTextEdit>();
         Solution? renamedSolution = null;
         if (definition.CSharpSymbol != null)
@@ -147,7 +153,10 @@ public sealed class DslSemanticWorkspace
             var workspaceSymbol = ResolveWorkspaceSymbol(definition.CSharpSymbol);
             if (workspaceSymbol == null)
                 return new RenameResult(Array.Empty<WorkspaceTextEdit>(), new[] { new DslDiagnostic("SEGTOOL003", "The C# symbol is not available in the Roslyn workspace.", new SourceSpan(path, 0, 0, line, column)) });
+            var renamerTimer = Stopwatch.StartNew();
             renamedSolution = Renamer.RenameSymbolAsync(roslynSolution, workspaceSymbol, newName, null, CancellationToken.None).GetAwaiter().GetResult();
+            renamerTimer.Stop();
+            var extractionTimer = Stopwatch.StartNew();
             foreach (var project in roslynSolution.Projects)
                 foreach (var originalDocument in project.Documents)
                 {
@@ -179,6 +188,8 @@ public sealed class DslSemanticWorkspace
                         AddRoslynChangeTokenEdits(edits, originalDocument, changes, newName);
                     }
                 }
+            extractionTimer.Stop();
+            Console.Error.WriteLine($"rename symbol={definition.DisplayName} definition={definitionTimer.Elapsed.TotalMilliseconds:0}ms dslLookup={dslReferenceTimer.Elapsed.TotalMilliseconds:0}ms renamer={renamerTimer.Elapsed.TotalMilliseconds:0}ms textChanges={extractionTimer.Elapsed.TotalMilliseconds:0}ms total={renameTimer.Elapsed.TotalMilliseconds:0}ms");
         }
         else if (definition.DslSymbol != null && model.DslDefinitions.TryGetValue(definition.DslSymbol, out var declaration))
             edits.Add(new WorkspaceTextEdit(declaration.Path, DslNameLocation(definition.DslSymbol.Name, declaration), newName));
@@ -191,11 +202,20 @@ public sealed class DslSemanticWorkspace
              (definition.DslSymbol != null && x.DslSymbol?.Equals(definition.DslSymbol) == true))))
             edits.Add(new WorkspaceTextEdit(reference.Location.Path, reference.Location.Span, newName));
         var finalEdits = edits.DistinctBy(x => (x.Path, x.Span.Start)).ToArray();
+        var validationTimer = Stopwatch.StartNew();
         var validation = ValidateRename(definition, finalEdits, renamedSolution, newName);
+        validationTimer.Stop();
+        Console.Error.WriteLine($"rename validation symbol={definition.DisplayName} finalValidation={validationTimer.Elapsed.TotalMilliseconds:0}ms total={renameTimer.Elapsed.TotalMilliseconds:0}ms succeeded={validation.Count == 0}");
         return validation.Count == 0
             ? new RenameResult(finalEdits, Array.Empty<DslDiagnostic>())
             : new RenameResult(Array.Empty<WorkspaceTextEdit>(), validation);
     }
+
+    private IReadOnlyList<SemanticReference> GetDslReferences(SemanticDefinition definition)
+        => model.ReferencesByNode
+            .Where(x => SameSymbol(x.CSharpSymbol, definition.CSharpSymbol) || SameDsl(x.DslSymbol, definition.DslSymbol))
+            .Select(x => new SemanticReference(definition.DisplayName, new SemanticLocation(x.Path, NormalizeDslSpan(x), x.ReferenceKind), x.CSharpSymbol, x.DslSymbol))
+            .ToArray();
 
     public IReadOnlyList<string> GetCompletions(string path, int line, int column, string? currentText = null)
     {

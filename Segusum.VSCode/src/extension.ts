@@ -15,6 +15,7 @@ class HostClient {
   private pending = new Map<number, { resolve: (v:any)=>void; reject:(e:any)=>void }>();
   public worlds: any[] = [];
   private startTask?: Promise<void>;
+  public get isReady(): boolean { return this.worlds.length > 0; }
   constructor(public readonly projectPath: string, private readonly workspacePath: string) {}
   async start(): Promise<void> {
     if (!this.startTask) this.startTask = this.startCore();
@@ -68,7 +69,7 @@ async function clientFor(document: vscode.TextDocument): Promise<HostClient> {
   if (!projectPath) throw new Error(`No consumer .csproj containing .seg files found under ${folder.uri.fsPath}`);
   const discoveryMs = Date.now() - started;
   const key = path.normalize(projectPath).toLowerCase(); let client = clients.get(key);
-  if (!client) { client = new HostClient(projectPath, folder.uri.fsPath); clients.set(key, client); try { await client.start(); } catch (e) { clients.delete(key); client.dispose(); throw e; } }
+  if (!client) { client = new HostClient(projectPath, folder.uri.fsPath); clients.set(key, client); status.text = 'Segusum: Loading'; status.tooltip = `Project: ${projectPath}\nLoading semantic workspace...`; status.show(); try { await client.start(); } catch (e) { clients.delete(key); client.dispose(); status.text = 'Segusum: Error'; status.tooltip = `Project: ${projectPath}\n${e}`; status.show(); throw e; } }
   log(`project discovery=${discoveryMs}ms client=${Date.now() - started}ms`);
   const selectedWorld = document.languageId === 'segusum' ? worldId(document) : '(C# target from source)';
   log(`selection document=${document.uri.fsPath} workspace=${folder.uri.fsPath} project=${projectPath} world=${selectedWorld}`);
@@ -82,7 +83,7 @@ async function focusReferencesView() { try { await vscode.commands.executeComman
 export async function activate(context: vscode.ExtensionContext) {
   const activationStarted = Date.now();
   output = vscode.window.createOutputChannel('Segusum'); context.subscriptions.push(output);
-  status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100); status.text = 'Segusum: Starting'; status.show(); context.subscriptions.push(status);
+  status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100); status.text = 'Segusum: Idle'; status.tooltip = 'No Segusum project is loading.'; status.show(); context.subscriptions.push(status);
   if (!vscode.workspace.workspaceFolders?.length) { status.text = 'Segusum: No workspace'; return; }
   log(`${BUILD_ID}`);
   log(`activation complete elapsed=${Date.now() - activationStarted}ms; host initialization is lazy.`);
@@ -114,5 +115,11 @@ export async function activate(context: vscode.ExtensionContext) {
     log('Workspace folders changed; cleared project discovery cache.');
   }));
   context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(editor => { if (editor) { status.text = 'Segusum: Idle'; status.tooltip = `Project will load on semantic request\nDocument: ${editor.document.uri.fsPath}`; status.show(); log(`Active document selected document=${editor.document.uri.fsPath}; semantic host start deferred.`); } }));
+  const active = vscode.window.activeTextEditor;
+  if (active && (active.document.languageId === 'segusum' || active.document.uri.fsPath.toLowerCase().endsWith('.cs'))) {
+    status.text = 'Segusum: Loading'; status.tooltip = `Document: ${active.document.uri.fsPath}\nPrewarming its consumer project...`; status.show();
+    log(`Prewarm started document=${active.document.uri.fsPath}`);
+    void clientFor(active.document).then(() => log(`Prewarm complete document=${active.document.uri.fsPath}`)).catch(e => { status.text = 'Segusum: Error'; status.tooltip = String(e); status.show(); log(`Prewarm failed: ${e}`); });
+  }
 }
 export function deactivate() { for (const client of clients.values()) client.dispose(); requestCts?.dispose(); for (const cts of completionCts.values()) cts.dispose(); }
