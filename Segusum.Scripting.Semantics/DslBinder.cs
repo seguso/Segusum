@@ -456,20 +456,28 @@ public sealed class DslBinder
     private static ITypeSymbol? MemberType(ISymbol symbol) => symbol switch { IFieldSymbol f => f.Type, IPropertySymbol p => p.Type, IMethodSymbol m => m.ReturnType, _ => null };
     private IEnumerable<IMethodSymbol> ExtensionMethodsOf(ITypeSymbol receiverType, string name)
     {
-        var methods = new List<IMethodSymbol>();
         foreach (var metadataName in new[] { "Seg.Utils", "System.Linq.Enumerable" })
         {
             var type = compilation.GetTypeByMetadataName(metadataName);
-            if (type == null) continue;
-            methods.AddRange(type.GetMembers(name).OfType<IMethodSymbol>().Where(x => x.IsExtensionMethod && x.IsStatic));
-        }
-        methods.AddRange(compilation.GetSymbolsWithName(name, SymbolFilter.Member).OfType<IMethodSymbol>().Where(x => x.IsExtensionMethod && x.IsStatic));
-        foreach (var method in methods.GroupBy(x => x.ToDisplayString()).Select(x => x.First()))
-        {
-            var candidate = method;
-            if (candidate.IsGenericMethod && candidate.TypeParameters.Length == 1 && TryGetEnumerableElement(receiverType, out var element))
-                candidate = candidate.Construct(element);
-            if (candidate.Parameters.Length != 0) yield return candidate;
+            if (type == null)
+                continue;
+
+            foreach (var method in type.GetMembers(name)
+                         .OfType<IMethodSymbol>()
+                         .Where(x => x.IsExtensionMethod && x.IsStatic))
+            {
+                var candidate = method;
+
+                if (candidate.IsGenericMethod
+                    && candidate.TypeParameters.Length == 1
+                    && TryGetEnumerableElement(receiverType, out var element))
+                {
+                    candidate = candidate.Construct(element);
+                }
+
+                if (candidate.Parameters.Length != 0)
+                    yield return candidate;
+            }
         }
     }
     private static bool TryGetEnumerableElement(ITypeSymbol type, out ITypeSymbol element)
