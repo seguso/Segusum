@@ -42,6 +42,7 @@ public sealed record NarRoomStatement(DslExpression Text,SourceSpan Span) : DslS
 public sealed record DialogueStatement(string Character,DslExpression Text,SourceSpan Span) : DslStatement(Span)
 {
     public SourceSpan CharacterSpan { get; init; } = Span;
+    public DslExpression? Insta { get; init; }
 }
 public sealed record NextCycleStatement(DslExpression Cycle,SourceSpan Span) : DslStatement(Span);
 public sealed record AddCycleElementStatement(string Cycle,string Id,bool Important,string? Repeat,DslExpression? Condition,IReadOnlyList<DslStatement> Body,SourceSpan Span) : DslStatement(Span)

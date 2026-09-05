@@ -287,6 +287,23 @@ public sealed class GeneratorTests
     }
 
     [Fact]
+    public void ParameterizedDialogueEmitsTheExistingInstaArgument()
+    {
+        var result = Run("use olivia here:\n olivia: \"{1}, ciao!\" insta: nome\nend", "public Character olivia = null!; public string nome() => \"Nome\";");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL"));
+        var generated = Generated(result);
+        Assert.Contains("dial(olivia,\"{1}, ciao!\", insta: nome());", generated);
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
+    public void ParameterizedDialogueRejectsAnUnmatchedPlaceholder()
+    {
+        var result = Run("use olivia here:\n olivia: \"Ciao {2}\" insta: nome\nend", "public Character olivia = null!; public string nome() => \"Nome\";");
+        Assert.Contains(result.Diagnostics, d => d.GetMessage().Contains("requires at least 2 insta arguments", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void MarkHappenedRejectsWrongTypesAndNonAssignableTargets()
     {
         var wrongType = Run("def mark:\n    mark-happened flag\nend", "public bool flag;");

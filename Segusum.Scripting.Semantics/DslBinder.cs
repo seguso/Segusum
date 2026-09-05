@@ -166,7 +166,19 @@ public sealed class DslBinder
                 case IfStatement i:
                     foreach (var branch in i.Branches) { Require(BindExpression(branch.Condition, scope), compilation.GetSpecialType(SpecialType.System_Boolean), branch.Condition.Span, "if condition must be bool."); BindStatements(branch.Body, new(scope), returnType); }
                     if (i.ElseBody != null) BindStatements(i.ElseBody, new(scope), returnType); break;
-                case DialogueStatement d: Require(BindName(d.Character, d.CharacterSpan, scope), compilation.GetTypeByMetadataName("Seg.Character"), d.Span, "dialogue speaker must be Character."); Require(BindExpression(d.Text, scope), compilation.GetSpecialType(SpecialType.System_String), d.Text.Span, "dialogue text must be string."); break;
+                case DialogueStatement d:
+                    Require(BindName(d.Character, d.CharacterSpan, scope), compilation.GetTypeByMetadataName("Seg.Character"), d.Span, "dialogue speaker must be Character.");
+                    Require(BindExpression(d.Text, scope), compilation.GetSpecialType(SpecialType.System_String), d.Text.Span, "dialogue text must be string.");
+                    if (d.Insta != null)
+                    {
+                        Require(BindExpression(d.Insta, scope), compilation.GetSpecialType(SpecialType.System_String), d.Insta.Span, "insta argument must be string.");
+                        if (d.Text is LiteralExpression { Kind: "string" } literal)
+                        {
+                            var max = MaxPlaceholder(literal.Value);
+                            if (max > 0 && max != 1) Report("SEGDSL332", $"Dialogue placeholder '{{{max}}}' requires at least {max} insta arguments; the runtime API currently accepts one.", d.Text.Span);
+                        }
+                    }
+                    break;
                 case NarStatement n: Require(BindExpression(n.Text, scope), compilation.GetSpecialType(SpecialType.System_String), n.Text.Span, "nar text must be string."); break;
                 case NarRoomStatement n: Require(BindExpression(n.Text, scope), compilation.GetSpecialType(SpecialType.System_String), n.Text.Span, "nar-room text must be string."); break;
                 case NarImgStatement n:
@@ -413,6 +425,19 @@ public sealed class DslBinder
     private void Require(ITypeSymbol? actual, ITypeSymbol? expected, SourceSpan span, string message) { if (actual == null || expected == null || !Compatible(actual, expected)) Report("SEGDSL313", message, span); }
     private void Report(string id, string message, SourceSpan span) { if (!suppressDiagnostics) report(new DslDiagnostic(id, message, span)); }
     private static string Name(string name) => name.Contains('-') ? DslNames.Camel(name) : name;
+    private static int MaxPlaceholder(string text)
+    {
+        var max = 0;
+        for (var i = 0; i + 2 < text.Length; i++)
+        {
+            if (text[i] != '{') continue;
+            var end = text.IndexOf('}', i + 1);
+            if (end <= i + 1) continue;
+            if (int.TryParse(text.Substring(i + 1, end - i - 1), out var value)) max = Math.Max(max, value);
+            i = end;
+        }
+        return max;
+    }
     private void CheckDuplicateCombines(IEnumerable<DslDeclaration> declarations) { var combines = declarations.OfType<HandlerDeclaration>().Where(x => x.Kind == "combine").GroupBy(x => NormalizeKey(x.First) + "\0" + NormalizeKey(x.Second!)); foreach (var group in combines.Where(x => x.Count() > 1)) foreach (var item in group.Skip(1)) Report("SEGDSL315", "Duplicate combine handler.", item.Span); }
     private void CheckDuplicateRoomChanged(IEnumerable<DslDeclaration> declarations) { foreach (var group in declarations.OfType<HandlerDeclaration>().Where(x => x.Kind == "room-changed").GroupBy(x => NormalizeKey(x.First))) foreach (var item in group.Skip(1)) Report("SEGDSL319", "Duplicate room-changed handler for the same Room.", item.Span); }
     private void CheckDuplicateUnaryHandlers(IEnumerable<DslDeclaration> declarations)

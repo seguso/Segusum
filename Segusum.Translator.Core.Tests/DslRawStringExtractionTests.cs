@@ -57,6 +57,15 @@ end
         Assert.DoesNotContain(extracted, x => x.Value is "ncsTest" or "curRoom" or "thing");
     }
 
+    [Fact]
+    public void ExtractsParameterizedDialogueTextButNotInstaExpression()
+    {
+        const string dsl = "world game\nuse camilla here:\n    camilla: \"{1}, ciao!\" insta: nomeZioOMago\nend\n";
+        var extracted = Extract(dsl);
+        Assert.Equal(new[] { "{1}, ciao!" }, extracted.Select(x => x.Value));
+        Assert.DoesNotContain(extracted, x => x.Value.Contains("nomeZioOMago", StringComparison.Ordinal));
+    }
+
     private static IReadOnlyList<SourceString> Extract(string dsl)
     {
         var root = Path.Combine(Path.GetTempPath(), "segusum-dsl-raw-" + Guid.NewGuid().ToString("N"));

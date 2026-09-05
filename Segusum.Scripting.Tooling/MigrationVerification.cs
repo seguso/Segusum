@@ -33,6 +33,7 @@ public sealed record NamedCutsceneFingerprint(
 
 public sealed record MarkHappenedOnceFingerprint(string Target, string SourcePath, int SourceLine);
 public sealed record MarkHappenedFingerprint(string Target, string SourcePath, int SourceLine);
+public sealed record DialogueFingerprint(string Speaker, string Text, string? Insta, string SourcePath, int SourceLine);
 
 public sealed record HandlerEquivalenceResult(
     HandlerRegistrationFingerprint? CSharpRegistration,
@@ -171,6 +172,40 @@ public static class MigrationVerifier
         => csharp.SequenceEqual(dsl, StringComparer.Ordinal)
             ? new("strings", EquivalenceStatus.Pass)
             : new("strings", EquivalenceStatus.Fail, $"C#=[{string.Join(", ", csharp)}] DSL=[{string.Join(", ", dsl)}]");
+
+    public static IReadOnlyList<DialogueFingerprint> ExtractCSharpDialogues(string path, string text)
+    {
+        var tree = CSharpSyntaxTree.ParseText(text, path: path);
+        return tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>()
+            .Where(x => InvocationName(x) == "dial" && x.ArgumentList.Arguments.Count >= 2)
+            .Select(x => new DialogueFingerprint(
+                x.ArgumentList.Arguments[0].Expression.ToString(),
+                LiteralText(x.ArgumentList.Arguments[1].Expression.ToString()) ?? x.ArgumentList.Arguments[1].Expression.ToString(),
+                NormalizeRuntimeExpression(x.ArgumentList.Arguments.FirstOrDefault(a => a.NameColon?.Name.Identifier.ValueText == "insta")?.Expression.ToString()),
+                path, x.GetLocation().GetLineSpan().StartLinePosition.Line + 1))
+            .ToArray();
+    }
+
+    public static IReadOnlyList<DialogueFingerprint> ExtractDslDialogues(DslSource source)
+    {
+        var result = new List<DialogueFingerprint>();
+        var parsed = DslParser.Parse(source);
+        foreach (var declaration in parsed.Document.Declarations)
+            CollectDslDialogues(declaration, source.Path, result);
+        return result;
+    }
+
+    public static VerificationCheck CompareDialogues(IReadOnlyList<DialogueFingerprint> csharp, IReadOnlyList<DialogueFingerprint> dsl)
+    {
+        if (csharp.Count != dsl.Count)
+            return new("dialogues", EquivalenceStatus.Fail, $"C# count={csharp.Count}; DSL count={dsl.Count}");
+        for (var i = 0; i < csharp.Count; i++)
+        {
+            if (csharp[i].Speaker != dsl[i].Speaker || csharp[i].Text != dsl[i].Text || csharp[i].Insta != dsl[i].Insta)
+                return new("dialogues", EquivalenceStatus.Fail, $"C#={csharp[i].Speaker}|{csharp[i].Text}|{csharp[i].Insta}; DSL={dsl[i].Speaker}|{dsl[i].Text}|{dsl[i].Insta}");
+        }
+        return new("dialogues", EquivalenceStatus.Pass);
+    }
 
     public static IReadOnlyList<MarkHappenedOnceFingerprint> ExtractCSharpMarkHappenedOnce(string path, string text)
     {
@@ -357,6 +392,39 @@ public static class MigrationVerifier
 
     private static string CSharpBodyShape(StatementSyntax statement)
         => string.Join("|", statement.DescendantNodes().OfType<InvocationExpressionSyntax>().Select(InvocationName));
+
+    private static string? NormalizeRuntimeExpression(string? expression)
+    {
+        if (expression == null) return null;
+        return expression.EndsWith("()", StringComparison.Ordinal) ? expression[..^2] : expression;
+    }
+
+    private static void CollectDslDialogues(DslDeclaration declaration, string path, List<DialogueFingerprint> result)
+    {
+        switch (declaration)
+        {
+            case HandlerDeclaration handler: CollectDslDialogues(handler.Body, path, result); break;
+            case FunctionDeclaration function: CollectDslDialogues(function.Body, path, result); break;
+            case CycleElementDeclaration cycle: CollectDslDialogues(cycle.Body, path, result); break;
+        }
+    }
+
+    private static void CollectDslDialogues(IEnumerable<DslStatement> statements, string path, List<DialogueFingerprint> result)
+    {
+        foreach (var statement in statements)
+            switch (statement)
+            {
+                case DialogueStatement dialogue:
+                    result.Add(new DialogueFingerprint(dialogue.Character, StringValue(dialogue.Text) ?? "", ExpressionText(dialogue.Insta), path, dialogue.Span.Line));
+                    break;
+                case IfStatement conditional:
+                    foreach (var branch in conditional.Branches) CollectDslDialogues(branch.Body, path, result);
+                    if (conditional.ElseBody != null) CollectDslDialogues(conditional.ElseBody, path, result);
+                    break;
+                case AddCycleElementStatement cycle: CollectDslDialogues(cycle.Body, path, result); break;
+                case NamedCutsceneStatement named: CollectDslDialogues(named.Body, path, result); break;
+            }
+    }
 
     private static void CollectDslNamedCutscenes(IEnumerable<DslStatement> statements, string path, List<NamedCutsceneFingerprint> result)
     {

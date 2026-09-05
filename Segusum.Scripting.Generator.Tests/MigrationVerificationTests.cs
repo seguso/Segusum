@@ -178,6 +178,19 @@ public sealed class MigrationVerificationTests
     }
 
     [Fact]
+    public void ParameterizedDialoguesCompareSpeakerTextAndInstaExpression()
+    {
+        const string csharp = "void Configure() { dial(olivia, \"{1}, ciao {1}!\", insta: nome()); }";
+        const string dsl = "world game\nuse olivia here:\n    olivia: \"{1}, ciao {1}!\" insta: nome\nend\n";
+        var left = MigrationVerifier.ExtractCSharpDialogues("handlers.cs", csharp);
+        var right = MigrationVerifier.ExtractDslDialogues(new DslSource("handlers.seg", dsl));
+        Assert.Equal(EquivalenceStatus.Pass, MigrationVerifier.CompareDialogues(left, right).Status);
+
+        var changed = new DslSource("handlers.seg", dsl.Replace("insta: nome", "insta: altro", StringComparison.Ordinal));
+        Assert.Equal(EquivalenceStatus.Fail, MigrationVerifier.CompareDialogues(left, MigrationVerifier.ExtractDslDialogues(changed)).Status);
+    }
+
+    [Fact]
     public void MansoMigrationKeepsExplanationAndNamedCutsceneTitle()
     {
         const string csharp = "NamedCutSceneId ncsTrovateMansoDeZuniga = new NamedCutSceneId { serId = \"ncsTrovateMansoDeZuniga\", titleUntranslated = \"Trovate Sir Manso De Zuniga\".translatable() }; void Configure() { addHandlerUseFor(armaturaCriptaDracula, puTrovareMansoDeZuniga, exPercheRicordaLeCrociate, e => { using (namedCutScene(ncsTrovateMansoDeZuniga, curRoom, ilSantoGraal, cliffDeserto, dracula)) { dial(olivia, \"Camilla, hai notato che strana questa armatura?\"); } }); }";

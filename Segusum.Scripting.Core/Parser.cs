@@ -118,7 +118,7 @@ public static class DslParser
                 case "text-input": return new TextInputStatement(Expression(), span);
                 case "nar-img": return ParseNarImg(span);
                 default:
-                    if (Is(":")) { var colon = Take(); return new DialogueStatement(keyword, RawText(colon.Span.Start + colon.Span.Length), span) { CharacterSpan = span }; }
+                    if (Is(":")) { return ParseDialogue(keyword, span); }
                     if (Is("++")) { Take(); return new IncrementStatement(keyword, span); }
                     if (Is(".") && position + 1 < tokens.Count && tokens[position + 1].Kind == DslTokenKind.Identifier)
                     {
@@ -131,6 +131,54 @@ public static class DslParser
                     if (Is("=") || Is("+=") || Is("-=")) { var op = Take().Text; return new AssignmentStatement(keyword, op, Expression(), span); }
                     var args = new List<DslArgument>(); while (CanStartArgument()) args.Add(ParseArgument()); return new CallStatement(new CallExpression(keyword, args, span) { NameSpan = span }, span);
             }
+        }
+        private DialogueStatement ParseDialogue(string character, SourceSpan span)
+        {
+            var colon = Take();
+            var lineEnd = sourceText.IndexOf('\n', colon.Span.Start + colon.Span.Length);
+            if (lineEnd < 0) lineEnd = sourceText.Length;
+            var contentStart = colon.Span.Start + colon.Span.Length;
+            if (FindInstaMarker(sourceText.Substring(contentStart, Math.Max(0, lineEnd - contentStart))) < 0)
+                return new DialogueStatement(character, RawText(contentStart), span) { CharacterSpan = span };
+            return ParseNarrativeLine(character, span, colon, (text, insta) => new DialogueStatement(character, text, span) { CharacterSpan = span, Insta = insta });
+        }
+        private T ParseNarrativeLine<T>(string keyword, SourceSpan span, DslToken colon, Func<DslExpression, DslExpression?, T> factory)
+        {
+            var lineEnd = sourceText.IndexOf('\n', colon.Span.Start + colon.Span.Length);
+            if (lineEnd < 0) lineEnd = sourceText.Length;
+            var contentStart = colon.Span.Start + colon.Span.Length;
+            var content = sourceText.Substring(contentStart, Math.Max(0, lineEnd - contentStart));
+            var marker = FindInstaMarker(content);
+            DslExpression? insta = null;
+            var textEnd = marker < 0 ? content.Length : marker;
+            if (marker >= 0)
+            {
+                var markerOffset = contentStart + marker;
+                while (position < tokens.Count && tokens[position].Span.Start < markerOffset) position++;
+                Need("insta"); Need(":"); insta = Expression();
+                if (Current.Kind == DslTokenKind.Comma)
+                    Error("The runtime dial API accepts one insta argument; multiple insta arguments are not supported.");
+                while (Current.Kind != DslTokenKind.NewLine && Current.Kind != DslTokenKind.EndOfFile) Take();
+            }
+            else
+            {
+                while (Current.Kind != DslTokenKind.NewLine && Current.Kind != DslTokenKind.EndOfFile) Take();
+            }
+            var text = StripComment(content.Substring(0, textEnd)).Trim();
+            if (text.Length == 0) Error("Dialogue text cannot be empty.");
+            var expression = new LiteralExpression(text, text.Length >= 2 && text[0] == '"' && text[text.Length - 1] == '"' ? "string" : "raw-string", SourceSpan.From(colon.Span.Path, sourceText, contentStart, text.Length));
+            return factory(expression, insta);
+        }
+        private static int FindInstaMarker(string content)
+        {
+            var quoted = false;
+            for (var i = 0; i + 5 < content.Length; i++)
+            {
+                if (content[i] == '"' && (i == 0 || content[i - 1] != '\\')) quoted = !quoted;
+                if (!quoted && content.IndexOf("insta:", i, StringComparison.Ordinal) == i
+                    && (i == 0 || !char.IsLetterOrDigit(content[i - 1]) && content[i - 1] != '_')) return i;
+            }
+            return -1;
         }
         private NamedCutsceneStatement ParseNamedCutscene(SourceSpan span)
         {

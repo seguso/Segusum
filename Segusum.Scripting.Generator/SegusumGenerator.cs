@@ -136,7 +136,10 @@ public sealed class SegusumGenerator : IIncrementalGenerator
                 if (n.Size == "medium") sb.Append(", NarSize.Medium"); else if (n.Size == "fullscreen") sb.Append(", NarSize.FullScreen");
                 if (n.ShowInText) sb.Append(", alsoShowGraphicsInTextMode: true");
                 sb.AppendLine(");"); break;
-            case DialogueStatement d: sb.Append(indent).Append("dial(").Append(EmitIdentifier(d.Character, model)).Append(',').Append(Emit(d.Text, model)).AppendLine(");"); break;
+            case DialogueStatement d:
+                sb.Append(indent).Append("dial(").Append(EmitIdentifier(d.Character, model)).Append(',').Append(Emit(d.Text, model));
+                if (d.Insta != null) sb.Append(", insta: ").Append(Emit(d.Insta, model));
+                sb.AppendLine(");"); break;
             case TextInputStatement t: sb.Append(indent).Append(input ?? "e").Append(".textInputToShow = ").Append(Emit(t.TextInput, model)).AppendLine(";"); break;
             case MarkHappenedOnceStatement mark: sb.Append(indent).Append("setIfNeverHappened(ref ").Append(Emit(mark.Target, model)).AppendLine(");"); break;
             case MarkHappenedStatement mark: sb.Append(indent).Append(Emit(mark.Target, model)).AppendLine(" = System.DateTime.Now;"); break;
