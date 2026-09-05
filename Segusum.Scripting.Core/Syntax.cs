@@ -59,6 +59,10 @@ public sealed record NamedCutsceneStatement(string Id,DslExpression Title,IReadO
     public SourceSpan IdSpan { get; init; } = Span;
 }
 public sealed record TextInputStatement(DslExpression TextInput,SourceSpan Span) : DslStatement(Span);
+public sealed record ExistsExpression(DslExpression Collection,string ItemName,DslExpression Predicate,SourceSpan Span) : DslExpression(Span)
+{
+    public SourceSpan ItemSpan { get; init; } = Span;
+}
 public sealed record NarImgStatement(DslExpression ImagePath,string? Size,bool ShowInText,DslExpression Text,SourceSpan Span) : DslStatement(Span);
 public abstract record DslExpression(SourceSpan Span) : DslNode(Span);
 public sealed record IdentifierExpression(string Name,SourceSpan Span) : DslExpression(Span);

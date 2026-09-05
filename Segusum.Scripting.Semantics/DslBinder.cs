@@ -55,6 +55,7 @@ public sealed class DslBinder
     private readonly INamedTypeSymbol? namedCutsceneId;
     private readonly ITypeSymbol? dateTime;
     private readonly ITypeSymbol? dateTimeNullable;
+    private readonly INamedTypeSymbol? textHandlerInput;
     private readonly INamedTypeSymbol? logicObj;
     private readonly INamedTypeSymbol? objective;
     private readonly INamedTypeSymbol? room;
@@ -74,7 +75,7 @@ public sealed class DslBinder
         this.compilation = compilation; this.world = world; this.report = report;
         cycle = compilation.GetTypeByMetadataName("Seg.Cycle"); cycleElementId = compilation.GetTypeByMetadataName("Seg.CycleElemId"); namedCutsceneId = compilation.GetTypeByMetadataName("Seg.NamedCutSceneId");
         logicObj = compilation.GetTypeByMetadataName("Seg.LogicObj"); objective = compilation.GetTypeByMetadataName("Seg.Objective"); room = compilation.GetTypeByMetadataName("Seg.Room"); explanation = compilation.GetTypeByMetadataName("Seg.Explanation");
-        dateTime = compilation.GetSpecialType(SpecialType.System_DateTime); dateTimeNullable = compilation.GetSpecialType(SpecialType.System_Nullable_T).Construct(dateTime);
+        dateTime = compilation.GetSpecialType(SpecialType.System_DateTime); dateTimeNullable = compilation.GetSpecialType(SpecialType.System_Nullable_T).Construct(dateTime); textHandlerInput = compilation.GetTypeByMetadataName("Seg.TextHandlerInput");
     }
     public void Bind(IReadOnlyList<DslDeclaration> declarations)
     {
@@ -122,7 +123,7 @@ public sealed class DslBinder
         if (h.Kind == "use-here") Require(first, logicObj, h.Span, "use-here object must be LogicObj.");
         if (h.Kind == "pickup") Require(first, logicObj, h.Span, "pickup target must be LogicObj.");
         if (h.Kind == "talk-here") Require(first, room, h.Span, "talk-here target must be Room.");
-        if (h.Kind == "cancel-text-input") Require(first, compilation.GetTypeByMetadataName("Seg.TextInput"), h.Span, "cancel-text-input target must be TextInput.");
+        if (h.Kind is "cancel-text-input" or "submit-text-input") Require(first, compilation.GetTypeByMetadataName("Seg.TextInput"), h.Span, $"{h.Kind} target must be TextInput.");
         if (h.Kind == "room-changed")
         {
             Require(first, room, h.Span, "room-changed target must be Room.");
@@ -131,9 +132,11 @@ public sealed class DslBinder
         if (h.Explanation != null) Require(BindExpression(h.Explanation, new()), explanation, h.Explanation.Span, "exp must be Explanation.");
         if (h.Condition != null) Require(BindExpression(h.Condition, new()), compilation.GetSpecialType(SpecialType.System_Boolean), h.Condition.Span, "possible-when must be bool.");
         var previousInputType = inputType;
-        inputType = compilation.GetTypeByMetadataName("Seg.HandlerInput");
+        inputType = h.Kind == "submit-text-input" ? textHandlerInput : compilation.GetTypeByMetadataName("Seg.HandlerInput");
+        inputContextAllowed = h.Kind == "submit-text-input";
         BindStatements(h.Body, new(), null);
         inputType = previousInputType;
+        inputContextAllowed = false;
     }
     private void BindCycle(string cycleName, string? repeat, DslExpression? condition, IReadOnlyList<DslStatement> body, SourceSpan span, Dictionary<string, ITypeSymbol>? scope = null)
     { scope ??= new(); Require(BindName(cycleName, span, scope), cycle, span, "add requires a Cycle."); if (repeat != null && repeat is not ("once" or "forever")) Report("SEGDSL316", $"Unknown Repeat modifier '{repeat}'.", span); if (condition != null) Require(BindExpression(condition, scope, dateTimeNullable), compilation.GetSpecialType(SpecialType.System_Boolean), condition.Span, "when must be bool."); BindStatements(body, new(scope), null); }
@@ -196,6 +199,7 @@ public sealed class DslBinder
         }
     }
     private ITypeSymbol? inputType;
+    private bool inputContextAllowed;
     private void BindNamedCutscene(NamedCutsceneStatement statement, Dictionary<string, ITypeSymbol>? scope = null)
     {
         var idType = BindName(statement.Id, statement.IdSpan, scope);
@@ -222,6 +226,11 @@ public sealed class DslBinder
             case LiteralExpression l: if (l.Kind == "null") { nullLiterals.Add(l); return null; } return l.Kind is "string" or "raw-string" ? compilation.GetSpecialType(SpecialType.System_String) : l.Kind == "bool" ? compilation.GetSpecialType(SpecialType.System_Boolean) : l.Kind == "cycle" ? cycle : compilation.GetSpecialType(SpecialType.System_Int32);
             case IdentifierExpression i:
                 if (i.Name == "it" && contextualIt != null) { model.Values[i] = new BoundValue(contextualIt, "x", null, BoundSymbolKind.ContextualIt); return contextualIt; }
+                if (i.Name == "input")
+                {
+                    if (!inputContextAllowed) { Report("SEGDSL330", "'input' is only valid inside submit-text-input.", i.Span); return null; }
+                    model.Values[i] = new BoundValue(textHandlerInput, "e", null, BoundSymbolKind.Local); return textHandlerInput;
+                }
         if (functions.TryGetValue(NormalizeKey(i.Name), out var function) && function.Parameters.Count == 0) { var functionType = TypeOf(function.ReturnType ?? "void"); model.Values[i] = new BoundValue(functionType, Name(function.Name), null, BoundSymbolKind.Function); lastSymbol = null; lastCSharpName = Name(function.Name); lastKind = BoundSymbolKind.Function; RecordName(i.Name, i.Span); return functionType; }
                 var resolved = BindName(i.Name, i.Span, scope);
                 if (resolved != null) model.Values[i] = new BoundValue(resolved, lastCSharpName, lastSymbol, lastKind);
@@ -234,12 +243,29 @@ public sealed class DslBinder
                 return b.Operator is "==" or "!=" or ">" or ">=" or "<" or "<=" ? compilation.GetSpecialType(SpecialType.System_Boolean) : lt;
             case MemberAccessExpression m:
                 var receiverType = BindExpression(m.Receiver, scope, contextualIt);
+                if (m.Receiver is IdentifierExpression { Name: "input" } && m.MemberName == "wordsLower")
+                {
+                    if (!inputContextAllowed) { Report("SEGDSL330", "'input.wordsLower' is only valid inside submit-text-input.", m.Span); return null; }
+                    var stringType = compilation.GetSpecialType(SpecialType.System_String);
+                    var list = compilation.GetTypeByMetadataName("System.Collections.Generic.List`1")?.Construct(stringType);
+                    model.Values[m] = new BoundValue(list, "splittaInputEFaiLower(e)", null, BoundSymbolKind.CSharpProperty); return list;
+                }
                 var member = receiverType == null ? null : MembersOf(receiverType, m.MemberName).FirstOrDefault(x => Accessible(x, receiverType));
                 if (member == null) { Report("SEGDSL312", $"Unknown or inaccessible member '{m.MemberName}'.", m.Span); return null; }
                 RecordReference(m.MemberName, m.MemberSpan, member is IMethodSymbol ? BoundSymbolKind.CSharpMethod : BoundSymbolKind.CSharpProperty, member, null, "member-name");
                 var memberType = MemberType(member); model.Values[m] = new BoundValue(memberType, m.MemberName, member, member is IMethodSymbol ? BoundSymbolKind.CSharpMethod : BoundSymbolKind.CSharpProperty); return memberType;
             case FunctionReferenceExpression r: Report("SEGDSL320", "Function references are reserved but not implemented yet.", r.Span); return null;
             case CallExpression c: return BindCall(c, scope, contextualIt);
+            case ExistsExpression e:
+                var collectionType = BindExpression(e.Collection, scope, contextualIt);
+                var elementType = collectionType is INamedTypeSymbol named && named.IsGenericType && named.TypeArguments.Length == 1 ? named.TypeArguments[0] : null;
+                if (elementType == null) { Report("SEGDSL331", "exists requires a typed collection.", e.Collection.Span); return null; }
+                var existsScope = new Dictionary<string, ITypeSymbol>(scope, StringComparer.Ordinal) { [NormalizeKey(e.ItemName)] = elementType };
+                var hadExistingItem = activeDslSymbols.TryGetValue(e.ItemName, out var previousItem);
+                AddLocalIdentity(e.ItemName, "local", e.ItemSpan);
+                Require(BindExpression(e.Predicate, existsScope), compilation.GetSpecialType(SpecialType.System_Boolean), e.Predicate.Span, "exists predicate must be bool.");
+                if (hadExistingItem) activeDslSymbols[e.ItemName] = previousItem!; else activeDslSymbols.Remove(e.ItemName);
+                return compilation.GetSpecialType(SpecialType.System_Boolean);
             default: return null;
         }
     }
@@ -391,7 +417,7 @@ public sealed class DslBinder
     private void CheckDuplicateRoomChanged(IEnumerable<DslDeclaration> declarations) { foreach (var group in declarations.OfType<HandlerDeclaration>().Where(x => x.Kind == "room-changed").GroupBy(x => NormalizeKey(x.First))) foreach (var item in group.Skip(1)) Report("SEGDSL319", "Duplicate room-changed handler for the same Room.", item.Span); }
     private void CheckDuplicateUnaryHandlers(IEnumerable<DslDeclaration> declarations)
     {
-        foreach (var kind in new[] { "pickup", "talk-here", "cancel-text-input" })
+        foreach (var kind in new[] { "pickup", "talk-here", "cancel-text-input", "submit-text-input" })
             foreach (var group in declarations.OfType<HandlerDeclaration>().Where(x => x.Kind == kind).GroupBy(x => NormalizeKey(x.First)))
                 foreach (var item in group.Skip(1)) Report("SEGDSL329", $"Duplicate {kind} handler for the same target.", item.Span);
     }

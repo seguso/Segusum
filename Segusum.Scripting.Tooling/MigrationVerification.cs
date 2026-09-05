@@ -269,7 +269,8 @@ public static class MigrationVerifier
         var registration = tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>()
             .FirstOrDefault(x => RegistrationKind(x) == kind
                 && OperandText(x.ArgumentList.Arguments, 0) == first
-                && (kind == "room-changed" || OperandText(x.ArgumentList.Arguments, 1) == secondOrTarget));
+                && (kind is "room-changed" or "pickup" or "talk-here" or "cancel-text-input" or "submit-text-input"
+                    || OperandText(x.ArgumentList.Arguments, 1) == secondOrTarget));
         var strings = new List<string>();
         if (registration != null)
         {
@@ -286,7 +287,8 @@ public static class MigrationVerifier
         var registration = tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>()
             .FirstOrDefault(x => RegistrationKind(x) == kind
                 && OperandText(x.ArgumentList.Arguments, 0) == first
-                && (kind == "room-changed" || OperandText(x.ArgumentList.Arguments, 1) == secondOrTarget));
+                && (kind is "room-changed" or "pickup" or "talk-here" or "cancel-text-input" or "submit-text-input"
+                    || OperandText(x.ArgumentList.Arguments, 1) == secondOrTarget));
         var strings = new List<string>();
         if (registration != null)
         {
@@ -428,6 +430,7 @@ public static class MigrationVerifier
         "addHandlerPickUp" => "pickup",
         "addHandlerTalkHere" => "talk-here",
         "addHandlerCancelTextInput" => "cancel-text-input",
+        "addHandlerSubmitTextInput" => "submit-text-input",
         "addRoomChangedHandler" => "room-changed",
         _ => null
     };
@@ -466,6 +469,7 @@ public static class MigrationVerifier
         LiteralExpression literal => literal.Kind is "string" or "raw-string" ? literal.Value.Trim('"') : literal.Value,
         UnaryExpression unary => unary.Operator + ExpressionText(unary.Operand),
         BinaryExpression binary => ExpressionText(binary.Left) + " " + binary.Operator + " " + ExpressionText(binary.Right),
+        ExistsExpression exists => "exists[from " + ExpressionText(exists.Collection) + " " + exists.ItemName + " where " + ExpressionText(exists.Predicate) + "]",
         ParenthesizedExpression parenthesized => "(" + ExpressionText(parenthesized.Expression) + ")",
         MemberAccessExpression member => ExpressionText(member.Receiver) + "." + member.MemberName,
         CallExpression call => (call.Receiver == null ? call.Name : ExpressionText(call.Receiver) + "." + call.Name)

@@ -163,6 +163,21 @@ public sealed class MigrationVerificationTests
     }
 
     [Fact]
+    public void SubmitTextInputRegistrationAndBodyStringsAreExtracted()
+    {
+        const string csharp = "void Configure() { addHandlerSubmitTextInput(ti, e => { dial(olivia, \"Risposta\"); }); }";
+        const string dslText = "world game\nsubmit-text-input ti:\n    olivia: Risposta\nend\n";
+        var csharpRegistration = Assert.Single(MigrationVerifier.ExtractCSharpRegistrations("handlers.cs", csharp));
+        var dslRegistration = Assert.Single(MigrationVerifier.ExtractDslRegistrations(new DslSource("handlers.seg", dslText)));
+        Assert.Equal("submit-text-input", csharpRegistration.Kind);
+        Assert.Equal(EquivalenceStatus.Pass, MigrationVerifier.CompareRegistration(csharpRegistration, dslRegistration).Overall);
+        var csharpStrings = MigrationVerifier.ExtractCSharpStringsForRegistration("handlers.cs", csharp, "submit-text-input", "ti", null);
+        var dslStrings = MigrationVerifier.ExtractDslStrings(new DslSource("handlers.seg", dslText));
+        Assert.Equal(new[] { "Risposta" }, csharpStrings);
+        Assert.Equal(csharpStrings, dslStrings);
+    }
+
+    [Fact]
     public void MansoMigrationKeepsExplanationAndNamedCutsceneTitle()
     {
         const string csharp = "NamedCutSceneId ncsTrovateMansoDeZuniga = new NamedCutSceneId { serId = \"ncsTrovateMansoDeZuniga\", titleUntranslated = \"Trovate Sir Manso De Zuniga\".translatable() }; void Configure() { addHandlerUseFor(armaturaCriptaDracula, puTrovareMansoDeZuniga, exPercheRicordaLeCrociate, e => { using (namedCutScene(ncsTrovateMansoDeZuniga, curRoom, ilSantoGraal, cliffDeserto, dracula)) { dial(olivia, \"Camilla, hai notato che strana questa armatura?\"); } }); }";

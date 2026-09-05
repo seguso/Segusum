@@ -798,6 +798,34 @@ public NamedCutSceneId ncsMikeStalloneIlBenefattore = null!;
         Assert.Contains(result.Diagnostics, d => d.GetMessage().Contains("text-input is only valid inside an action handler", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void SubmitTextInputWordsLowerAndExistsAreEmittedAsDomainOperations()
+    {
+        var result = Run("submit-text-input tiTest:\n    var spl = input.wordsLower\n    if exists [\n        from spl w\n        where w.startsWith \"bird\"\n    ]:\n        solve\n    else:\n        makes-no-sense\n    end\nend", "public TextInput tiTest = null!; public void solve() { } private static System.Collections.Generic.List<string> splittaInputEFaiLower(TextHandlerInput e) => new();");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL", StringComparison.Ordinal));
+        var generated = Generated(result);
+        Assert.Contains("addHandlerSubmitTextInput(tiTest", generated, StringComparison.Ordinal);
+        Assert.Contains("var spl = splittaInputEFaiLower(e);", generated, StringComparison.Ordinal);
+        Assert.Contains("System.Linq.Enumerable.Any(spl, w => w.StartsWith(\"bird\"))", generated, StringComparison.Ordinal);
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
+    public void SubmitTextInputIsRequiredForInputContext()
+    {
+        var result = Run("def bad:\n    var spl = input.wordsLower\nend");
+        Assert.Contains(result.Diagnostics, d => d.GetMessage().Contains("'input' is only valid inside submit-text-input", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void CommentsAreIgnoredWithoutChangingStrings()
+    {
+        var result = Run("// declaration comment\nsubmit-text-input tiTest: // trailing\n    // body comment\n    nar: https://example.com/test // trailing comment\nend", "public TextInput tiTest = null!;");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL", StringComparison.Ordinal));
+        Assert.Contains("narText(\"https://example.com/test\")", Generated(result), StringComparison.Ordinal);
+        Assert.DoesNotContain("trailing comment", Generated(result), StringComparison.Ordinal);
+    }
+
     private static RunResult RunWithWorld(string dsl, string worldSource)
     {
         return RunWithWorldFiles(worldSource, ("test.seg", dsl));

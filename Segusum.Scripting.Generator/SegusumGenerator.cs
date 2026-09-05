@@ -98,6 +98,7 @@ public sealed class SegusumGenerator : IIncrementalGenerator
         else if (handler.Kind == "pickup") sb.Append("  addHandlerPickUp(").Append(EmitIdentifier(handler.First, model));
         else if (handler.Kind == "talk-here") sb.Append("  addHandlerTalkHere(").Append(EmitIdentifier(handler.First, model));
         else if (handler.Kind == "cancel-text-input") sb.Append("  addHandlerCancelTextInput(").Append(EmitIdentifier(handler.First, model));
+        else if (handler.Kind == "submit-text-input") sb.Append("  addHandlerSubmitTextInput(").Append(EmitIdentifier(handler.First, model));
         else sb.Append("  addHandlerUseHere(").Append(EmitIdentifier(handler.First, model));
         if (handler.Explanation != null && handler.Kind == "use-for") sb.Append(", ").Append(Emit(handler.Explanation, model));
         else if (handler.Explanation != null && handler.Kind == "combine") sb.Append(", explanation: ").Append(Emit(handler.Explanation, model));
@@ -168,6 +169,8 @@ public sealed class SegusumGenerator : IIncrementalGenerator
         BinaryExpression b => Emit(b.Left, model) + " " + (b.Operator == "and" ? "&&" : b.Operator == "or" ? "||" : b.Operator) + " " + Emit(b.Right, model),
         CallExpression c when model.DomainOperations.TryGetValue(c, out var domain) && domain.Kind == BoundDomainOperationKind.NotSeenRecently => Emit(domain.Receiver, model) + ".notSeenRecently(" + Emit(domain.Argument!, model) + ")",
         CallExpression c when model.DomainOperations.TryGetValue(c, out var seen) && seen.Kind == BoundDomainOperationKind.WasSeenAtLeastOnce => "wasSeenAtLeastOnce(" + Emit(seen.Receiver, model) + ")",
+        ExistsExpression e => "System.Linq.Enumerable.Any(" + Emit(e.Collection, model) + ", " + Name(e.ItemName) + " => " + Emit(e.Predicate, model) + ")",
+        MemberAccessExpression m when model.Values.TryGetValue(m, out var words) && words.CSharpName == "splittaInputEFaiLower(e)" => words.CSharpName,
         MemberAccessExpression m when model.Values.TryGetValue(m, out var member) && member.Kind == BoundSymbolKind.CSharpMethod => Emit(m.Receiver, model) + "." + member.CSharpName + "()",
         MemberAccessExpression m when model.Values.TryGetValue(m, out var property) => Emit(m.Receiver, model) + "." + property.CSharpName,
         CallExpression c when model.Calls.TryGetValue(c, out var bound) => (bound.Receiver == null ? bound.TargetName : Emit(bound.Receiver, model) + "." + bound.TargetName) + "(" + string.Join(",", bound.Arguments.Select(a => (a.Source.Name == null ? "" : Name(a.ParameterName) + ": ") + Emit(a.Source.Expression, model))) + ")",

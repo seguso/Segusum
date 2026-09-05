@@ -46,6 +46,7 @@ public static class DslParser
                     case "pickup": result.Add(ParseHandler("pickup", span)); break;
                     case "talk-here": result.Add(ParseHandler("talk-here", span)); break;
                     case "cancel-text-input": result.Add(ParseHandler("cancel-text-input", span)); break;
+                    case "submit-text-input": result.Add(ParseHandler("submit-text-input", span)); break;
                     case "room-changed": result.Add(ParseHandler("room-changed", span)); break;
                     case "add": result.Add(ParseCycleElement(span)); break;
                     case "var": { var name = Word(); Need("="); Need("new-cycle"); result.Add(new CycleDeclaration(name, span)); break; }
@@ -71,7 +72,7 @@ public static class DslParser
             var firstToken = WordToken(); var first = firstToken.Text; string? second = null; string? target = null; SourceSpan? secondSpan = null; SourceSpan? targetSpan = null;
             if (kind == "combine") { Need("with"); var token = WordToken(); second = token.Text; secondSpan = token.Span; }
             else if (kind == "room-changed") { }
-            else if (kind is "pickup" or "talk-here" or "cancel-text-input") { }
+            else if (kind is "pickup" or "talk-here" or "cancel-text-input" or "submit-text-input") { }
             else if (Is("for")) { Take(); kind = "use-for"; var token = WordToken(); target = token.Text; targetSpan = token.Span; }
             else { Need("here"); kind = "use-here"; }
             Need(":"); SkipTerminators(); DslExpression? phrase = null, explanation = null, condition = null; var body = new List<DslStatement>();
@@ -180,7 +181,7 @@ public static class DslParser
             var end = sourceText.IndexOf('\n', start);
             if (end < 0) end = sourceText.Length;
             while (position < tokens.Count && tokens[position].Kind != DslTokenKind.NewLine && tokens[position].Kind != DslTokenKind.EndOfFile) position++;
-            var text = sourceText.Substring(Math.Min(start, sourceText.Length), Math.Max(0, end - Math.Min(start, sourceText.Length))).Trim();
+            var text = StripComment(sourceText.Substring(Math.Min(start, sourceText.Length), Math.Max(0, end - Math.Min(start, sourceText.Length)))).Trim();
             if (text.Length == 0) Error("Narrative text cannot be empty.");
             return new LiteralExpression(text, "raw-string", Current.Span);
         }
@@ -189,9 +190,16 @@ public static class DslParser
             var end = sourceText.IndexOf('\n', start); if (end < 0) end = sourceText.Length;
             while (position < tokens.Count && tokens[position].Kind != DslTokenKind.NewLine && tokens[position].Kind != DslTokenKind.EndOfFile) position++;
             var actualStart = Math.Min(start, sourceText.Length);
-            var text = sourceText.Substring(actualStart, Math.Max(0, end - actualStart)).Trim();
+            var text = StripComment(sourceText.Substring(actualStart, Math.Max(0, end - actualStart))).Trim();
             if (text.Length == 0) Error("Dialogue text cannot be empty.");
             return new LiteralExpression(text, text.Length >= 2 && text[0] == '"' && text[text.Length - 1] == '"' ? "string" : "raw-string", SourceSpan.From(tokens[Math.Max(0, position - 1)].Span.Path, sourceText, actualStart, text.Length));
+        }
+        private static string StripComment(string text)
+        {
+            for (var i = 0; i + 1 < text.Length; i++)
+                if (text[i] == '/' && text[i + 1] == '/' && (i == 0 || char.IsWhiteSpace(text[i - 1])))
+                    return text.Substring(0, i);
+            return text;
         }
         private DslExpression ParseCallAfterKeyword(SourceSpan span) { Error("The 'call' keyword is no longer part of the DSL syntax."); var name = Word(); return new CallExpression(name, Array.Empty<DslArgument>(), span); }
         private bool CanStartArgument() => (Current.Kind is DslTokenKind.Identifier or DslTokenKind.Number or DslTokenKind.String or DslTokenKind.LParen) && Current.Text is not ("and" or "or" or "else" or "elif" or "end" or "when" or "with" or "for" or "here");
@@ -221,6 +229,7 @@ public static class DslParser
         {
             while (Current.Kind == DslTokenKind.NewLine) Take(); var span = Current.Span;
             if (Is("not")) { Take(); return new UnaryExpression("not", Expression(Precedence("not")), span); }
+            if (Is("exists")) return ParseExists(span);
             if (Current.Kind == DslTokenKind.LParen) { Take(); var expression = Expression(); Need(")"); return new ParenthesizedExpression(expression, span); }
             if (Current.Kind == DslTokenKind.String) return new LiteralExpression(Take().Text, "string", span);
             if (Current.Kind == DslTokenKind.Number) return new LiteralExpression(Take().Text, "number", span);
@@ -242,6 +251,24 @@ public static class DslParser
                 var args = new List<DslArgument>(); while (CanStartArgument()) args.Add(ParseArgument()); return new CallExpression(identifier.Name, args, span) { NameSpan = identifier.Span };
             }
             return identifier;
+        }
+        private ExistsExpression ParseExists(SourceSpan span)
+        {
+            Take(); Need("["); SkipTerminators(); Need("from");
+            var collection = ParseCollectionExpression();
+            var item = WordToken(); SkipTerminators(); Need("where");
+            var predicate = Expression(); SkipTerminators(); Need("]");
+            return new ExistsExpression(collection, item.Text, predicate, span) { ItemSpan = item.Span };
+        }
+        private DslExpression ParseCollectionExpression()
+        {
+            var expression = ParseSimpleExpression();
+            if (Is("."))
+            {
+                Take(); var member = WordToken();
+                expression = new MemberAccessExpression(expression, member.Text, expression.Span) { MemberSpan = member.Span };
+            }
+            return expression;
         }
     }
 }
