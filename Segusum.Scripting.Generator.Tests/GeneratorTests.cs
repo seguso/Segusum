@@ -657,6 +657,27 @@ public NamedCutSceneId ncsMikeStalloneIlBenefattore = null!;
     }
 
     [Fact]
+    public void RuntimeCallsAcceptNamedOptionalArguments()
+    {
+        var result = Run("def main:\n changeRoom roomA callRoomChangedHandler:true\n narRoom \"Testo\" roomA removeIfLast:false alsoShowGraphicsInTextMode:true\n removeObjective objective solved:false\nend", "public Room roomA = null!; public Objective objective = null!;");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL"));
+        var generated = Generated(result);
+        Assert.Contains("changeRoom(roomA,callRoomChangedHandler: true)", generated);
+        Assert.Contains("narRoom(\"Testo\",roomA,removeIfLast: false,alsoShowGraphicsInTextMode: true)", generated);
+        Assert.Contains("removeObjective(objective,solved: false)", generated);
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
+    public void RandomExpressionUsesTheGeneralWorldCapability()
+    {
+        var result = Run("def main:\n var variante = random 3\nend");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL"));
+        Assert.Contains("var variante = random(3);", Generated(result));
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
     public void UnknownIdentifierHasDslDiagnosticAndNoGeneratedSource()
     {
         var result = Run("def main:\n missing\nend");

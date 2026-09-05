@@ -61,6 +61,7 @@ namespace Seg
         public bool IsCasualMode { get; protected internal set; }
         public bool IsTutorialMode { get; protected internal set; }
         public bool IsCasual() => IsCasualMode;
+        protected int random(int maxExclusive) => eng.rnd.Next(maxExclusive);
         public virtual bool CasualModeKeepsExplanation(LogicObj first, LogicObj second) => false;
         public virtual Cycle CasualGenericFailureCycle() => null;
 

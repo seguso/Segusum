@@ -301,12 +301,16 @@ public static class DslParser
                 return expression;
             if (Is("not-seen-recently")) { Take(); return new CallExpression("not-seen-recently", new[] { new DslArgument(null, identifier, span), new DslArgument(null, Prefix(), Current.Span) }, span); }
             if (Is("was-seen-at-least-once")) { Take(); return new CallExpression("was-seen-at-least-once", new[] { new DslArgument(null, identifier, span) }, span); }
-            if (CanStartArgument())
+            if (CanStartArgument() && !IsNamedArgumentStart())
             {
                 var args = new List<DslArgument>(); while (CanStartArgument()) args.Add(ParseArgument()); return new CallExpression(identifier.Name, args, span) { NameSpan = identifier.Span };
             }
             return identifier;
         }
+        private bool IsNamedArgumentStart()
+            => Current.Kind == DslTokenKind.Identifier
+                && position + 1 < tokens.Count
+                && tokens[position + 1].Kind == DslTokenKind.Colon;
         private ExistsExpression ParseExists(SourceSpan span)
         {
             Take(); Need("["); SkipTerminators(); Need("from");
