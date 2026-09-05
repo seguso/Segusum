@@ -97,6 +97,11 @@ internal sealed class ToolingHost
     {
         if (context == null) throw new InvalidOperationException("Host is not initialized.");
         var target = FindWorld(context.Compilation, parameters?.Path) ?? world ?? throw new InvalidOperationException("No target World was found.");
+        if (parameters?.Text != null && parameters.Path != null)
+        {
+            var overlay = sources.Select(x => string.Equals(x.Path, parameters.Path, StringComparison.OrdinalIgnoreCase) ? new DslSource(x.Path, parameters.Text) : x).ToArray();
+            return new DslSemanticWorkspace(context, target, overlay);
+        }
         if (semantic == null || !SymbolEqualityComparer.Default.Equals(target, world)) semantic = new DslSemanticWorkspace(context, target, sources);
         return semantic;
     }
@@ -157,6 +162,6 @@ internal sealed class ToolingHost
 }
 
 internal sealed record HostRequest(int Id, string Method, HostParams? Params);
-internal sealed record HostParams(string? Path = null, int? Line = null, int? Column = null, string? NewName = null, string? ProjectPath = null, int? RequestId = null);
+internal sealed record HostParams(string? Path = null, int? Line = null, int? Column = null, string? NewName = null, string? ProjectPath = null, int? RequestId = null, string? Text = null);
 internal sealed record HostResponse(int? Id, object? Result, HostError? Error);
 internal sealed record HostError(string Code, string Message);
