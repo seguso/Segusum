@@ -43,6 +43,9 @@ public static class DslParser
                     case "def": result.Add(ParseFunction(span)); break;
                     case "combine": result.Add(ParseHandler("combine", span)); break;
                     case "use": result.Add(ParseHandler("use", span)); break;
+                    case "pickup": result.Add(ParseHandler("pickup", span)); break;
+                    case "talk-here": result.Add(ParseHandler("talk-here", span)); break;
+                    case "cancel-text-input": result.Add(ParseHandler("cancel-text-input", span)); break;
                     case "room-changed": result.Add(ParseHandler("room-changed", span)); break;
                     case "add": result.Add(ParseCycleElement(span)); break;
                     case "var": { var name = Word(); Need("="); Need("new-cycle"); result.Add(new CycleDeclaration(name, span)); break; }
@@ -68,6 +71,7 @@ public static class DslParser
             var firstToken = WordToken(); var first = firstToken.Text; string? second = null; string? target = null; SourceSpan? secondSpan = null; SourceSpan? targetSpan = null;
             if (kind == "combine") { Need("with"); var token = WordToken(); second = token.Text; secondSpan = token.Span; }
             else if (kind == "room-changed") { }
+            else if (kind is "pickup" or "talk-here" or "cancel-text-input") { }
             else if (Is("for")) { Take(); kind = "use-for"; var token = WordToken(); target = token.Text; targetSpan = token.Span; }
             else { Need("here"); kind = "use-here"; }
             Need(":"); SkipTerminators(); DslExpression? phrase = null, explanation = null, condition = null; var body = new List<DslStatement>();
@@ -83,7 +87,7 @@ public static class DslParser
         {
             if (Current.Kind != DslTokenKind.Identifier) return null;
             if (Is("once") || Is("forever")) return Take().Text;
-            if (Is("when") || Is("nar") || Is("nar-room") || Is("call") || Is("if") || Is("var") || Is("next") || Is("makes-no-sense") || Is("mark-happened-once") || Is("finish-game") || Is("do-not-advance-time")) return null;
+            if (Is("when") || Is("nar") || Is("nar-room") || Is("call") || Is("if") || Is("var") || Is("next") || Is("makes-no-sense") || Is("mark-happened-once") || Is("mark-happened") || Is("finish-game") || Is("do-not-advance-time")) return null;
             diagnostics.Add(new DslDiagnostic("SEGDSL102", $"Unknown Repeat modifier '{Current.Text}'. Expected 'once' or 'forever'.", Current.Span));
             return null;
         }
@@ -108,7 +112,7 @@ public static class DslParser
                 case "nar-room": if (Is(":")) Take(); return new NarRoomStatement(RawTextAfterKeyword(), span); case "call": Error("The 'call' keyword is no longer part of the DSL syntax."); return new CallStatement(new IdentifierExpression("_error", span), span);
                 case "var": { var name = Word(); Need("="); return new VariableDeclaration(name, Expression(), span); }
                 case "next": return new NextCycleStatement(Expression(), span); case "add": return ParseAdd(span);
-                case "makes-no-sense": return new MakesNoSenseStatement(span); case "mark-happened-once": return new MarkHappenedOnceStatement(Expression(), span); case "finish-game": return new FinishGameStatement(span); case "do-not-advance-time": return new DoNotAdvanceTimeStatement(span);
+                case "makes-no-sense": return new MakesNoSenseStatement(span); case "mark-happened-once": return new MarkHappenedOnceStatement(Expression(), span); case "mark-happened": return new MarkHappenedStatement(Expression(), span); case "finish-game": return new FinishGameStatement(span); case "do-not-advance-time": return new DoNotAdvanceTimeStatement(span);
                 case "named-cutscene": return ParseNamedCutscene(span);
                 case "text-input": return new TextInputStatement(Expression(), span);
                 case "nar-img": return ParseNarImg(span);

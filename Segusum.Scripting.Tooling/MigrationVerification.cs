@@ -32,6 +32,7 @@ public sealed record NamedCutsceneFingerprint(
     int SourceLine);
 
 public sealed record MarkHappenedOnceFingerprint(string Target, string SourcePath, int SourceLine);
+public sealed record MarkHappenedFingerprint(string Target, string SourcePath, int SourceLine);
 
 public sealed record HandlerEquivalenceResult(
     HandlerRegistrationFingerprint? CSharpRegistration,
@@ -213,6 +214,38 @@ public static class MigrationVerifier
         return new("mark-happened-once", EquivalenceStatus.Pass);
     }
 
+    public static IReadOnlyList<MarkHappenedFingerprint> ExtractCSharpMarkHappened(string path, string text)
+    {
+        var tree = CSharpSyntaxTree.ParseText(text, path: path);
+        return tree.GetRoot().DescendantNodes().OfType<AssignmentExpressionSyntax>()
+            .Where(x => x.Right.ToString() == "DateTime.Now")
+            .Select(x => new MarkHappenedFingerprint(x.Left.ToString(), path, x.GetLocation().GetLineSpan().StartLinePosition.Line + 1))
+            .ToArray();
+    }
+
+    public static IReadOnlyList<MarkHappenedFingerprint> ExtractDslMarkHappened(DslSource source)
+    {
+        var result = new List<MarkHappenedFingerprint>();
+        var parsed = DslParser.Parse(source);
+        foreach (var declaration in parsed.Document.Declarations)
+            switch (declaration)
+            {
+                case HandlerDeclaration handler: CollectDslMarkHappened(handler.Body, source.Path, result); break;
+                case FunctionDeclaration function: CollectDslMarkHappened(function.Body, source.Path, result); break;
+                case CycleElementDeclaration element: CollectDslMarkHappened(element.Body, source.Path, result); break;
+            }
+        return result;
+    }
+
+    public static VerificationCheck CompareMarkHappened(IReadOnlyList<MarkHappenedFingerprint> csharp, IReadOnlyList<MarkHappenedFingerprint> dsl)
+    {
+        if (csharp.Count != dsl.Count) return new("mark-happened presence", EquivalenceStatus.Fail, $"C# count={csharp.Count}; DSL count={dsl.Count}");
+        for (var i = 0; i < csharp.Count; i++)
+            if (!string.Equals(csharp[i].Target, dsl[i].Target, StringComparison.Ordinal))
+                return new("mark-happened target", EquivalenceStatus.Fail, $"C#='{csharp[i].Target}' DSL='{dsl[i].Target}'");
+        return new("mark-happened", EquivalenceStatus.Pass);
+    }
+
     public static IReadOnlyList<string> ExtractCSharpStrings(string path, string text)
     {
         var tree = CSharpSyntaxTree.ParseText(text, path: path);
@@ -361,6 +394,21 @@ public static class MigrationVerifier
         }
     }
 
+    private static void CollectDslMarkHappened(IEnumerable<DslStatement> statements, string path, List<MarkHappenedFingerprint> result)
+    {
+        foreach (var statement in statements)
+            switch (statement)
+            {
+                case MarkHappenedStatement mark: result.Add(new MarkHappenedFingerprint(ExpressionText(mark.Target) ?? "", path, mark.Span.Line)); break;
+                case IfStatement conditional:
+                    foreach (var branch in conditional.Branches) CollectDslMarkHappened(branch.Body, path, result);
+                    if (conditional.ElseBody != null) CollectDslMarkHappened(conditional.ElseBody, path, result);
+                    break;
+                case AddCycleElementStatement cycle: CollectDslMarkHappened(cycle.Body, path, result); break;
+                case NamedCutsceneStatement named: CollectDslMarkHappened(named.Body, path, result); break;
+            }
+    }
+
     private static string DslBodyShape(IEnumerable<DslStatement> statements)
         => string.Join("|", statements.Select(statement => statement switch
         {
@@ -378,6 +426,8 @@ public static class MigrationVerifier
         "addHandlerUseFor" => "use-for",
         "addHandlerUseHere" => "use-here",
         "addHandlerPickUp" => "pickup",
+        "addHandlerTalkHere" => "talk-here",
+        "addHandlerCancelTextInput" => "cancel-text-input",
         "addRoomChangedHandler" => "room-changed",
         _ => null
     };

@@ -274,6 +274,28 @@ public sealed class GeneratorTests
     }
 
     [Fact]
+    public void DomainHandlerPrimitivesAndMarkHappenedEmitExistingApis()
+    {
+        var result = Run("pickup item:\n    nar: picked\nend\ntalk-here roomA:\n    nar: talked\nend\ncancel-text-input ti:\n    nar: cancelled\nend\ndef mark:\n    mark-happened stamp\nend", "public LogicObj item = null!; public Room roomA = null!; public TextInput ti = null!; public DateTime stamp;");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL"));
+        var generated = Generated(result);
+        Assert.Contains("addHandlerPickUp(item", generated);
+        Assert.Contains("addHandlerTalkHere(roomA", generated);
+        Assert.Contains("addHandlerCancelTextInput(ti", generated);
+        Assert.Contains("stamp = System.DateTime.Now;", generated);
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
+    public void MarkHappenedRejectsWrongTypesAndNonAssignableTargets()
+    {
+        var wrongType = Run("def mark:\n    mark-happened flag\nend", "public bool flag;");
+        Assert.Contains(wrongType.Diagnostics, d => d.GetMessage().Contains("mark-happened target must be DateTime", StringComparison.Ordinal));
+        var literal = Run("def mark:\n    mark-happened 1\nend");
+        Assert.Contains(literal.Diagnostics, d => d.GetMessage().Contains("assignable timestamp field", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void DuplicateRoomChangedIsDiagnostic()
     {
         var result = Run("room-changed roomA:\n nar: uno\nend\nroom-changed roomA:\n nar: due\nend", "public Room roomA = null!; protected override void configureActionHandlers() { }");

@@ -107,6 +107,7 @@ public sealed class DslBinder
         }
         CheckDuplicateCombines(declarations);
         CheckDuplicateRoomChanged(declarations);
+        CheckDuplicateUnaryHandlers(declarations);
         CheckCSharpRoomChangedDuplicates(declarations);
     }
     private void AddGlobal(string name, ITypeSymbol? type, SourceSpan span, BoundSymbolKind kind)
@@ -119,6 +120,9 @@ public sealed class DslBinder
         if (h.Kind == "combine") { Require(first, logicObj, h.Span, "combine first operand must be LogicObj."); Require(second, logicObj, h.Span, "combine second operand must be LogicObj."); }
         if (h.Kind == "use-for") { Require(first, logicObj, h.Span, "use-for object must be LogicObj."); Require(target, objective, h.Span, "use-for target must be Objective."); }
         if (h.Kind == "use-here") Require(first, logicObj, h.Span, "use-here object must be LogicObj.");
+        if (h.Kind == "pickup") Require(first, logicObj, h.Span, "pickup target must be LogicObj.");
+        if (h.Kind == "talk-here") Require(first, room, h.Span, "talk-here target must be Room.");
+        if (h.Kind == "cancel-text-input") Require(first, compilation.GetTypeByMetadataName("Seg.TextInput"), h.Span, "cancel-text-input target must be TextInput.");
         if (h.Kind == "room-changed")
         {
             Require(first, room, h.Span, "room-changed target must be Room.");
@@ -179,6 +183,14 @@ public sealed class DslBinder
                         break;
                     }
                     Require(BindExpression(mark.Target, scope), dateTime, mark.Target.Span, "mark-happened-once target must be DateTime.");
+                    break;
+                case MarkHappenedStatement mark:
+                    if (mark.Target is not IdentifierExpression)
+                    {
+                        Report("SEGDSL328", "mark-happened requires an assignable timestamp field.", mark.Target.Span);
+                        break;
+                    }
+                    Require(BindExpression(mark.Target, scope), dateTime, mark.Target.Span, "mark-happened target must be DateTime.");
                     break;
             }
         }
@@ -377,6 +389,12 @@ public sealed class DslBinder
     private static string Name(string name) => name.Contains('-') ? DslNames.Camel(name) : name;
     private void CheckDuplicateCombines(IEnumerable<DslDeclaration> declarations) { var combines = declarations.OfType<HandlerDeclaration>().Where(x => x.Kind == "combine").GroupBy(x => NormalizeKey(x.First) + "\0" + NormalizeKey(x.Second!)); foreach (var group in combines.Where(x => x.Count() > 1)) foreach (var item in group.Skip(1)) Report("SEGDSL315", "Duplicate combine handler.", item.Span); }
     private void CheckDuplicateRoomChanged(IEnumerable<DslDeclaration> declarations) { foreach (var group in declarations.OfType<HandlerDeclaration>().Where(x => x.Kind == "room-changed").GroupBy(x => NormalizeKey(x.First))) foreach (var item in group.Skip(1)) Report("SEGDSL319", "Duplicate room-changed handler for the same Room.", item.Span); }
+    private void CheckDuplicateUnaryHandlers(IEnumerable<DslDeclaration> declarations)
+    {
+        foreach (var kind in new[] { "pickup", "talk-here", "cancel-text-input" })
+            foreach (var group in declarations.OfType<HandlerDeclaration>().Where(x => x.Kind == kind).GroupBy(x => NormalizeKey(x.First)))
+                foreach (var item in group.Skip(1)) Report("SEGDSL329", $"Duplicate {kind} handler for the same target.", item.Span);
+    }
     private void CheckCSharpRoomChangedDuplicates(IEnumerable<DslDeclaration> declarations)
     {
         var handlers = declarations.OfType<HandlerDeclaration>().Where(x => x.Kind == "room-changed").ToArray();

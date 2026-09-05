@@ -131,6 +131,38 @@ public sealed class MigrationVerificationTests
     }
 
     [Fact]
+    public void MarkHappenedMatchesDateTimeNowAssignment()
+    {
+        const string csharp = "void Configure() { stamp = DateTime.Now; }";
+        const string dsl = "world game\ndef mark:\n    mark-happened stamp\nend\n";
+        Assert.Equal(EquivalenceStatus.Pass, MigrationVerifier.CompareMarkHappened(
+            MigrationVerifier.ExtractCSharpMarkHappened("handlers.cs", csharp),
+            MigrationVerifier.ExtractDslMarkHappened(new DslSource("handlers.seg", dsl))).Status);
+    }
+
+    [Theory]
+    [InlineData("mark-happened other")]
+    [InlineData("")]
+    public void MarkHappenedFailsWhenTargetDiffers(string statement)
+    {
+        const string csharp = "void Configure() { stamp = DateTime.Now; }";
+        var dsl = $"world game\ndef mark:\n    {statement}\nend\n";
+        Assert.Equal(EquivalenceStatus.Fail, MigrationVerifier.CompareMarkHappened(
+            MigrationVerifier.ExtractCSharpMarkHappened("handlers.cs", csharp),
+            MigrationVerifier.ExtractDslMarkHappened(new DslSource("handlers.seg", dsl))).Status);
+    }
+
+    [Fact]
+    public void DomainHandlerRegistrationsKeepTheirKindAndTarget()
+    {
+        var csharp = MigrationVerifier.ExtractCSharpRegistrations("handlers.cs", "void Configure() { addHandlerPickUp(item, e => { }); addHandlerTalkHere(room, e => { }); addHandlerCancelTextInput(ti, e => { }); }");
+        var dsl = MigrationVerifier.ExtractDslRegistrations(new DslSource("handlers.seg", "world game\npickup item:\nend\ntalk-here room:\nend\ncancel-text-input ti:\nend\n"));
+        Assert.Equal(new[] { "pickup", "talk-here", "cancel-text-input" }, csharp.Select(x => x.Kind));
+        Assert.Equal(csharp.Select(x => x.Kind), dsl.Select(x => x.Kind));
+        Assert.Equal(csharp.Select(x => x.First), dsl.Select(x => x.First));
+    }
+
+    [Fact]
     public void MansoMigrationKeepsExplanationAndNamedCutsceneTitle()
     {
         const string csharp = "NamedCutSceneId ncsTrovateMansoDeZuniga = new NamedCutSceneId { serId = \"ncsTrovateMansoDeZuniga\", titleUntranslated = \"Trovate Sir Manso De Zuniga\".translatable() }; void Configure() { addHandlerUseFor(armaturaCriptaDracula, puTrovareMansoDeZuniga, exPercheRicordaLeCrociate, e => { using (namedCutScene(ncsTrovateMansoDeZuniga, curRoom, ilSantoGraal, cliffDeserto, dracula)) { dial(olivia, \"Camilla, hai notato che strana questa armatura?\"); } }); }";

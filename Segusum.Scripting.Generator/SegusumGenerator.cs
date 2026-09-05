@@ -95,6 +95,9 @@ public sealed class SegusumGenerator : IIncrementalGenerator
         if (handler.Kind == "combine") sb.Append("  addHandlerCombine(").Append(EmitIdentifier(handler.First, model)).Append(',').Append(EmitIdentifier(handler.Second!, model)).Append(',').Append(Emit(handler.Phrase ?? new LiteralExpression("\"\"", "string", handler.Span), model));
         else if (handler.Kind == "use-for") sb.Append("  addHandlerUseFor(").Append(EmitIdentifier(handler.First, model)).Append(',').Append(EmitIdentifier(handler.Target!, model));
         else if (handler.Kind == "room-changed") sb.Append("  addRoomChangedHandler(").Append(EmitIdentifier(handler.First, model));
+        else if (handler.Kind == "pickup") sb.Append("  addHandlerPickUp(").Append(EmitIdentifier(handler.First, model));
+        else if (handler.Kind == "talk-here") sb.Append("  addHandlerTalkHere(").Append(EmitIdentifier(handler.First, model));
+        else if (handler.Kind == "cancel-text-input") sb.Append("  addHandlerCancelTextInput(").Append(EmitIdentifier(handler.First, model));
         else sb.Append("  addHandlerUseHere(").Append(EmitIdentifier(handler.First, model));
         if (handler.Explanation != null && handler.Kind == "use-for") sb.Append(", ").Append(Emit(handler.Explanation, model));
         else if (handler.Explanation != null && handler.Kind == "combine") sb.Append(", explanation: ").Append(Emit(handler.Explanation, model));
@@ -135,6 +138,7 @@ public sealed class SegusumGenerator : IIncrementalGenerator
             case DialogueStatement d: sb.Append(indent).Append("dial(").Append(EmitIdentifier(d.Character, model)).Append(',').Append(Emit(d.Text, model)).AppendLine(");"); break;
             case TextInputStatement t: sb.Append(indent).Append(input ?? "e").Append(".textInputToShow = ").Append(Emit(t.TextInput, model)).AppendLine(";"); break;
             case MarkHappenedOnceStatement mark: sb.Append(indent).Append("setIfNeverHappened(ref ").Append(Emit(mark.Target, model)).AppendLine(");"); break;
+            case MarkHappenedStatement mark: sb.Append(indent).Append(Emit(mark.Target, model)).AppendLine(" = System.DateTime.Now;"); break;
             case NamedCutsceneStatement n:
                 sb.Append(indent).Append("using (namedCutScene(").Append(EmitIdentifier(n.Id, model));
                 if (n.Arguments.Count != 0) sb.Append(", ").Append(string.Join(", ", n.Arguments.Select(x => Emit(x, model))));
