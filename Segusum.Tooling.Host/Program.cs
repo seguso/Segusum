@@ -137,7 +137,7 @@ internal sealed class ToolingHost
     {
         var stopwatch = Stopwatch.StartNew();
         var wasCached = semantic != null;
-        var result = Workspace(p is null ? null : p with { Text = null }, ct).GetDefinition(p?.Path ?? "", p?.Line ?? 1, p?.Column ?? 1);
+        var result = Workspace(p, ct).GetDefinition(p?.Path ?? "", p?.Line ?? 1, p?.Column ?? 1);
         stopwatch.Stop();
         Console.Error.WriteLine($"definition project={projectPath} semanticBuild={(wasCached ? 0 : stopwatch.Elapsed.TotalMilliseconds):0}ms lookup={(wasCached ? stopwatch.Elapsed.TotalMilliseconds : 0):0}ms total={stopwatch.Elapsed.TotalMilliseconds:0}ms found={result != null}");
         return result == null ? null : ToDto(result);
@@ -146,7 +146,7 @@ internal sealed class ToolingHost
     private async Task<object> ReferencesAsync(HostParams? p, CancellationToken ct)
     {
         var stopwatch = Stopwatch.StartNew();
-        var result = await Workspace(p is null ? null : p with { Text = null }, ct).FindReferencesAsync(p?.Path ?? "", p?.Line ?? 1, p?.Column ?? 1, ct);
+        var result = await Workspace(p, ct).FindReferencesAsync(p?.Path ?? "", p?.Line ?? 1, p?.Column ?? 1, ct);
         stopwatch.Stop();
         Console.Error.WriteLine($"references project={projectPath} total={stopwatch.Elapsed.TotalMilliseconds:0}ms count={result.Count}");
         return result.Select(ToDto).ToArray();
@@ -164,8 +164,7 @@ internal sealed class ToolingHost
         ct.ThrowIfCancellationRequested();
         var hadSemantic = semantic != null;
         var build = Stopwatch.StartNew();
-        var stable = p == null ? null : p with { Text = null };
-        var workspace = Workspace(stable, ct);
+        var workspace = Workspace(p, ct);
         build.Stop();
         ct.ThrowIfCancellationRequested();
         var query = Stopwatch.StartNew();
@@ -173,7 +172,7 @@ internal sealed class ToolingHost
         ct.ThrowIfCancellationRequested();
         query.Stop(); total.Stop();
         var queueWait = Stopwatch.GetElapsedTime(receivedAt).TotalMilliseconds;
-        Console.Error.WriteLine($"completion project={projectPath} queueWait={queueWait:0}ms overlay=0ms semanticBuild={(hadSemantic ? 0 : build.Elapsed.TotalMilliseconds):0}ms completionQuery={query.Elapsed.TotalMilliseconds:0}ms total={total.Elapsed.TotalMilliseconds:0}ms");
+        Console.Error.WriteLine($"completion project={projectPath} queueWait={queueWait:0}ms overlay={(p?.Text == null ? 0 : build.Elapsed.TotalMilliseconds):0}ms semanticBuild={(hadSemantic ? 0 : build.Elapsed.TotalMilliseconds):0}ms completionQuery={query.Elapsed.TotalMilliseconds:0}ms total={total.Elapsed.TotalMilliseconds:0}ms");
         return result.Select(x => new { label = x }).ToArray();
     }
 
