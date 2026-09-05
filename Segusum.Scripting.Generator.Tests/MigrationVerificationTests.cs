@@ -99,6 +99,24 @@ public sealed class MigrationVerificationTests
     }
 
     [Fact]
+    public void MansoMigrationKeepsExplanationAndNamedCutsceneTitle()
+    {
+        const string csharp = "void Configure() { addHandlerUseFor(armaturaCriptaDracula, puTrovareMansoDeZuniga, exPercheRicordaLeCrociate, e => { using (namedCutScene(ncsTrovateMansoDeZuniga, curRoom, ilSantoGraal, cliffDeserto, dracula)) { dial(olivia, \"Camilla, hai notato che strana questa armatura?\"); } }); }";
+        const string dslText = "world game\nuse armaturaCriptaDracula for puTrovareMansoDeZuniga:\n    exp exPercheRicordaLeCrociate\n    named-cutscene ncsTrovateMansoDeZuniga \"Trovate Sir Manso De Zuniga\" curRoom ilSantoGraal cliffDeserto dracula:\n        olivia: Camilla, hai notato che strana questa armatura?\n    end\nend\n";
+
+        var csharpRegistration = Assert.Single(MigrationVerifier.ExtractCSharpRegistrations("worldActionHandlers.cs", csharp));
+        var dslRegistration = Assert.Single(MigrationVerifier.ExtractDslRegistrations(new DslSource("Gameplay/ActionHandlers.seg", dslText)));
+        Assert.Equal(EquivalenceStatus.Pass, MigrationVerifier.CompareRegistration(csharpRegistration, dslRegistration).Overall);
+
+        var csharpStrings = MigrationVerifier.ExtractCSharpStringsForRegistration("worldActionHandlers.cs", csharp, "use-for", "armaturaCriptaDracula", "puTrovareMansoDeZuniga");
+        var dslStrings = MigrationVerifier.ExtractDslStrings(new DslSource("Gameplay/ActionHandlers.seg", dslText));
+        Assert.Equal(new[] { "Camilla, hai notato che strana questa armatura?" }, csharpStrings);
+        Assert.Equal("Trovate Sir Manso De Zuniga", dslStrings[0]);
+        Assert.Equal(csharpStrings, dslStrings.Skip(1));
+        Assert.Equal(EquivalenceStatus.Pass, MigrationVerifier.CompareStrings(csharpStrings, dslStrings.Skip(1).ToArray()).Status);
+    }
+
+    [Fact]
     public void SemanticRegistrationExtractionRequiresTheMatchingTree()
     {
         var tree = CSharpSyntaxTree.ParseText("void Configure() { addHandlerUseFor(mareSpiaggia, objective, e => { }); }", path: "handlers.cs");

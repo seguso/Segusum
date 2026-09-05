@@ -66,7 +66,7 @@ public sealed class SegusumGenerator : IIncrementalGenerator
         foreach (var element in declarations.SelectMany(AllCycleElements).GroupBy(x => Name(x.Id), StringComparer.Ordinal).Select(x => x.First()))
         { EmitLine(sb, element.Span); sb.Append(" public CycleElemId ").Append(Name(element.Id)).AppendLine(" { get; set; } = new();"); EmitDefaultLine(sb); }
         foreach (var id in declarations.SelectMany(AllNamedCutscenes).GroupBy(x => Name(x.Id), StringComparer.Ordinal).Select(x => x.First()))
-            if (!world.GetMembers(Name(id.Id)).Any()) { EmitLine(sb, id.Span); sb.Append(" public NamedCutSceneId ").Append(Name(id.Id)).Append(" = new NamedCutSceneId { serId = \"").Append(EscapeString(id.Id)).AppendLine("\", titleUntranslated = \"" + EscapeString(id.Id) + "\" };" ); EmitDefaultLine(sb); }
+        { EmitLine(sb, id.Span); sb.Append(" public NamedCutSceneId ").Append(Name(id.Id)).Append(" = new NamedCutSceneId { serId = \"").Append(EscapeString(id.Id)).Append("\", titleUntranslated = ").Append(Emit(id.Title, binder.Model)).AppendLine(".translatable() };"); EmitDefaultLine(sb); }
         foreach (var function in declarations.OfType<FunctionDeclaration>()) EmitFunction(sb, function, binder.Model);
         sb.AppendLine("#line hidden\n protected override void configureGeneratedActionHandlers()\n {");
         foreach (var handler in declarations.OfType<HandlerDeclaration>()) EmitHandler(sb, handler, sp, binder.Model);

@@ -41,11 +41,20 @@ end
     [Fact]
     public void ExtractsNarrativeTextFromNamedCutsceneNarImgAndIgnoresPathAndId()
     {
-        const string dsl = "world game\nuse camilla here:\n    named-cutscene ncsTest curRoom thing:\n        nar-img \"img/test.png\" size medium show-in-text: Immagine narrativa\n        nar: Dopo\n    end\nend\n";
+        const string dsl = "world game\nuse camilla here:\n    named-cutscene ncsTest \"Titolo\" curRoom thing:\n        nar-img \"img/test.png\" size medium show-in-text: Immagine narrativa\n        nar: Dopo\n    end\nend\n";
         var extracted = Extract(dsl);
-        Assert.Equal(new[] { "Immagine narrativa", "Dopo" }, extracted.Select(x => x.Value));
+        Assert.Equal(new[] { "Titolo", "Immagine narrativa", "Dopo" }, extracted.Select(x => x.Value));
         Assert.DoesNotContain(extracted, x => x.Value.Contains("img/test.png", StringComparison.Ordinal));
         Assert.DoesNotContain(extracted, x => x.Value.Contains("ncsTest", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ExtractsNamedCutsceneTitleButNotItsIdOrRuntimeArguments()
+    {
+        const string dsl = "world game\nuse camilla here:\n    named-cutscene ncsTest \"Titolo della cutscene\" curRoom thing:\n        nar: Corpo\n    end\nend\n";
+        var extracted = Extract(dsl);
+        Assert.Equal(new[] { "Titolo della cutscene", "Corpo" }, extracted.Select(x => x.Value));
+        Assert.DoesNotContain(extracted, x => x.Value is "ncsTest" or "curRoom" or "thing");
     }
 
     private static IReadOnlyList<SourceString> Extract(string dsl)

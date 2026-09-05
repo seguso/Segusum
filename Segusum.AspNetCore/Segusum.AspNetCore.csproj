@@ -34,6 +34,7 @@
 
   <ItemGroup>
     <None Include="../Segusum.Scripting.Generator/bin/$(Configuration)/netstandard2.0/Segusum.Scripting.Generator.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+    <None Include="../Segusum.Scripting.Semantics/bin/$(Configuration)/netstandard2.0/Segusum.Scripting.Semantics.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
     <None Include="../Segusum.Scripting.Core/bin/$(Configuration)/netstandard2.0/Segusum.Scripting.Core.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
     <None Include="buildTransitive/Segusum.AspNetCore.props" Pack="true" PackagePath="buildTransitive" />
     <None Include="buildTransitive/Segusum.AspNetCore.targets" Pack="true" PackagePath="buildTransitive" />

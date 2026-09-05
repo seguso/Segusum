@@ -179,6 +179,10 @@ public sealed class DslBinder
     {
         var idType = BindName(statement.Id, statement.IdSpan, scope);
         Require(idType, namedCutsceneId, statement.IdSpan, "named-cutscene id must be a declared NamedCutSceneId.");
+        if (statement.Title is not LiteralExpression { Kind: "string" })
+            Report("SEGDSL326", "named-cutscene title must be a quoted string literal.", statement.Title.Span);
+        else
+            Require(BindExpression(statement.Title, scope ?? new()), compilation.GetSpecialType(SpecialType.System_String), statement.Title.Span, "named-cutscene title must be a string literal.");
         foreach (var argument in statement.Arguments) BindExpression(argument, scope ?? new());
         BindStatements(statement.Body, scope == null ? new() : new(scope), null);
     }
@@ -186,6 +190,7 @@ public sealed class DslBinder
     {
         var key = NormalizeKey(statement.Id);
         if (namedCutsceneGlobals.ContainsKey(key) || globals.ContainsKey(key)) { Report("SEGDSL324", $"Duplicate named-cutscene id '{statement.Id}'.", statement.IdSpan); return; }
+        if (ResolveCSharpMembers(statement.Id).Count != 0) { Report("SEGDSL325", $"Named-cutscene id '{statement.Id}' collides with an existing World member; remove the C# member before migrating it.", statement.IdSpan); return; }
         if (namedCutsceneId != null) namedCutsceneGlobals[key] = namedCutsceneId;
         model.References[statement.Id] = Name(statement.Id);
     }

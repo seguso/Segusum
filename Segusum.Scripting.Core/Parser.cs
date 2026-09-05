@@ -129,10 +129,16 @@ public static class DslParser
         }
         private NamedCutsceneStatement ParseNamedCutscene(SourceSpan span)
         {
-            var id = WordToken(); var args = new List<DslExpression>();
-            while (!Is(":") && Current.Kind != DslTokenKind.NewLine && Current.Kind != DslTokenKind.EndOfFile) args.Add(ParseSimpleExpression());
-            Need(":"); return new NamedCutsceneStatement(id.Text, args, ParseBody(false), span) { IdSpan = id.Span };
+            var id = WordToken(); SkipHeaderNewLines(); var title = ParseSimpleExpression(); var args = new List<DslExpression>();
+            while (Current.Kind != DslTokenKind.EndOfFile)
+            {
+                SkipHeaderNewLines();
+                if (Is(":") || Current.Kind == DslTokenKind.EndOfFile) break;
+                args.Add(ParseSimpleExpression());
+            }
+            Need(":"); return new NamedCutsceneStatement(id.Text, title, args, ParseBody(false), span) { IdSpan = id.Span };
         }
+        private void SkipHeaderNewLines() { while (Current.Kind == DslTokenKind.NewLine) Take(); }
         private NarImgStatement ParseNarImg(SourceSpan span)
         {
             var path = ParseSimpleExpression(); string? size = null; var show = false;

@@ -103,7 +103,7 @@ public sealed class GeneratorTests
     [Fact]
     public void SemanticWorkspaceTreatsNamedCutsceneIdAsAnImplicitDslIdentity()
     {
-        const string dslText = "world game\nuse thing here:\n    named-cutscene ncsTest curRoom thing:\n        nar: Testo\n    end\nend\ndef seen ret bool:\n    ret namedCutSceneIsSeen ncsTest\nend\n";
+        const string dslText = "world game\nuse thing here:\n    named-cutscene ncsTest \"Titolo\" curRoom thing:\n        nar: Testo\n    end\nend\ndef seen ret bool:\n    ret namedCutSceneIsSeen ncsTest\nend\n";
         var references = ((string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES"))!.Split(Path.PathSeparator).Select(path => MetadataReference.CreateFromFile(path)).Cast<MetadataReference>().ToList();
         references.Add(MetadataReference.CreateFromFile(typeof(Seg.WorldBase).Assembly.Location));
         var tree = CSharpSyntaxTree.ParseText("using Seg; namespace Demo { public partial class Pinco : WorldBase { public Pinco() : base(\"en\") { } public LogicObj thing = null!; } }", path: "World.cs");
@@ -668,10 +668,13 @@ public NamedCutSceneId ncsMikeStalloneIlBenefattore = null!;
     [Fact]
     public void NamedCutsceneAndDomainStatementsAreEmitted()
     {
-        var result = Run("use thing here:\n    named-cutscene ncsTest curRoom thing:\n        nar-img \"img/test.png\" size medium show-in-text: Una narrazione.\n        text-input ti\n    end\nend", "public LogicObj thing = null!; public TextInput ti = null!; public NamedCutSceneId ncsTest = new();");
+        var result = Run("use thing here:\n    named-cutscene ncsTest \"Titolo test\" curRoom thing:\n        nar-img \"img/test.png\" size medium show-in-text: Una narrazione.\n        text-input ti\n    end\nend", "public LogicObj thing = null!; public TextInput ti = null!;");
         Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL"));
         var generated = Generated(result);
+        Assert.Contains("NamedCutSceneId ncsTest", generated);
+        Assert.Contains("serId = \"ncsTest\", titleUntranslated = \"Titolo test\".translatable()", generated);
         Assert.Contains("using (namedCutScene(ncsTest, curRoom, thing))", generated);
+        Assert.DoesNotContain("foreach", generated, StringComparison.Ordinal);
         Assert.Contains("narImg(\"Una narrazione.\", \"img/test.png\", NarSize.Medium, alsoShowGraphicsInTextMode: true)", generated);
         Assert.DoesNotContain("narImg(\"\\\"Una narrazione.", generated, StringComparison.Ordinal);
         Assert.Contains("e.textInputToShow = ti;", generated);
@@ -689,8 +692,15 @@ public NamedCutSceneId ncsMikeStalloneIlBenefattore = null!;
     [Fact]
     public void NamedCutsceneIdsMustBeUnique()
     {
-        var result = Run("use thing here:\n    named-cutscene ncsTest curRoom thing:\n    end\n    named-cutscene ncsTest curRoom thing:\n    end\n    named-cutscene missing curRoom thing:\n    end\nend", "public LogicObj thing = null!;");
+        var result = Run("use thing here:\n    named-cutscene ncsTest \"Titolo 1\" curRoom thing:\n    end\n    named-cutscene ncsTest \"Titolo 2\" curRoom thing:\n    end\n    named-cutscene missing \"Titolo 3\" curRoom thing:\n    end\nend", "public LogicObj thing = null!;");
         Assert.Contains(result.Diagnostics, d => d.GetMessage().Contains("Duplicate named-cutscene id 'ncsTest'", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void NamedCutsceneIdCollidingWithCSharpMemberIsDiagnostic()
+    {
+        var result = Run("use thing here:\n    named-cutscene ncsTest \"Titolo\" curRoom thing:\n    end\nend", "public LogicObj thing = null!; public NamedCutSceneId ncsTest = new();");
+        Assert.Contains(result.Diagnostics, d => d.GetMessage().Contains("collides with an existing World member", StringComparison.Ordinal));
     }
 
     [Fact]

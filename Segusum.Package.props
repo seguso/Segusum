@@ -1,7 +1,7 @@
 <Project>
   <!-- Versione condivisa dei package pubblici correlati. -->
   <PropertyGroup>
-    <Version>0.1.31</Version>
+    <Version>0.1.32</Version>
     <Authors>Seguso</Authors>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>

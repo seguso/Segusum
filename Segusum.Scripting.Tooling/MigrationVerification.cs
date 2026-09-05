@@ -351,7 +351,7 @@ public static class MigrationVerifier
                     if (conditional.ElseBody != null) Walk(conditional.ElseBody, result);
                     break;
                 case AddCycleElementStatement cycle: Walk(cycle.Body, result); break;
-                case NamedCutsceneStatement namedCutscene: Walk(namedCutscene.Body, result); break;
+                case NamedCutsceneStatement namedCutscene: AddString(namedCutscene.Title, result); Walk(namedCutscene.Body, result); break;
             }
         }
     }

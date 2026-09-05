@@ -7,11 +7,13 @@ public sealed class DslParserStructureTests
     [Fact]
     public void NamedCutsceneDeclarationAndBodyAreStructured()
     {
-        var result = DslParser.Parse(new DslSource("named.seg", "world game\nuse camilla here:\n named-cutscene ncsTest curRoom thing:\n  nar-img \"img/test.png\" show-in-text: testo\n end\nend"));
+        var result = DslParser.Parse(new DslSource("named.seg", "world game\nuse camilla here:\n named-cutscene ncsTest \"Titolo test\" curRoom\n  thing:\n  nar-img \"img/test.png\" show-in-text: testo\n end\nend"));
         Assert.Empty(result.Diagnostics);
         var handler = Assert.IsType<HandlerDeclaration>(result.Document.Declarations[0]);
         var cutscene = Assert.IsType<NamedCutsceneStatement>(handler.Body.Single());
         Assert.Equal("ncsTest", cutscene.Id);
+        Assert.IsType<LiteralExpression>(cutscene.Title);
+        Assert.Equal("Titolo test", ((LiteralExpression)cutscene.Title).Value.Trim('"'));
         Assert.Equal(2, cutscene.Arguments.Count);
         Assert.IsType<NarImgStatement>(cutscene.Body.Single());
     }
