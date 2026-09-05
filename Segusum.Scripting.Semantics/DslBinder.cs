@@ -53,6 +53,7 @@ public sealed class DslBinder
     private readonly INamedTypeSymbol? cycle;
     private readonly INamedTypeSymbol? cycleElementId;
     private readonly INamedTypeSymbol? namedCutsceneId;
+    private readonly ITypeSymbol? dateTime;
     private readonly ITypeSymbol? dateTimeNullable;
     private readonly INamedTypeSymbol? logicObj;
     private readonly INamedTypeSymbol? objective;
@@ -73,7 +74,7 @@ public sealed class DslBinder
         this.compilation = compilation; this.world = world; this.report = report;
         cycle = compilation.GetTypeByMetadataName("Seg.Cycle"); cycleElementId = compilation.GetTypeByMetadataName("Seg.CycleElemId"); namedCutsceneId = compilation.GetTypeByMetadataName("Seg.NamedCutSceneId");
         logicObj = compilation.GetTypeByMetadataName("Seg.LogicObj"); objective = compilation.GetTypeByMetadataName("Seg.Objective"); room = compilation.GetTypeByMetadataName("Seg.Room"); explanation = compilation.GetTypeByMetadataName("Seg.Explanation");
-        var dateTime = compilation.GetSpecialType(SpecialType.System_DateTime); dateTimeNullable = compilation.GetSpecialType(SpecialType.System_Nullable_T).Construct(dateTime);
+        dateTime = compilation.GetSpecialType(SpecialType.System_DateTime); dateTimeNullable = compilation.GetSpecialType(SpecialType.System_Nullable_T).Construct(dateTime);
     }
     public void Bind(IReadOnlyList<DslDeclaration> declarations)
     {
@@ -177,7 +178,7 @@ public sealed class DslBinder
                         Report("SEGDSL327", "mark-happened-once requires an assignable flag field.", mark.Target.Span);
                         break;
                     }
-                    Require(BindExpression(mark.Target, scope), dateTimeNullable, mark.Target.Span, "mark-happened-once target must be DateTime.");
+                    Require(BindExpression(mark.Target, scope), dateTime, mark.Target.Span, "mark-happened-once target must be DateTime.");
                     break;
             }
         }

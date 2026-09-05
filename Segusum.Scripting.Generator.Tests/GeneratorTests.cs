@@ -208,6 +208,31 @@ public sealed class GeneratorTests
     }
 
     [Fact]
+    public void MarkHappenedOnceEmitsRefCall()
+    {
+        var result = Run("use imodium here:\n mark-happened-once ftDatoImodiumADracula\nend", "public LogicObj imodium = null!; public DateTime ftDatoImodiumADracula; public void setIfNeverHappened(ref DateTime value) { }");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL"));
+        var generated = Generated(result);
+        Assert.Contains("setIfNeverHappened(ref ftDatoImodiumADracula);", generated);
+        Assert.DoesNotContain("ftDatoImodiumADracula = setIfNeverHappened", generated, StringComparison.Ordinal);
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
+    public void MarkHappenedOnceRejectsNonDateTimeTarget()
+    {
+        var result = Run("use imodium here:\n mark-happened-once flag\nend", "public LogicObj imodium = null!; public bool flag;");
+        Assert.Contains(result.Diagnostics, d => d.GetMessage().Contains("mark-happened-once target must be DateTime", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void MarkHappenedOnceRejectsLiteralTarget()
+    {
+        var result = Run("use imodium here:\n mark-happened-once 1\nend", "public LogicObj imodium = null!;");
+        Assert.Contains(result.Diagnostics, d => d.GetMessage().Contains("assignable flag field", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void DuplicateRoomChangedIsDiagnostic()
     {
         var result = Run("room-changed roomA:\n nar: uno\nend\nroom-changed roomA:\n nar: due\nend", "public Room roomA = null!; protected override void configureActionHandlers() { }");

@@ -31,6 +31,8 @@ public sealed record NamedCutsceneFingerprint(
     string SourcePath,
     int SourceLine);
 
+public sealed record MarkHappenedOnceFingerprint(string Target, string SourcePath, int SourceLine);
+
 public sealed record HandlerEquivalenceResult(
     HandlerRegistrationFingerprint? CSharpRegistration,
     HandlerRegistrationFingerprint? DslRegistration,
@@ -169,6 +171,48 @@ public static class MigrationVerifier
             ? new("strings", EquivalenceStatus.Pass)
             : new("strings", EquivalenceStatus.Fail, $"C#=[{string.Join(", ", csharp)}] DSL=[{string.Join(", ", dsl)}]");
 
+    public static IReadOnlyList<MarkHappenedOnceFingerprint> ExtractCSharpMarkHappenedOnce(string path, string text)
+    {
+        var tree = CSharpSyntaxTree.ParseText(text, path: path);
+        return tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>()
+            .Where(x => InvocationName(x) == "setIfNeverHappened"
+                && x.ArgumentList.Arguments.Count == 1
+                && x.ArgumentList.Arguments[0].RefKindKeyword.IsKind(SyntaxKind.RefKeyword))
+            .Select(x => new MarkHappenedOnceFingerprint(x.ArgumentList.Arguments[0].Expression.ToString(), path,
+                x.GetLocation().GetLineSpan().StartLinePosition.Line + 1))
+            .ToArray();
+    }
+
+    public static IReadOnlyList<MarkHappenedOnceFingerprint> ExtractDslMarkHappenedOnce(DslSource source)
+    {
+        var result = new List<MarkHappenedOnceFingerprint>();
+        var parsed = DslParser.Parse(source);
+        foreach (var declaration in parsed.Document.Declarations)
+        {
+            switch (declaration)
+            {
+                case HandlerDeclaration handler: CollectDslMarkHappenedOnce(handler.Body, source.Path, result); break;
+                case FunctionDeclaration function: CollectDslMarkHappenedOnce(function.Body, source.Path, result); break;
+                case CycleElementDeclaration element: CollectDslMarkHappenedOnce(element.Body, source.Path, result); break;
+            }
+        }
+        return result;
+    }
+
+    public static VerificationCheck CompareMarkHappenedOnce(
+        IReadOnlyList<MarkHappenedOnceFingerprint> csharp,
+        IReadOnlyList<MarkHappenedOnceFingerprint> dsl)
+    {
+        if (csharp.Count != dsl.Count)
+            return new("mark-happened-once presence", EquivalenceStatus.Fail, $"C# count={csharp.Count}; DSL count={dsl.Count}");
+        for (var i = 0; i < csharp.Count; i++)
+        {
+            if (!string.Equals(csharp[i].Target, dsl[i].Target, StringComparison.Ordinal))
+                return new("mark-happened-once target", EquivalenceStatus.Fail, $"C#='{csharp[i].Target}' DSL='{dsl[i].Target}'");
+        }
+        return new("mark-happened-once", EquivalenceStatus.Pass);
+    }
+
     public static IReadOnlyList<string> ExtractCSharpStrings(string path, string text)
     {
         var tree = CSharpSyntaxTree.ParseText(text, path: path);
@@ -294,6 +338,25 @@ public static class MigrationVerifier
                     if (conditional.ElseBody != null) CollectDslNamedCutscenes(conditional.ElseBody, path, result);
                     break;
                 case AddCycleElementStatement cycle: CollectDslNamedCutscenes(cycle.Body, path, result); break;
+            }
+        }
+    }
+
+    private static void CollectDslMarkHappenedOnce(IEnumerable<DslStatement> statements, string path, List<MarkHappenedOnceFingerprint> result)
+    {
+        foreach (var statement in statements)
+        {
+            switch (statement)
+            {
+                case MarkHappenedOnceStatement mark:
+                    result.Add(new MarkHappenedOnceFingerprint(ExpressionText(mark.Target) ?? "", path, mark.Span.Line));
+                    break;
+                case IfStatement conditional:
+                    foreach (var branch in conditional.Branches) CollectDslMarkHappenedOnce(branch.Body, path, result);
+                    if (conditional.ElseBody != null) CollectDslMarkHappenedOnce(conditional.ElseBody, path, result);
+                    break;
+                case AddCycleElementStatement cycle: CollectDslMarkHappenedOnce(cycle.Body, path, result); break;
+                case NamedCutsceneStatement named: CollectDslMarkHappenedOnce(named.Body, path, result); break;
             }
         }
     }
