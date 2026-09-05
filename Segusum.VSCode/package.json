@@ -2,7 +2,7 @@
   "name": "segusum-dsl",
   "displayName": "Segusum DSL",
   "description": "Segusum DSL semantic tooling",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "seguso",
   "engines": { "vscode": "^1.85.0" },
   "categories": ["Programming Languages"],
@@ -20,6 +20,6 @@
     "viewsContainers": { "panel": [{ "id": "segusum.references", "title": "Segusum", "icon": "$(references)" }] },
     "views": { "segusum.references": [{ "id": "segusum.referencesView", "name": "References" }] }
   },
-  "scripts": { "compile": "tsc -p ./tsconfig.json", "test:cancellation": "npm run compile && node test/pendingRequests.test.mjs", "test:invalidation": "npm run compile && node test/invalidation.test.mjs", "test": "npm run test:cancellation && node test/invalidation.test.mjs" },
+  "scripts": { "compile": "tsc -p ./tsconfig.json", "test:cancellation": "npm run compile && node test/pendingRequests.test.mjs", "test:invalidation": "npm run compile && node test/invalidation.test.mjs", "test:semantic": "npm run compile && node test/semanticRequest.test.mjs", "test": "npm run test:cancellation && node test/invalidation.test.mjs && node test/semanticRequest.test.mjs" },
   "devDependencies": { "@types/node": "^22.0.0", "@types/vscode": "^1.85.0", "typescript": "^5.6.0" }
 }

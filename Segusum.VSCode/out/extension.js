@@ -41,6 +41,7 @@ const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
 const pendingRequests_1 = require("./pendingRequests");
 const invalidation_1 = require("./invalidation");
+const semanticRequest_1 = require("./semanticRequest");
 const BUILD_ID = 'extension build = invalidation-lifecycle-2026-09-05';
 const INTERACTIVE_RPC_TIMEOUT_MS = 15_000;
 const interactiveMethods = new Set(['definition', 'completion', 'references', 'rename']);
@@ -289,7 +290,7 @@ async function activate(context) {
     log(`activation complete elapsed=${Date.now() - activationStarted}ms; host initialization is lazy.`);
     context.subscriptions.push(vscode.languages.registerDefinitionProvider({ language: 'segusum' }, { provideDefinition: async (document, pos) => { try {
             const client = await clientFor(document);
-            const result = await client.request('definition', { path: document.uri.fsPath, line: pos.line + 1, column: pos.character + 1 });
+            const result = await client.request('definition', (0, semanticRequest_1.semanticDocumentSnapshot)(document.uri.fsPath, pos.line + 1, pos.character + 1, document.getText()));
             return result?.path ? new vscode.Location(vscode.Uri.file(result.path), new vscode.Position(result.line - 1, result.column - 1)) : undefined;
         }
         catch (e) {
@@ -328,11 +329,11 @@ async function activate(context) {
             }
         } }, '.'));
     context.subscriptions.push(vscode.commands.registerCommand('segusum.findAllReferences', async () => { try {
-        const query = await savedPosition();
+        const query = position();
         const client = await clientFor(query.editor.document);
         requestCts?.cancel();
         requestCts = new vscode.CancellationTokenSource();
-        await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Segusum references', cancellable: true }, async (_progress, token) => { token.onCancellationRequested(() => requestCts?.cancel()); const result = await client.request('references', { path: query.path, line: query.line, column: query.column }, requestCts.token); refs.clear(); for (const reference of result ?? []) {
+        await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Segusum references', cancellable: true }, async (_progress, token) => { token.onCancellationRequested(() => requestCts?.cancel()); const result = await client.request('references', (0, semanticRequest_1.semanticDocumentSnapshot)(query.path, query.line, query.column, query.editor.document.getText()), requestCts.token); refs.clear(); for (const reference of result ?? []) {
             let preview = reference.displayName;
             try {
                 const document = await vscode.workspace.openTextDocument(vscode.Uri.file(reference.path));
