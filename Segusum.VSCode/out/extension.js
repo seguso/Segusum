@@ -39,7 +39,7 @@ const vscode = __importStar(require("vscode"));
 const child_process_1 = require("child_process");
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
-const BUILD_ID = 'extension build = completion-fastpath-2026-09-05';
+const BUILD_ID = 'extension build = references-definition-completion-2026-09-05';
 let output;
 let status;
 function log(message) { output?.appendLine(`[${new Date().toISOString()}] ${message}`); }
@@ -189,7 +189,7 @@ async function activate(context) {
     log(`${BUILD_ID}`);
     context.subscriptions.push(vscode.languages.registerDefinitionProvider({ language: 'segusum' }, { provideDefinition: async (document, pos) => { try {
             const client = await clientFor(document);
-            const result = await client.request('definition', { path: document.uri.fsPath, line: pos.line + 1, column: pos.character + 1, text: document.getText() });
+            const result = await client.request('definition', { path: document.uri.fsPath, line: pos.line + 1, column: pos.character + 1 });
             return result?.path ? new vscode.Location(vscode.Uri.file(result.path), new vscode.Position(result.line - 1, result.column - 1)) : undefined;
         }
         catch (e) {

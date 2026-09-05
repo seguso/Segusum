@@ -36,6 +36,7 @@ public sealed class DslSemanticWorkspace
     private readonly DslBinder binder;
     private readonly Dictionary<string, DslSource> documents;
     private readonly string[] completionNames;
+    private readonly Dictionary<string, DslSemanticReference[]> referencesByPath;
     private readonly List<DslDiagnostic> diagnostics = new();
     private Solution roslynSolution => workspaceContext.Solution;
 
@@ -64,6 +65,9 @@ public sealed class DslSemanticWorkspace
             .Distinct(StringComparer.Ordinal)
             .OrderBy(x => x, StringComparer.Ordinal)
             .ToArray();
+        referencesByPath = model.SemanticReferenceList
+            .GroupBy(x => x.Path, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(x => x.Key, x => x.OrderBy(r => r.Span.Start).ToArray(), StringComparer.OrdinalIgnoreCase);
     }
 
     public IReadOnlyList<DslDiagnostic> Diagnostics => diagnostics;
@@ -104,7 +108,7 @@ public sealed class DslSemanticWorkspace
 
     public SemanticDefinition? GetDefinition(string path, int line, int column)
     {
-        var sourceReference = model.SemanticReferenceList.FirstOrDefault(x => string.Equals(x.Path, path, StringComparison.OrdinalIgnoreCase) && x.Span.Line == line && column >= x.Span.Column && column <= x.Span.Column + Math.Max(1, x.Span.Length));
+        var sourceReference = FindReference(path, line, column);
         if (sourceReference?.CSharpSymbol != null)
         {
             var location = sourceReference.CSharpSymbol.Locations.FirstOrDefault() ?? Location.None;
@@ -182,12 +186,49 @@ public sealed class DslSemanticWorkspace
             var receiverName = ReadIdentifierBackward(before, dot);
             var receiverType = binder.ResolveCompletionType(receiverName);
             if (receiverType != null)
-                return binder.GetAccessibleMembers(receiverType).Select(x => x.Name).Where(x => x.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).Distinct(StringComparer.Ordinal).OrderBy(x => x, StringComparer.Ordinal).ToArray();
+                return RankCompletions(binder.GetAccessibleMembers(receiverType).Select(x => x.Name), prefix);
             return Array.Empty<string>();
         }
-        return completionNames
-            .Where(x => x.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            .ToArray();
+        return RankCompletions(completionNames, prefix);
+    }
+
+    private DslSemanticReference? FindReference(string path, int line, int column)
+    {
+        if (!referencesByPath.TryGetValue(path, out var references)) return null;
+        var low = 0; var high = references.Length - 1;
+        while (low <= high)
+        {
+            var middle = low + ((high - low) / 2);
+            var candidate = references[middle];
+            if (candidate.Span.Line < line || (candidate.Span.Line == line && candidate.Span.Column + Math.Max(1, candidate.Span.Length) < column)) low = middle + 1;
+            else high = middle - 1;
+        }
+        for (var i = Math.Max(0, low - 2); i < Math.Min(references.Length, low + 3); i++)
+        {
+            var span = references[i].Span;
+            if (span.Line == line && column >= span.Column && column <= span.Column + Math.Max(1, span.Length)) return references[i];
+        }
+        return null;
+    }
+
+    private static IReadOnlyList<string> RankCompletions(IEnumerable<string> names, string query)
+        => names.Select(name => (name, score: CompletionScore(name, query)))
+            .Where(x => x.score < int.MaxValue)
+            .OrderBy(x => x.score).ThenBy(x => x.name, StringComparer.Ordinal)
+            .Select(x => x.name).ToArray();
+
+    private static int CompletionScore(string name, string query)
+    {
+        if (query.Length == 0) return 400;
+        if (string.Equals(name, query, StringComparison.OrdinalIgnoreCase)) return 0;
+        if (name.StartsWith(query, StringComparison.OrdinalIgnoreCase)) return 100 + name.Length - query.Length;
+        var compact = new string(name.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
+        var q = query.ToLowerInvariant();
+        var subsequence = 0; var cursor = 0;
+        foreach (var c in q) { var found = compact.IndexOf(c, cursor); if (found < 0) { subsequence = int.MaxValue; break; } subsequence += found - cursor; cursor = found + 1; }
+        if (subsequence != int.MaxValue) return 200 + subsequence + name.Length;
+        var contains = name.IndexOf(query, StringComparison.OrdinalIgnoreCase);
+        return contains >= 0 ? 300 + contains + name.Length : int.MaxValue;
     }
 
     private static string ReadIdentifierBackward(string text, int end)

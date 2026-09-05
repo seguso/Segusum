@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 
 type RpcResponse = { id: number; result?: any; error?: { code: string; message: string } };
-const BUILD_ID = 'extension build = completion-fastpath-2026-09-05';
+const BUILD_ID = 'extension build = references-definition-completion-2026-09-05';
 let output: vscode.OutputChannel;
 let status: vscode.StatusBarItem;
 function log(message: string) { output?.appendLine(`[${new Date().toISOString()}] ${message}`); }
@@ -82,7 +82,7 @@ export async function activate(context: vscode.ExtensionContext) {
   status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100); status.text = 'Segusum: Starting'; status.show(); context.subscriptions.push(status);
   if (!vscode.workspace.workspaceFolders?.length) { status.text = 'Segusum: No workspace'; return; }
   log(`${BUILD_ID}`);
-  context.subscriptions.push(vscode.languages.registerDefinitionProvider({ language: 'segusum' }, { provideDefinition: async (document, pos) => { try { const client = await clientFor(document); const result = await client.request('definition', { path: document.uri.fsPath, line: pos.line + 1, column: pos.character + 1, text: document.getText() }); return result?.path ? new vscode.Location(vscode.Uri.file(result.path), new vscode.Position(result.line - 1, result.column - 1)) : undefined; } catch (e) { log(`Definition failed: ${e}`); output.show(true); vscode.window.showErrorMessage(`Segusum definition failed: ${e}`); return undefined; } } }));
+  context.subscriptions.push(vscode.languages.registerDefinitionProvider({ language: 'segusum' }, { provideDefinition: async (document, pos) => { try { const client = await clientFor(document); const result = await client.request('definition', { path: document.uri.fsPath, line: pos.line + 1, column: pos.character + 1 }); return result?.path ? new vscode.Location(vscode.Uri.file(result.path), new vscode.Position(result.line - 1, result.column - 1)) : undefined; } catch (e) { log(`Definition failed: ${e}`); output.show(true); vscode.window.showErrorMessage(`Segusum definition failed: ${e}`); return undefined; } } }));
   context.subscriptions.push(vscode.languages.registerCompletionItemProvider({ language: 'segusum' }, { provideCompletionItems: async (document, pos, token) => {
     const key = document.uri.toString();
     completionCts.get(key)?.cancel(); completionCts.get(key)?.dispose();

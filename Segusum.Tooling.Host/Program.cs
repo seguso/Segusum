@@ -16,6 +16,7 @@ internal sealed class ToolingHost
     private MsBuildWorkspaceContext? context;
     private string? projectPath;
     private INamedTypeSymbol? world;
+    private INamedTypeSymbol? semanticTarget;
     private DslSemanticWorkspace? semantic;
     private IReadOnlyList<DslSource> sources = Array.Empty<DslSource>();
 
@@ -93,8 +94,10 @@ internal sealed class ToolingHost
         if (projectPath == null) throw new InvalidOperationException("No .csproj containing .seg files was found.");
         context?.Dispose();
         context = await MsBuildWorkspaceContext.OpenProjectAsync(projectPath, cancellationToken);
-        world = FindWorld(context.Compilation, null);
         await RebuildAsync(cancellationToken);
+        // Sources (including world directives) must be loaded before selecting the
+        // default world; otherwise a multi-world project leaves this cache key null.
+        world = FindWorld(context.Compilation, null);
     }
 
     private async Task RebuildAsync(CancellationToken cancellationToken)
@@ -104,6 +107,7 @@ internal sealed class ToolingHost
             .Where(x => !x.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) && !x.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
             .OrderBy(x => x, StringComparer.Ordinal).Select(x => new DslSource(x, File.ReadAllText(x))).ToArray();
         semantic = null;
+        semanticTarget = null;
         await Task.CompletedTask;
     }
 
@@ -116,19 +120,30 @@ internal sealed class ToolingHost
             var overlay = sources.Select(x => string.Equals(x.Path, parameters.Path, StringComparison.OrdinalIgnoreCase) ? new DslSource(x.Path, parameters.Text) : x).ToArray();
             return new DslSemanticWorkspace(context, target, overlay);
         }
-        if (semantic == null || !SymbolEqualityComparer.Default.Equals(target, world)) semantic = new DslSemanticWorkspace(context, target, sources);
+        if (semantic == null || !SymbolEqualityComparer.Default.Equals(target, semanticTarget))
+        {
+            semantic = new DslSemanticWorkspace(context, target, sources);
+            semanticTarget = target;
+        }
         return semantic;
     }
 
     private object? Definition(HostParams? p, CancellationToken ct)
     {
-        var result = Workspace(p, ct).GetDefinition(p?.Path ?? "", p?.Line ?? 1, p?.Column ?? 1);
+        var stopwatch = Stopwatch.StartNew();
+        var wasCached = semantic != null;
+        var result = Workspace(p is null ? null : p with { Text = null }, ct).GetDefinition(p?.Path ?? "", p?.Line ?? 1, p?.Column ?? 1);
+        stopwatch.Stop();
+        Console.Error.WriteLine($"definition project={projectPath} semanticBuild={(wasCached ? 0 : stopwatch.Elapsed.TotalMilliseconds):0}ms lookup={(wasCached ? stopwatch.Elapsed.TotalMilliseconds : 0):0}ms total={stopwatch.Elapsed.TotalMilliseconds:0}ms found={result != null}");
         return result == null ? null : ToDto(result);
     }
 
     private async Task<object> ReferencesAsync(HostParams? p, CancellationToken ct)
     {
-        var result = await Workspace(p, ct).FindReferencesAsync(p?.Path ?? "", p?.Line ?? 1, p?.Column ?? 1, ct);
+        var stopwatch = Stopwatch.StartNew();
+        var result = await Workspace(p is null ? null : p with { Text = null }, ct).FindReferencesAsync(p?.Path ?? "", p?.Line ?? 1, p?.Column ?? 1, ct);
+        stopwatch.Stop();
+        Console.Error.WriteLine($"references project={projectPath} total={stopwatch.Elapsed.TotalMilliseconds:0}ms count={result.Count}");
         return result.Select(ToDto).ToArray();
     }
 
