@@ -20,6 +20,6 @@
     "viewsContainers": { "panel": [{ "id": "segusum.references", "title": "Segusum", "icon": "$(references)" }] },
     "views": { "segusum.references": [{ "id": "segusum.referencesView", "name": "References" }] }
   },
-  "scripts": { "compile": "tsc -p ./tsconfig.json" },
+  "scripts": { "compile": "tsc -p ./tsconfig.json", "test:cancellation": "npm run compile && node test/pendingRequests.test.mjs" },
   "devDependencies": { "@types/node": "^22.0.0", "@types/vscode": "^1.85.0", "typescript": "^5.6.0" }
 }

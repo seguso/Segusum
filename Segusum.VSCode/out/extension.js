@@ -39,7 +39,8 @@ const vscode = __importStar(require("vscode"));
 const child_process_1 = require("child_process");
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
-const BUILD_ID = 'extension build = prewarm-rename-fastpath-2026-09-05';
+const pendingRequests_1 = require("./pendingRequests");
+const BUILD_ID = 'extension build = completion-cancellation-2026-09-05';
 let output;
 let status;
 function log(message) { output?.appendLine(`[${new Date().toISOString()}] ${message}`); }
@@ -48,7 +49,8 @@ class HostClient {
     workspacePath;
     child;
     next = 1;
-    pending = new Map();
+    pending = new pendingRequests_1.PendingRequestRegistry();
+    get pendingCount() { return this.pending.size; }
     worlds = [];
     startTask;
     get isReady() { return this.worlds.length > 0; }
@@ -79,11 +81,9 @@ class HostClient {
                 continue;
             try {
                 const response = JSON.parse(line);
-                const pending = this.pending.get(response.id);
-                if (!pending)
-                    continue;
-                this.pending.delete(response.id);
-                response.error ? pending.reject(new Error(response.error.message)) : pending.resolve(response.result);
+                const settled = response.error ? this.pending.reject(response.id, new Error(response.error.message)) : this.pending.resolve(response.id, response.result);
+                if (!settled)
+                    log(`RPC response ignored #${response.id} (late) pending=${this.pendingCount}`);
             }
             catch (e) {
                 log(`Invalid host response: ${e}`);
@@ -94,12 +94,16 @@ class HostClient {
         this.worlds = initialized?.worlds ?? [];
         log(`Host initialized project=${initialized?.projectPath ?? this.projectPath} worlds=${this.worlds.map((x) => x.id).join(',')} elapsed=${Date.now() - started}ms`);
     }
-    request(method, params, token) { const id = this.next++; log(`RPC start #${id} ${method} project=${this.projectPath}`); return new Promise((resolve, reject) => { this.pending.set(id, { resolve: value => { log(`RPC end #${id} ${method}`); resolve(value); }, reject: error => { log(`RPC error #${id} ${method}: ${error}`); reject(error); } }); this.child?.stdin.write(JSON.stringify({ id, method, params }) + '\n'); if (token)
-        token.onCancellationRequested(() => this.cancel(id)); }); }
-    cancel(id) { this.child?.stdin.write(JSON.stringify({ id: this.next++, method: 'cancel', params: { requestId: id } }) + '\n'); }
+    request(method, params, token) { const id = this.next++; log(`RPC start #${id} ${method} project=${this.projectPath} pending=${this.pendingCount + 1}`); return new Promise((resolve, reject) => { const subscription = token?.onCancellationRequested(() => this.cancel(id)); this.pending.add(id, { resolve: value => { log(`RPC end #${id} ${method} pending=${this.pendingCount}`); resolve(value); }, reject: error => { log(`RPC error #${id} ${method}: ${error} pending=${this.pendingCount}`); reject(error); }, dispose: () => subscription?.dispose() }); this.child?.stdin.write(JSON.stringify({ id, method, params }) + '\n'); }); }
+    cancel(id) { const cancelled = this.pending.reject(id, new Error('Request cancelled')); if (cancelled)
+        log(`RPC cancelled locally #${id} pending=${this.pendingCount}`); try {
+        this.child?.stdin.write(JSON.stringify({ id: this.next++, method: 'cancel', params: { requestId: id } }) + '\n');
+    }
+    catch (e) {
+        log(`RPC cancel send failed #${id}: ${e}`);
+    } }
     invalidate() { log(`Invalidating project=${this.projectPath}`); void this.request('invalidate', {}).catch(e => log(`invalidate failed: ${e}`)); }
-    dispose() { this.child?.kill(); this.child = undefined; for (const pending of this.pending.values())
-        pending.reject(new Error('Host stopped')); this.pending.clear(); }
+    dispose() { this.child?.kill(); this.child = undefined; this.pending.clear(new Error('Host stopped')); }
 }
 let requestCts;
 const clients = new Map();

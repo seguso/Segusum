@@ -33,15 +33,6 @@ internal sealed class ToolingHost
             catch (Exception ex) { await ErrorAsync(null, "Invalid JSON: " + ex.Message); continue; }
             if (request == null) continue;
             if (request.Method == "cancel") { Cancel(request.Params?.RequestId); continue; }
-            // Completion is deliberately handled inline.  Its warm query is synchronous and
-            // cheap; keeping it on the reader avoids thread-pool continuation delays while
-            // the workspace is being used by the interactive editor.  The cancellation token
-            // still reaches the request and the completion gate protects the semantic cache.
-            if (request.Method == "completion")
-            {
-                await ProcessAsync(request, Stopwatch.GetTimestamp());
-                continue;
-            }
             work.Add(ProcessAsync(request, Stopwatch.GetTimestamp()));
         }
         await Task.WhenAll(work);
@@ -51,6 +42,7 @@ internal sealed class ToolingHost
     {
         using var cts = new CancellationTokenSource();
         requests[request.Id] = cts;
+        Console.Error.WriteLine($"RPC start #{request.Id} {request.Method} pending={requests.Count}");
         try
         {
             var result = await ExecuteAsync(request, cts.Token, receivedAt);
@@ -58,10 +50,10 @@ internal sealed class ToolingHost
         }
         catch (OperationCanceledException) { await WriteAsync(new HostResponse(request.Id, null, new HostError("cancelled", "Operation cancelled."))); }
         catch (Exception ex) { await WriteAsync(new HostResponse(request.Id, null, new HostError("host", ex.Message))); }
-        finally { requests.TryRemove(request.Id, out _); }
+        finally { requests.TryRemove(request.Id, out _); Console.Error.WriteLine($"RPC end #{request.Id} {request.Method} pending={requests.Count}"); }
     }
 
-    private void Cancel(int? id) { if (id.HasValue && requests.TryGetValue(id.Value, out var cts)) cts.Cancel(); }
+    private void Cancel(int? id) { if (id.HasValue && requests.TryGetValue(id.Value, out var cts)) { Console.Error.WriteLine($"RPC cancel #{id.Value} pending={requests.Count}"); cts.Cancel(); } }
 
     private readonly SemaphoreSlim completionGate = new(1, 1);
 
