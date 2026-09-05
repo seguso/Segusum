@@ -83,7 +83,7 @@ public static class DslParser
         {
             if (Current.Kind != DslTokenKind.Identifier) return null;
             if (Is("once") || Is("forever")) return Take().Text;
-            if (Is("when") || Is("nar") || Is("nar-room") || Is("call") || Is("if") || Is("var") || Is("next") || Is("makes-no-sense") || Is("finish-game") || Is("do-not-advance-time")) return null;
+            if (Is("when") || Is("nar") || Is("nar-room") || Is("call") || Is("if") || Is("var") || Is("next") || Is("makes-no-sense") || Is("mark-happened-once") || Is("finish-game") || Is("do-not-advance-time")) return null;
             diagnostics.Add(new DslDiagnostic("SEGDSL102", $"Unknown Repeat modifier '{Current.Text}'. Expected 'once' or 'forever'.", Current.Span));
             return null;
         }
@@ -108,7 +108,7 @@ public static class DslParser
                 case "nar-room": if (Is(":")) Take(); return new NarRoomStatement(RawTextAfterKeyword(), span); case "call": Error("The 'call' keyword is no longer part of the DSL syntax."); return new CallStatement(new IdentifierExpression("_error", span), span);
                 case "var": { var name = Word(); Need("="); return new VariableDeclaration(name, Expression(), span); }
                 case "next": return new NextCycleStatement(Expression(), span); case "add": return ParseAdd(span);
-                case "makes-no-sense": return new MakesNoSenseStatement(span); case "finish-game": return new FinishGameStatement(span); case "do-not-advance-time": return new DoNotAdvanceTimeStatement(span);
+                case "makes-no-sense": return new MakesNoSenseStatement(span); case "mark-happened-once": return new MarkHappenedOnceStatement(Expression(), span); case "finish-game": return new FinishGameStatement(span); case "do-not-advance-time": return new DoNotAdvanceTimeStatement(span);
                 case "named-cutscene": return ParseNamedCutscene(span);
                 case "text-input": return new TextInputStatement(Expression(), span);
                 case "nar-img": return ParseNarImg(span);

@@ -84,9 +84,10 @@ namespace Seg
                         return t != default(DateTime);
                 }
 
-                public static DateTime setIfNeverHappened(DateTime t)
+                public static void setIfNeverHappened(ref DateTime t)
                 {
-                        return t.neverHappened() ? DateTime.Now : t;
+                        if (t.neverHappened())
+                                t = DateTime.Now;
                 }
 
                 public static int quickIntHashOfString(this string s)

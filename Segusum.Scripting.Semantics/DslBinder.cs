@@ -171,6 +171,14 @@ public sealed class DslBinder
                     else { var expected = MembersOf(inputType, "textInputToShow").OfType<IFieldSymbol>().FirstOrDefault()?.Type ?? MembersOf(inputType, "textInputToShow").OfType<IPropertySymbol>().FirstOrDefault()?.Type; RequireExpression(t.TextInput, BindExpression(t.TextInput, scope), expected, "text-input type mismatch."); }
                     break;
                 case NamedCutsceneStatement n: BindNamedCutscene(n, scope); break;
+                case MarkHappenedOnceStatement mark:
+                    if (mark.Target is not IdentifierExpression)
+                    {
+                        Report("SEGDSL327", "mark-happened-once requires an assignable flag field.", mark.Target.Span);
+                        break;
+                    }
+                    Require(BindExpression(mark.Target, scope), dateTimeNullable, mark.Target.Span, "mark-happened-once target must be DateTime.");
+                    break;
             }
         }
     }

@@ -134,6 +134,7 @@ public sealed class SegusumGenerator : IIncrementalGenerator
                 sb.AppendLine(");"); break;
             case DialogueStatement d: sb.Append(indent).Append("dial(").Append(EmitIdentifier(d.Character, model)).Append(',').Append(Emit(d.Text, model)).AppendLine(");"); break;
             case TextInputStatement t: sb.Append(indent).Append(input ?? "e").Append(".textInputToShow = ").Append(Emit(t.TextInput, model)).AppendLine(";"); break;
+            case MarkHappenedOnceStatement mark: sb.Append(indent).Append("setIfNeverHappened(ref ").Append(Emit(mark.Target, model)).AppendLine(");"); break;
             case NamedCutsceneStatement n:
                 sb.Append(indent).Append("using (namedCutScene(").Append(EmitIdentifier(n.Id, model));
                 if (n.Arguments.Count != 0) sb.Append(", ").Append(string.Join(", ", n.Arguments.Select(x => Emit(x, model))));

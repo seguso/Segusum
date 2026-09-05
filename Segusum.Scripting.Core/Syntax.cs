@@ -50,6 +50,7 @@ public sealed record AddCycleElementStatement(string Cycle,string Id,bool Import
     public SourceSpan IdSpan { get; init; } = Span;
 }
 public sealed record MakesNoSenseStatement(SourceSpan Span) : DslStatement(Span);
+public sealed record MarkHappenedOnceStatement(DslExpression Target,SourceSpan Span) : DslStatement(Span);
 public sealed record FinishGameStatement(SourceSpan Span) : DslStatement(Span);
 public sealed record DoNotAdvanceTimeStatement(SourceSpan Span) : DslStatement(Span);
 public sealed record NamedCutsceneStatement(string Id,DslExpression Title,IReadOnlyList<DslExpression> Arguments,IReadOnlyList<DslStatement> Body,SourceSpan Span) : DslStatement(Span)
