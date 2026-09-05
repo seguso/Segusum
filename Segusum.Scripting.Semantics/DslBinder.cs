@@ -61,6 +61,7 @@ public sealed class DslBinder
     private readonly INamedTypeSymbol? room;
     private readonly INamedTypeSymbol? explanation;
     private readonly ITypeSymbol? beforeRoomChangeInput;
+    private readonly ITypeSymbol? walkPath;
     private ISymbol? lastSymbol;
     private BoundSymbolKind lastKind;
     private string lastCSharpName = "";
@@ -75,7 +76,7 @@ public sealed class DslBinder
     {
         this.compilation = compilation; this.world = world; this.report = report;
         cycle = compilation.GetTypeByMetadataName("Seg.Cycle"); cycleElementId = compilation.GetTypeByMetadataName("Seg.CycleElemId"); namedCutsceneId = compilation.GetTypeByMetadataName("Seg.NamedCutSceneId");
-        logicObj = compilation.GetTypeByMetadataName("Seg.LogicObj"); objective = compilation.GetTypeByMetadataName("Seg.Objective"); room = compilation.GetTypeByMetadataName("Seg.Room"); explanation = compilation.GetTypeByMetadataName("Seg.Explanation"); beforeRoomChangeInput = compilation.GetTypeByMetadataName("Seg.BeforeRoomChangeInput");
+        logicObj = compilation.GetTypeByMetadataName("Seg.LogicObj"); objective = compilation.GetTypeByMetadataName("Seg.Objective"); room = compilation.GetTypeByMetadataName("Seg.Room"); explanation = compilation.GetTypeByMetadataName("Seg.Explanation"); beforeRoomChangeInput = compilation.GetTypeByMetadataName("Seg.BeforeRoomChangeInput"); walkPath = compilation.GetTypeByMetadataName("Seg.WalkPath");
         dateTime = compilation.GetSpecialType(SpecialType.System_DateTime); dateTimeNullable = compilation.GetSpecialType(SpecialType.System_Nullable_T).Construct(dateTime); textHandlerInput = compilation.GetTypeByMetadataName("Seg.TextHandlerInput");
     }
     public void Bind(IReadOnlyList<DslDeclaration> declarations)
@@ -121,10 +122,16 @@ public sealed class DslBinder
         var scope = new Dictionary<string, ITypeSymbol>(StringComparer.Ordinal)
         {
             [NormalizeKey("from")] = room!,
-            [NormalizeKey("to")] = room!
+            [NormalizeKey("to")] = room!,
+            [NormalizeKey("fromToSegment")] = walkPath!,
+            [NormalizeKey("fullPath")] = walkPath!,
+            [NormalizeKey("e")] = beforeRoomChangeInput!
         };
         AddLocalIdentity("from", "contextual", declaration.Span);
         AddLocalIdentity("to", "contextual", declaration.Span);
+        AddLocalIdentity("fromToSegment", "contextual", declaration.Span);
+        AddLocalIdentity("fullPath", "contextual", declaration.Span);
+        AddLocalIdentity("e", "contextual", declaration.Span);
         var oldInput = inputType; var oldAllowed = inputContextAllowed;
         inputType = beforeRoomChangeInput; inputContextAllowed = false;
         BindStatements(declaration.Body, scope, null);
@@ -286,6 +293,17 @@ public sealed class DslBinder
                     model.Values[m] = new BoundValue(list, "splittaInputEFaiLower(e)", null, BoundSymbolKind.CSharpProperty); return list;
                 }
                 var member = receiverType == null ? null : MembersOf(receiverType, m.MemberName).FirstOrDefault(x => Accessible(x, receiverType));
+                if (member == null && receiverType != null)
+                {
+                    var extensions = ExtensionMethodsOf(receiverType, m.MemberName).Where(x => x.Parameters.Length == 1).ToArray();
+                    if (extensions.Length == 1)
+                    {
+                        var extension = extensions[0];
+                        RecordReference(m.MemberName, m.MemberSpan, BoundSymbolKind.CSharpMethod, extension, null, "member-name");
+                        model.Values[m] = new BoundValue(extension.ReturnType, extension.Name, extension, BoundSymbolKind.CSharpMethod);
+                        return extension.ReturnType;
+                    }
+                }
                 if (member == null) { Report("SEGDSL312", $"Unknown or inaccessible member '{m.MemberName}'.", m.Span); return null; }
                 RecordReference(m.MemberName, m.MemberSpan, member is IMethodSymbol ? BoundSymbolKind.CSharpMethod : BoundSymbolKind.CSharpProperty, member, null, "member-name");
                 var memberType = MemberType(member); model.Values[m] = new BoundValue(memberType, m.MemberName, member, member is IMethodSymbol ? BoundSymbolKind.CSharpMethod : BoundSymbolKind.CSharpProperty); return memberType;
@@ -312,20 +330,35 @@ public sealed class DslBinder
         var receiverType = call.Receiver == null ? null : BindExpression(call.Receiver, scope, contextualIt);
         var exactMethods = (receiverType == null ? AllMembers(call.Name) : MembersOf(receiverType, call.Name).Where(x => Accessible(x, receiverType))).OfType<IMethodSymbol>().ToArray();
         var fallbackMembers = receiverType == null ? DslNames.Candidates(call.Name).Skip(1).SelectMany(AllMembers) : MembersOf(receiverType).Where(x => Accessible(x, receiverType) && NormalizeKey(x.Name) == NormalizeKey(call.Name));
-        var methods = (exactMethods.Length != 0 ? exactMethods : fallbackMembers.OfType<IMethodSymbol>()).Where(m => NormalizeKey(m.Name) == NormalizeKey(call.Name)).GroupBy(m => m.ToDisplayString()).Select(g => g.First()).ToArray();
+        var extensionMethods = receiverType == null ? Enumerable.Empty<IMethodSymbol>() : ExtensionMethodsOf(receiverType, call.Name);
+        var methods = (exactMethods.Length != 0 ? exactMethods : fallbackMembers.OfType<IMethodSymbol>().Concat(extensionMethods)).Where(m => NormalizeKey(m.Name) == NormalizeKey(call.Name)).GroupBy(m => m.ToDisplayString()).Select(g => g.First()).ToArray();
         if (methods.Length == 0) { Report("SEGDSL305", $"Unknown function or method '{call.Name}'.", call.Span); return null; }
         var results = methods.Select(m => TryBind(call, m, scope, contextualIt)).ToArray();
         var applicable = results.Where(x => x.Call != null).OrderBy(x => x.Score).ToArray();
         if (applicable.Length == 0) { ReportFailure(call, results); return null; }
         var bestScore = applicable[0].Score; var best = applicable.Where(x => x.Score == bestScore).ToArray();
         if (best.Length != 1) { Report("SEGDSL306", $"Call to '{call.Name}' is ambiguous.", call.Span); return null; }
-        var boundCall = best[0].Call! with { Receiver = call.Receiver };
+        var boundCall = best[0].Call! with { Receiver = best[0].Call!.Method?.IsExtensionMethod == true ? null : call.Receiver };
         RecordReference(call.Name, call.NameSpan, BoundSymbolKind.CSharpMethod, boundCall.Method, null, "invocation");
         model.Calls[call] = boundCall; return boundCall.ReturnType;
     }
     private sealed record ParameterInfo(string Name, ITypeSymbol Type, bool Optional, IParameterSymbol? Symbol = null);
     private CandidateResult TryBind(CallExpression call, IMethodSymbol method, Dictionary<string, ITypeSymbol> scope, ITypeSymbol? contextualIt)
-    { var parameters = method.Parameters.Select(p => new ParameterInfo(p.Name, p.Type, p.IsOptional, p)).ToArray(); var previous = suppressDiagnostics; suppressDiagnostics = true; try { var result = BindArgumentList(call, parameters, scope, contextualIt); return result.Call == null ? result : result with { Call = new BoundCall(method, method.Name, result.Call.Arguments, method.ReturnType, call.Receiver) }; } finally { suppressDiagnostics = previous; } }
+    {
+        var parameters = method.Parameters.Select(p => new ParameterInfo(p.Name, p.Type, p.IsOptional, p)).ToArray();
+        var bindCall = method.IsExtensionMethod
+            ? new CallExpression(call.Name, new[] { new DslArgument(null, call.Receiver!, call.Span) }.Concat(call.Arguments).ToArray(), call.Span)
+            : call;
+        var previous = suppressDiagnostics; suppressDiagnostics = true;
+        try
+        {
+            var result = BindArgumentList(bindCall, parameters, scope, contextualIt);
+            if (result.Call == null) return result;
+            var target = method.IsExtensionMethod ? method.ContainingType.ToDisplayString() + "." + method.Name : method.Name;
+            return result with { Call = new BoundCall(method, target, result.Call.Arguments, method.ReturnType, method.IsExtensionMethod ? null : call.Receiver) };
+        }
+        finally { suppressDiagnostics = previous; }
+    }
     private CandidateResult BindArgumentList(CallExpression call, IReadOnlyList<ParameterInfo> parameters, Dictionary<string, ITypeSymbol> scope, ITypeSymbol? contextualIt = null)
     {
         var result = new List<BoundArgument>(); var used = new HashSet<string>(StringComparer.Ordinal); var namedSeen = false; var positionalIndex = 0; var score = 0;
@@ -421,6 +454,33 @@ public sealed class DslBinder
         => !symbol.IsImplicitlyDeclared && symbol is not IMethodSymbol { MethodKind: MethodKind.Constructor or MethodKind.PropertyGet or MethodKind.PropertySet or MethodKind.EventAdd or MethodKind.EventRemove };
     private IReadOnlyList<ISymbol> ResolveCSharpMembers(string name) => AllMembers(name).ToArray();
     private static ITypeSymbol? MemberType(ISymbol symbol) => symbol switch { IFieldSymbol f => f.Type, IPropertySymbol p => p.Type, IMethodSymbol m => m.ReturnType, _ => null };
+    private IEnumerable<IMethodSymbol> ExtensionMethodsOf(ITypeSymbol receiverType, string name)
+    {
+        var methods = new List<IMethodSymbol>();
+        foreach (var metadataName in new[] { "Seg.Utils", "System.Linq.Enumerable" })
+        {
+            var type = compilation.GetTypeByMetadataName(metadataName);
+            if (type == null) continue;
+            methods.AddRange(type.GetMembers(name).OfType<IMethodSymbol>().Where(x => x.IsExtensionMethod && x.IsStatic));
+        }
+        methods.AddRange(compilation.GetSymbolsWithName(name, SymbolFilter.Member).OfType<IMethodSymbol>().Where(x => x.IsExtensionMethod && x.IsStatic));
+        foreach (var method in methods.GroupBy(x => x.ToDisplayString()).Select(x => x.First()))
+        {
+            var candidate = method;
+            if (candidate.IsGenericMethod && candidate.TypeParameters.Length == 1 && TryGetEnumerableElement(receiverType, out var element))
+                candidate = candidate.Construct(element);
+            if (candidate.Parameters.Length != 0) yield return candidate;
+        }
+    }
+    private static bool TryGetEnumerableElement(ITypeSymbol type, out ITypeSymbol element)
+    {
+        if (type is INamedTypeSymbol named && named.IsGenericType && named.Name == "IEnumerable" && named.TypeArguments.Length == 1)
+        { element = named.TypeArguments[0]; return true; }
+        foreach (var iface in type.AllInterfaces)
+            if (iface.IsGenericType && iface.Name == "IEnumerable" && iface.TypeArguments.Length == 1)
+            { element = iface.TypeArguments[0]; return true; }
+        element = null!; return false;
+    }
     private IEnumerable<ISymbol> AllMembers(string name)
     {
         for (INamedTypeSymbol? t = world; t != null; t = t.BaseType)

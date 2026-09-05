@@ -326,9 +326,9 @@ public sealed class GeneratorTests
         var result = Run("before-room-change:\n if from == roomA and to == roomB:\n  prevent-room-change\n end\nend", "public Room roomA = null!; public Room roomB = null!;");
         Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL"));
         var generated = Generated(result);
-        Assert.Contains("private void beforeRoomChangeSegusum(Room from, Room to, BeforeRoomChangeInput e)", generated);
+        Assert.Contains("private void beforeRoomChangeSegusum(Room from, Room to, WalkPath fromToSegment, WalkPath fullPath, BeforeRoomChangeInput e)", generated);
         Assert.Contains("if (from == roomA && to == roomB)", generated);
-        Assert.Contains("e.canChangeRoom = false;", generated);
+        Assert.True(generated.Contains("e.canChangeRoom=false;", StringComparison.Ordinal), generated);
         Assert.DoesNotContain("foreach", generated, StringComparison.Ordinal);
         AssertGeneratedCompilationSucceeds(result);
     }
@@ -340,6 +340,19 @@ public sealed class GeneratorTests
         Assert.Contains(duplicate.Diagnostics, d => d.GetMessage().Contains("Duplicate before-room-change", StringComparison.Ordinal));
         var outside = Run("def f:\n prevent-room-change\nend");
         Assert.Contains(outside.Diagnostics, d => d.GetMessage().Contains("only valid inside before-room-change", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void BeforeRoomChangeExposesTechnicalParametersThroughNormalExpressions()
+    {
+        var result = Run("before-room-change:\n    if e.canChangeRoom and fromToSegment.contains roomA:\n        e.canChangeRoom = false\n    end\n    var first = fullPath.locations.First\n    if not curCutScene.isEmpty:\n        e.canChangeRoom = true\n    end\nend", "public Room roomA = null!;");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL"));
+        var generated = Generated(result);
+        Assert.True(generated.Contains("e.canChangeRoom=false;", StringComparison.Ordinal), generated);
+        Assert.Contains("fromToSegment.contains(roomA)", generated);
+        Assert.Contains("fullPath.locations.First()", generated);
+        Assert.Contains("!curCutScene().isEmpty()", generated);
+        AssertGeneratedCompilationSucceeds(result);
     }
 
     [Fact]

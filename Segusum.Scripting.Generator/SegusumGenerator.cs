@@ -58,7 +58,7 @@ public sealed class SegusumGenerator : IIncrementalGenerator
         binder.Bind(declarations);
         foreach (var diagnostic in semanticDiagnostics) sp.ReportDiagnostic(Diagnostic.Create(Error, ToLocation(diagnostic.Span), diagnostic.Message));
         if (semanticDiagnostics.Count != 0) return;
-        var sb = new StringBuilder(SegusumGeneratedSource.Marker + "\n#nullable enable\n#line hidden\nusing Seg;\nusing static Seg.Utils;\n");
+        var sb = new StringBuilder(SegusumGeneratedSource.Marker + "\n#nullable enable\n#line hidden\nusing Seg;\nusing System.Linq;\nusing static Seg.Utils;\n");
         sb.Append("namespace ").Append(world.ContainingNamespace.ToDisplayString()).Append(";\n\n");
         sb.Append("partial class ").Append(world.Name).AppendLine("\n{");
         foreach (var state in declarations.OfType<StateDeclaration>()) { EmitLine(sb, state.Span); sb.Append(" private ").Append(Type(state.Type)).Append(' ').Append(Name(state.Name)).Append(" = ").Append(Emit(state.Initializer, binder.Model)).AppendLine(";"); EmitDefaultLine(sb); }
@@ -93,7 +93,7 @@ public sealed class SegusumGenerator : IIncrementalGenerator
     private static void EmitBeforeRoomChange(StringBuilder sb, BeforeRoomChangeDeclaration declaration, BoundModel model)
     {
         EmitLine(sb, declaration.Span);
-        sb.AppendLine(" private void beforeRoomChangeSegusum(Room from, Room to, BeforeRoomChangeInput e)");
+        sb.AppendLine(" private void beforeRoomChangeSegusum(Room from, Room to, WalkPath fromToSegment, WalkPath fullPath, BeforeRoomChangeInput e)");
         sb.AppendLine(" {"); EmitDefaultLine(sb);
         foreach (var statement in declaration.Body) EmitStatement(sb, statement, "  ", "e", model);
         sb.AppendLine(" #line hidden\n }"); EmitDefaultLine(sb);

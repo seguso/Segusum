@@ -279,20 +279,26 @@ public static class DslParser
             while (Current.Kind == DslTokenKind.NewLine) Take(); var span = Current.Span;
             if (Is("not")) { Take(); return new UnaryExpression("not", Expression(Precedence("not")), span); }
             if (Is("exists")) return ParseExists(span);
-            if (Current.Kind == DslTokenKind.LParen) { Take(); var expression = Expression(); Need(")"); return new ParenthesizedExpression(expression, span); }
+            if (Current.Kind == DslTokenKind.LParen) { Take(); var parenthesized = Expression(); Need(")"); return new ParenthesizedExpression(parenthesized, span); }
             if (Current.Kind == DslTokenKind.String) return new LiteralExpression(Take().Text, "string", span);
             if (Current.Kind == DslTokenKind.Number) return new LiteralExpression(Take().Text, "number", span);
             if (Is("true") || Is("false")) return new LiteralExpression(Take().Text, "bool", span);
             if (Is("null")) { Take(); return new LiteralExpression("null", "null", span); }
             if (Is("new-cycle")) { Take(); return new LiteralExpression("new-cycle", "cycle", span); }
             if (Is("ref")) { Take(); return new FunctionReferenceExpression(Word(), span); }
-            var identifierToken = WordToken(); var identifier = new IdentifierExpression(identifierToken.Text, identifierToken.Span);
-            if (Is("."))
+            var identifierToken = WordToken(); var identifier = new IdentifierExpression(identifierToken.Text, identifierToken.Span); DslExpression expression = identifier;
+            while (Is("."))
             {
-                Take(); var memberToken = WordToken(); var member = memberToken.Text; var access = new MemberAccessExpression(identifier, member, span) { MemberSpan = memberToken.Span };
-                if (CanStartArgument()) { var args = new List<DslArgument>(); while (CanStartArgument()) args.Add(ParseArgument()); return new CallExpression(member, args, span) { Receiver = identifier, NameSpan = memberToken.Span }; }
-                return access;
+                Take(); var memberToken = WordToken();
+                if (CanStartArgument())
+                {
+                    var args = new List<DslArgument>(); while (CanStartArgument()) args.Add(ParseArgument());
+                    expression = new CallExpression(memberToken.Text, args, span) { Receiver = expression, NameSpan = memberToken.Span };
+                }
+                else expression = new MemberAccessExpression(expression, memberToken.Text, span) { MemberSpan = memberToken.Span };
             }
+            if (expression is not IdentifierExpression)
+                return expression;
             if (Is("not-seen-recently")) { Take(); return new CallExpression("not-seen-recently", new[] { new DslArgument(null, identifier, span), new DslArgument(null, Prefix(), Current.Span) }, span); }
             if (Is("was-seen-at-least-once")) { Take(); return new CallExpression("was-seen-at-least-once", new[] { new DslArgument(null, identifier, span) }, span); }
             if (CanStartArgument())
@@ -312,7 +318,7 @@ public static class DslParser
         private DslExpression ParseCollectionExpression()
         {
             var expression = ParseSimpleExpression();
-            if (Is("."))
+            while (Is("."))
             {
                 Take(); var member = WordToken();
                 expression = new MemberAccessExpression(expression, member.Text, expression.Span) { MemberSpan = member.Span };
