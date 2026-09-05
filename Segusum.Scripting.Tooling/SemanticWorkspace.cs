@@ -33,6 +33,7 @@ public sealed class DslSemanticWorkspace
     private readonly INamedTypeSymbol world;
     private readonly IReadOnlyList<DslSource> sources;
     private readonly BoundModel model;
+    private readonly DslBinder binder;
     private readonly Dictionary<string, DslSource> documents;
     private readonly List<DslDiagnostic> diagnostics = new();
     private Solution roslynSolution => workspaceContext.Solution;
@@ -54,7 +55,7 @@ public sealed class DslSemanticWorkspace
             diagnostics.AddRange(parsed.Diagnostics);
         }
         var declarations = documents.Values.Select(x => DslParser.Parse(x).Document).SelectMany(x => x.Declarations).ToArray();
-        var binder = new DslBinder(compilation, world, diagnostics.Add);
+        binder = new DslBinder(compilation, world, diagnostics.Add);
         binder.Bind(declarations);
         model = binder.Model;
     }
@@ -163,13 +164,29 @@ public sealed class DslSemanticWorkspace
 
     public IReadOnlyList<string> GetCompletions(string path, int line, int column)
     {
-        var tree = compilation.SyntaxTrees.FirstOrDefault(x => string.Equals(x.FilePath, path, StringComparison.OrdinalIgnoreCase));
-        if (tree != null)
+        if (!documents.TryGetValue(path, out var source)) return Array.Empty<string>();
+        var lineText = source.Text.Split('\n').ElementAtOrDefault(Math.Max(0, line - 1))?.TrimEnd('\r') ?? "";
+        var cursor = Math.Clamp(column - 1, 0, lineText.Length);
+        var before = lineText[..cursor];
+        var prefix = ReadIdentifierBackward(before, before.Length);
+        var dot = before.LastIndexOf('.');
+        if (dot >= 0 && dot == before.Length - prefix.Length - 1)
         {
-            var token = tree.GetRoot().FindToken(GetPosition(tree, line, column));
-            if (token.Text == ".") return compilation.GetSemanticModel(tree).LookupSymbols(token.SpanStart + 1).Where(x => x is IFieldSymbol or IPropertySymbol or IMethodSymbol).Select(x => x.Name).Distinct(StringComparer.Ordinal).OrderBy(x => x).ToArray();
+            var receiverName = ReadIdentifierBackward(before, dot);
+            var receiverType = binder.ResolveCompletionType(receiverName);
+            if (receiverType != null)
+                return binder.GetAccessibleMembers(receiverType).Select(x => x.Name).Where(x => x.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).Distinct(StringComparer.Ordinal).OrderBy(x => x, StringComparer.Ordinal).ToArray();
+            return Array.Empty<string>();
         }
-        return model.DslSymbolsByName.Keys.Concat(world.GetMembers().Select(x => x.Name)).Distinct(StringComparer.Ordinal).OrderBy(x => x).ToArray();
+        return model.DslSymbolsByName.Keys.Concat(binder.GetAccessibleWorldMembers().Select(x => x.Name))
+            .Where(x => x.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).Distinct(StringComparer.Ordinal).OrderBy(x => x, StringComparer.Ordinal).ToArray();
+    }
+
+    private static string ReadIdentifierBackward(string text, int end)
+    {
+        var i = Math.Min(end, text.Length);
+        while (i > 0 && (char.IsLetterOrDigit(text[i - 1]) || text[i - 1] is '_' or '-')) i--;
+        return text[i..Math.Min(end, text.Length)];
     }
 
     private static bool SameSymbol(ISymbol? left, ISymbol? right) => left != null && right != null && SymbolEqualityComparer.Default.Equals(left, right);

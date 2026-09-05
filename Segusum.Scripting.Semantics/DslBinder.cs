@@ -110,7 +110,7 @@ public sealed class DslBinder
     { var scope = new Dictionary<string, ITypeSymbol>(StringComparer.Ordinal); currentParameters.Clear(); activeDslSymbols.Clear(); foreach (var p in f.Parameters) { scope[NormalizeKey(p.Name)] = TypeOf(p.Type)!; currentParameters.Add(NormalizeKey(p.Name)); AddLocalIdentity(p.Name, "parameter", f.Span); } BindStatements(f.Body, scope, f.ReturnType == null ? null : TypeOf(f.ReturnType)); currentParameters.Clear(); activeDslSymbols.Clear(); }
     private void BindHandler(HandlerDeclaration h)
     {
-        var first = BindName(h.First, h.Span); var second = h.Second == null ? null : BindName(h.Second, h.Span); var target = h.Target == null ? null : BindName(h.Target, h.Span);
+        var first = BindName(h.First, h.FirstSpan); var second = h.Second == null ? null : BindName(h.Second, h.SecondSpan ?? h.Span); var target = h.Target == null ? null : BindName(h.Target, h.TargetSpan ?? h.Span);
         if (h.Kind == "combine") { Require(first, logicObj, h.Span, "combine first operand must be LogicObj."); Require(second, logicObj, h.Span, "combine second operand must be LogicObj."); }
         if (h.Kind == "use-for") { Require(first, logicObj, h.Span, "use-for object must be LogicObj."); Require(target, objective, h.Span, "use-for target must be Objective."); }
         if (h.Kind == "use-here") Require(first, logicObj, h.Span, "use-here object must be LogicObj.");
@@ -151,7 +151,7 @@ public sealed class DslBinder
                 case IfStatement i:
                     foreach (var branch in i.Branches) { Require(BindExpression(branch.Condition, scope), compilation.GetSpecialType(SpecialType.System_Boolean), branch.Condition.Span, "if condition must be bool."); BindStatements(branch.Body, new(scope), returnType); }
                     if (i.ElseBody != null) BindStatements(i.ElseBody, new(scope), returnType); break;
-                case DialogueStatement d: Require(BindName(d.Character, new SourceSpan(d.Span.Path, d.Span.Start, d.Character.Length, d.Span.Line, d.Span.Column), scope), compilation.GetTypeByMetadataName("Seg.Character"), d.Span, "dialogue speaker must be Character."); Require(BindExpression(d.Text, scope), compilation.GetSpecialType(SpecialType.System_String), d.Text.Span, "dialogue text must be string."); break;
+                case DialogueStatement d: Require(BindName(d.Character, d.CharacterSpan, scope), compilation.GetTypeByMetadataName("Seg.Character"), d.Span, "dialogue speaker must be Character."); Require(BindExpression(d.Text, scope), compilation.GetSpecialType(SpecialType.System_String), d.Text.Span, "dialogue text must be string."); break;
                 case NarStatement n: Require(BindExpression(n.Text, scope), compilation.GetSpecialType(SpecialType.System_String), n.Text.Span, "nar text must be string."); break;
                 case NarRoomStatement n: Require(BindExpression(n.Text, scope), compilation.GetSpecialType(SpecialType.System_String), n.Text.Span, "nar-room text must be string."); break;
             }
@@ -178,6 +178,7 @@ public sealed class DslBinder
                 var receiverType = BindExpression(m.Receiver, scope, contextualIt);
                 var member = receiverType == null ? null : MembersOf(receiverType, m.MemberName).FirstOrDefault(x => Accessible(x, receiverType));
                 if (member == null) { Report("SEGDSL312", $"Unknown or inaccessible member '{m.MemberName}'.", m.Span); return null; }
+                RecordReference(m.MemberName, m.MemberSpan, member is IMethodSymbol ? BoundSymbolKind.CSharpMethod : BoundSymbolKind.CSharpProperty, member, null, "member-name");
                 var memberType = MemberType(member); model.Values[m] = new BoundValue(memberType, m.MemberName, member, member is IMethodSymbol ? BoundSymbolKind.CSharpMethod : BoundSymbolKind.CSharpProperty); return memberType;
             case FunctionReferenceExpression r: Report("SEGDSL320", "Function references are reserved but not implemented yet.", r.Span); return null;
             case CallExpression c: return BindCall(c, scope, contextualIt);
@@ -188,7 +189,7 @@ public sealed class DslBinder
     {
         if (call.Name == "not-seen-recently") { if (call.Arguments.Count == 2) { var receiver = call.Arguments[0].Expression; Require(BindExpression(receiver, scope, contextualIt), dateTimeNullable, call.Arguments[0].Span, "not-seen-recently receiver must be DateTime?."); Require(BindExpression(call.Arguments[1].Expression, scope), compilation.GetSpecialType(SpecialType.System_Int32), call.Arguments[1].Span, "cooldown must be numeric."); model.DomainOperations[call] = new BoundDomainOperation(BoundDomainOperationKind.NotSeenRecently, receiver, call.Arguments[1].Expression, null); } return compilation.GetSpecialType(SpecialType.System_Boolean); }
         if (call.Name == "was-seen-at-least-once") { if (call.Arguments.Count == 1) { var receiver = call.Arguments[0].Expression; var t = BindExpression(receiver, scope); Require(t, cycleElementId, call.Arguments[0].Span, "was-seen-at-least-once requires CycleElemId."); model.DomainOperations[call] = new BoundDomainOperation(BoundDomainOperationKind.WasSeenAtLeastOnce, receiver, null, null); } return compilation.GetSpecialType(SpecialType.System_Boolean); }
-        if (functions.TryGetValue(NormalizeKey(call.Name), out var function)) { var result = BindArgumentList(call, function.Parameters.Select(p => new ParameterInfo(p.Name, TypeOf(p.Type)!, false)).ToArray(), scope, contextualIt); if (result.Call == null) { ReportFailure(call, new[] { result }); return null; } lastKind = BoundSymbolKind.Function; RecordName(call.Name, call.Span); model.Calls[call] = new BoundCall(null, Name(function.Name), result.Call.Arguments, TypeOf(function.ReturnType ?? "void")); return TypeOf(function.ReturnType ?? "void"); }
+        if (functions.TryGetValue(NormalizeKey(call.Name), out var function)) { var result = BindArgumentList(call, function.Parameters.Select(p => new ParameterInfo(p.Name, TypeOf(p.Type)!, false)).ToArray(), scope, contextualIt); if (result.Call == null) { ReportFailure(call, new[] { result }); return null; } RecordDslReference(call.Name, call.NameSpan, BoundSymbolKind.Function, function.Name, "invocation"); model.Calls[call] = new BoundCall(null, Name(function.Name), result.Call.Arguments, TypeOf(function.ReturnType ?? "void")); return TypeOf(function.ReturnType ?? "void"); }
         var receiverType = call.Receiver == null ? null : BindExpression(call.Receiver, scope, contextualIt);
         var exactMethods = (receiverType == null ? AllMembers(call.Name) : MembersOf(receiverType, call.Name).Where(x => Accessible(x, receiverType))).OfType<IMethodSymbol>().ToArray();
         var fallbackMembers = receiverType == null ? DslNames.Candidates(call.Name).Skip(1).SelectMany(AllMembers) : MembersOf(receiverType).Where(x => Accessible(x, receiverType) && NormalizeKey(x.Name) == NormalizeKey(call.Name));
@@ -199,7 +200,9 @@ public sealed class DslBinder
         if (applicable.Length == 0) { ReportFailure(call, results); return null; }
         var bestScore = applicable[0].Score; var best = applicable.Where(x => x.Score == bestScore).ToArray();
         if (best.Length != 1) { Report("SEGDSL306", $"Call to '{call.Name}' is ambiguous.", call.Span); return null; }
-        model.Calls[call] = best[0].Call! with { Receiver = call.Receiver }; return best[0].Call!.ReturnType;
+        var boundCall = best[0].Call! with { Receiver = call.Receiver };
+        RecordReference(call.Name, call.NameSpan, BoundSymbolKind.CSharpMethod, boundCall.Method, null, "invocation");
+        model.Calls[call] = boundCall; return boundCall.ReturnType;
     }
     private sealed record ParameterInfo(string Name, ITypeSymbol Type, bool Optional, IParameterSymbol? Symbol = null);
     private CandidateResult TryBind(CallExpression call, IMethodSymbol method, Dictionary<string, ITypeSymbol> scope, ITypeSymbol? contextualIt)
@@ -259,22 +262,48 @@ public sealed class DslBinder
         model.DslDefinitions[identity] = span;
         activeDslSymbols[name] = identity;
     }
-    private void RecordName(string name, SourceSpan span)
+    private void RecordName(string name, SourceSpan span) => RecordReference(name, span, lastKind, lastSymbol, null, "name");
+    private void RecordDslReference(string name, SourceSpan span, BoundSymbolKind kind, string declaredName, string referenceKind)
     {
-        var dslSymbol = lastKind is BoundSymbolKind.CSharpField or BoundSymbolKind.CSharpProperty or BoundSymbolKind.CSharpMethod
-            ? null
+        var dslSymbol = activeDslSymbols.TryGetValue(name, out var local) ? local
+            : model.DslSymbolsByName.TryGetValue(declaredName, out var exact) ? exact
+            : model.DslSymbolsByName.Values.FirstOrDefault(x => x.Name == declaredName);
+        RecordReference(name, span, kind, null, dslSymbol, referenceKind);
+    }
+    private void RecordReference(string name, SourceSpan span, BoundSymbolKind kind, ISymbol? symbol, DslSymbolIdentity? dslSymbol, string referenceKind)
+    {
+        dslSymbol ??= kind is BoundSymbolKind.CSharpField or BoundSymbolKind.CSharpProperty or BoundSymbolKind.CSharpMethod ? null
             : activeDslSymbols.TryGetValue(name, out var local) ? local
             : model.DslSymbolsByName.TryGetValue(name, out var exact) ? exact
             : model.DslSymbolsByName.Values.FirstOrDefault(x => NormalizeKey(x.Name) == NormalizeKey(name));
-        model.SemanticReferenceList.Add(new DslSemanticReference(span.Path, span, lastKind, lastSymbol, dslSymbol, "name"));
+        model.SemanticReferenceList.Add(new DslSemanticReference(span.Path, span, kind, symbol, dslSymbol, referenceKind));
     }
     private static string NormalizeSymbolId(string name) => name;
+    public ITypeSymbol? ResolveCompletionType(string name)
+    {
+        var key = NormalizeKey(name);
+        if (globals.TryGetValue(key, out var global)) return global;
+        if (cycleElementGlobals.TryGetValue(name, out var element)) return element;
+        if (functions.TryGetValue(key, out var function) && function.Parameters.Count == 0) return TypeOf(function.ReturnType ?? "void");
+        var candidates = ResolveCSharpMembers(name);
+        if (candidates.Count == 1) return MemberType(candidates[0]);
+        var normalized = DslNames.Candidates(name).Skip(1).SelectMany(AllMembers).Distinct(SymbolEqualityComparer.Default).ToArray();
+        return normalized.Length == 1 ? MemberType(normalized[0]) : null;
+    }
+    public IReadOnlyList<ISymbol> GetAccessibleMembers(ITypeSymbol receiverType)
+        => MembersOf(receiverType).Where(x => x is IFieldSymbol or IPropertySymbol or IMethodSymbol)
+            .Where(x => IsCompletionMember(x) && Accessible(x, receiverType)).GroupBy(x => x.Name, StringComparer.Ordinal).Select(x => x.First())
+            .OrderBy(x => x.Name, StringComparer.Ordinal).ToArray();
+    public IReadOnlyList<ISymbol> GetAccessibleWorldMembers()
+        => AllMembers(string.Empty).Where(IsCompletionMember).ToArray();
+    private static bool IsCompletionMember(ISymbol symbol)
+        => !symbol.IsImplicitlyDeclared && symbol is not IMethodSymbol { MethodKind: MethodKind.Constructor or MethodKind.PropertyGet or MethodKind.PropertySet or MethodKind.EventAdd or MethodKind.EventRemove };
     private IReadOnlyList<ISymbol> ResolveCSharpMembers(string name) => AllMembers(name).ToArray();
     private static ITypeSymbol? MemberType(ISymbol symbol) => symbol switch { IFieldSymbol f => f.Type, IPropertySymbol p => p.Type, IMethodSymbol m => m.ReturnType, _ => null };
     private IEnumerable<ISymbol> AllMembers(string name)
     {
         for (INamedTypeSymbol? t = world; t != null; t = t.BaseType)
-            foreach (var member in t.GetMembers(name))
+            foreach (var member in string.IsNullOrEmpty(name) ? t.GetMembers() : t.GetMembers(name))
                 if (Accessible(member))
                     yield return member;
     }

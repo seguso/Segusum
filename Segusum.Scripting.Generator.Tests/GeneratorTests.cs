@@ -91,6 +91,13 @@ public sealed class GeneratorTests
         var functionDefinition = workspace.GetDefinition("Gameplay/Nav.seg", 3, 9);
         Assert.NotNull(functionDefinition);
         Assert.Equal("helper", functionDefinition!.DisplayName);
+        var memberDefinition = workspace.GetDefinition("Gameplay/Nav.seg", 6, 17);
+        Assert.NotNull(memberDefinition);
+        Assert.Equal("isHere", memberDefinition!.DisplayName);
+        var memberCompletions = workspace.GetCompletions("Gameplay/Nav.seg", 6, 15);
+        Assert.Contains("isHere", memberCompletions);
+        Assert.DoesNotContain("explanation", memberCompletions, StringComparer.Ordinal);
+        Assert.Contains("olivia", workspace.GetCompletions("Gameplay/Nav.seg", 6, 11));
     }
 
     [Fact]

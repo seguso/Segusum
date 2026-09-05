@@ -39,6 +39,9 @@ const vscode = __importStar(require("vscode"));
 const child_process_1 = require("child_process");
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
+let output;
+let status;
+function log(message) { output?.appendLine(`[${new Date().toISOString()}] ${message}`); }
 class HostClient {
     child;
     next = 1;
@@ -46,6 +49,7 @@ class HostClient {
     async start(root) {
         const configured = vscode.workspace.getConfiguration('segusum').get('toolingHostPath');
         const dll = configured || path.join(root, 'Segusum.Tooling.Host', 'bin', 'Debug', 'net8.0', 'Segusum.Tooling.Host.dll');
+        log(`Starting host: ${dll}`);
         if (!fs.existsSync(dll))
             throw new Error(`Tooling host not found: ${dll}`);
         this.child = (0, child_process_1.spawn)('dotnet', [dll], { cwd: root, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -65,13 +69,16 @@ class HostClient {
             }
             catch { /* protocol remains stdout-only JSON */ }
         } });
-        this.child.stderr.on('data', data => console.error(`[Segusum] ${data}`));
-        await this.request('initialize', { projectPath: await discoverProject(root) });
+        this.child.stderr.on('data', data => log(`host stderr: ${data.toString().trim()}`));
+        const projectPath = await discoverProject(root);
+        log(`Initializing project: ${projectPath ?? '(discovery failed)'}`);
+        await this.request('initialize', { projectPath });
+        log('Host initialized.');
     }
-    request(method, params, token) { const id = this.next++; return new Promise((resolve, reject) => { this.pending.set(id, { resolve, reject }); this.child?.stdin.write(JSON.stringify({ id, method, params }) + '\n'); if (token)
+    request(method, params, token) { const id = this.next++; log(`RPC start #${id} ${method}`); return new Promise((resolve, reject) => { this.pending.set(id, { resolve: (v) => { log(`RPC end #${id} ${method}`); resolve(v); }, reject: (e) => { log(`RPC error #${id} ${method}: ${e}`); reject(e); } }); this.child?.stdin.write(JSON.stringify({ id, method, params }) + '\n'); if (token)
         token.onCancellationRequested(() => this.cancel(id)); }); }
     cancel(id) { this.child?.stdin.write(JSON.stringify({ id: this.next++, method: 'cancel', params: { requestId: id } }) + '\n'); }
-    invalidate() { void this.request('invalidate', {}); }
+    invalidate() { log('Invalidating semantic workspace.'); void this.request('invalidate', {}).catch(e => log(`invalidate failed: ${e}`)); }
     dispose() { this.child?.kill(); this.child = undefined; for (const p of this.pending.values())
         p.reject(new Error('Host stopped')); this.pending.clear(); }
 }
@@ -108,19 +115,48 @@ async function call(method, params, token) { if (!client)
     throw new Error('Segusum host is not initialized.'); if (token?.isCancellationRequested)
     throw new vscode.CancellationError(); return client.request(method, params, token); }
 async function activate(context) {
+    output = vscode.window.createOutputChannel('Segusum');
+    context.subscriptions.push(output);
+    status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+    status.text = 'Segusum: Starting';
+    status.show();
+    context.subscriptions.push(status);
     const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    if (!root)
+    if (!root) {
+        status.text = 'Segusum: No workspace';
         return;
+    }
     client = new HostClient();
     try {
         await client.start(root);
+        status.text = 'Segusum: Ready';
+        status.tooltip = `Project: ${root}`;
     }
     catch (e) {
+        status.text = 'Segusum: Error';
+        log(`Initialization failed: ${e}`);
+        output.show(true);
         vscode.window.showErrorMessage(String(e));
         return;
     }
-    context.subscriptions.push(vscode.languages.registerDefinitionProvider({ language: 'segusum' }, { provideDefinition: async (_d, p) => { const x = await call('definition', { path: _d.uri.fsPath, line: p.line + 1, column: p.character + 1 }); return x?.path ? new vscode.Location(vscode.Uri.file(x.path), new vscode.Position(x.line - 1, x.column - 1)) : undefined; } }));
-    context.subscriptions.push(vscode.languages.registerCompletionItemProvider({ language: 'segusum' }, { provideCompletionItems: async (d, p) => { const x = await call('completion', { path: d.uri.fsPath, line: p.line + 1, column: p.character + 1 }); return (x ?? []).map((a) => new vscode.CompletionItem(a.label)); } }, '.'));
+    context.subscriptions.push(vscode.languages.registerDefinitionProvider({ language: 'segusum' }, { provideDefinition: async (_d, p) => { try {
+            const x = await call('definition', { path: _d.uri.fsPath, line: p.line + 1, column: p.character + 1 });
+            return x?.path ? new vscode.Location(vscode.Uri.file(x.path), new vscode.Position(x.line - 1, x.column - 1)) : undefined;
+        }
+        catch (e) {
+            log(`Definition failed: ${e}`);
+            output.show(true);
+            vscode.window.showErrorMessage(`Segusum definition failed: ${e}`);
+            return undefined;
+        } } }));
+    context.subscriptions.push(vscode.languages.registerCompletionItemProvider({ language: 'segusum' }, { provideCompletionItems: async (d, p) => { try {
+            const x = await call('completion', { path: d.uri.fsPath, line: p.line + 1, column: p.character + 1 });
+            return (x ?? []).map((a) => new vscode.CompletionItem(a.label));
+        }
+        catch (e) {
+            log(`Completion failed: ${e}`);
+            return [];
+        } } }));
     context.subscriptions.push(vscode.commands.registerCommand('segusum.findAllReferences', async () => { const q = await savedPosition(); requestCts?.cancel(); requestCts = new vscode.CancellationTokenSource(); await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Segusum references', cancellable: true }, async (_p, t) => { t.onCancellationRequested(() => requestCts?.cancel()); const result = await call('references', { path: q.path, line: q.line, column: q.column }, requestCts.token); refs.clear(); for (const r of result ?? []) {
         let preview = r.displayName;
         try {
