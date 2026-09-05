@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 
 type RpcResponse = { id: number; result?: any; error?: { code: string; message: string } };
-const BUILD_ID = 'extension build = rename-validation-startup-2026-09-05';
+const BUILD_ID = 'extension build = prewarm-rename-fastpath-2026-09-05';
 let output: vscode.OutputChannel;
 let status: vscode.StatusBarItem;
 function log(message: string) { output?.appendLine(`[${new Date().toISOString()}] ${message}`); }

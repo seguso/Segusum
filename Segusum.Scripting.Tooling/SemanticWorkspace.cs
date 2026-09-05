@@ -157,8 +157,10 @@ public sealed class DslSemanticWorkspace
             renamedSolution = Renamer.RenameSymbolAsync(roslynSolution, workspaceSymbol, newName, null, CancellationToken.None).GetAwaiter().GetResult();
             renamerTimer.Stop();
             var extractionTimer = Stopwatch.StartNew();
-            foreach (var project in roslynSolution.Projects)
-                foreach (var originalDocument in project.Documents)
+            var changedDocumentIds = renamedSolution.GetChanges(roslynSolution).GetProjectChanges()
+                .SelectMany(x => x.GetChangedDocuments()).ToHashSet();
+            foreach (var originalDocument in roslynSolution.Projects.SelectMany(x => x.Documents)
+                .Where(x => changedDocumentIds.Contains(x.Id)))
                 {
                     var originalRoot = originalDocument.GetSyntaxRootAsync().GetAwaiter().GetResult();
                     if (originalRoot != null && SegusumGeneratedSource.IsGenerated(originalRoot.SyntaxTree)) continue;
