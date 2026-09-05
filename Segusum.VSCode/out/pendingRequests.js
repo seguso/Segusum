@@ -4,6 +4,7 @@ exports.PendingRequestRegistry = void 0;
 class PendingRequestRegistry {
     entries = new Map();
     get size() { return this.entries.size; }
+    has(id) { return this.entries.has(id); }
     add(id, entry) { this.entries.set(id, entry); }
     resolve(id, value) {
         const entry = this.entries.get(id);

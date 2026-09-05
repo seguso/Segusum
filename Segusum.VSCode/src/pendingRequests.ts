@@ -9,6 +9,8 @@ export class PendingRequestRegistry<T> {
 
   get size(): number { return this.entries.size; }
 
+  has(id: number): boolean { return this.entries.has(id); }
+
   add(id: number, entry: PendingRequest<T>): void { this.entries.set(id, entry); }
 
   resolve(id: number, value: T): boolean {
