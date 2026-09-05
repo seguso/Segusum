@@ -210,7 +210,7 @@ public sealed class DslBinder
             case LiteralExpression l: if (l.Kind == "null") { nullLiterals.Add(l); return null; } return l.Kind is "string" or "raw-string" ? compilation.GetSpecialType(SpecialType.System_String) : l.Kind == "bool" ? compilation.GetSpecialType(SpecialType.System_Boolean) : l.Kind == "cycle" ? cycle : compilation.GetSpecialType(SpecialType.System_Int32);
             case IdentifierExpression i:
                 if (i.Name == "it" && contextualIt != null) { model.Values[i] = new BoundValue(contextualIt, "x", null, BoundSymbolKind.ContextualIt); return contextualIt; }
-                if (functions.TryGetValue(NormalizeKey(i.Name), out var function) && function.Parameters.Count == 0) { var functionType = TypeOf(function.ReturnType ?? "void"); model.Values[i] = new BoundValue(functionType, Name(function.Name), null, BoundSymbolKind.Function); lastKind = BoundSymbolKind.Function; RecordName(i.Name, i.Span); return functionType; }
+        if (functions.TryGetValue(NormalizeKey(i.Name), out var function) && function.Parameters.Count == 0) { var functionType = TypeOf(function.ReturnType ?? "void"); model.Values[i] = new BoundValue(functionType, Name(function.Name), null, BoundSymbolKind.Function); lastSymbol = null; lastCSharpName = Name(function.Name); lastKind = BoundSymbolKind.Function; RecordName(i.Name, i.Span); return functionType; }
                 var resolved = BindName(i.Name, i.Span, scope);
                 if (resolved != null) model.Values[i] = new BoundValue(resolved, lastCSharpName, lastSymbol, lastKind);
                 return resolved;

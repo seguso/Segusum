@@ -7,7 +7,7 @@ import { InvalidationScheduler, isGeneratedPath } from './invalidation';
 import { semanticDocumentSnapshot } from './semanticRequest';
 
 type RpcResponse = { id: number; result?: any; error?: { code: string; message: string } };
-const BUILD_ID = 'extension build = invalidation-lifecycle-2026-09-05';
+const BUILD_ID = 'extension build = dirty-buffer-definition-0.1.4-2026-09-05';
 const INTERACTIVE_RPC_TIMEOUT_MS = 15_000;
 const interactiveMethods = new Set(['definition', 'completion', 'references', 'rename']);
 let output: vscode.OutputChannel;

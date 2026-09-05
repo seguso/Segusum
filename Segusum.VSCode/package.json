@@ -2,7 +2,7 @@
   "name": "segusum-dsl",
   "displayName": "Segusum DSL",
   "description": "Segusum DSL semantic tooling",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "publisher": "seguso",
   "engines": { "vscode": "^1.85.0" },
   "categories": ["Programming Languages"],

@@ -111,6 +111,14 @@ public sealed class DslSemanticWorkspace
     public SemanticDefinition? GetDefinition(string path, int line, int column)
     {
         var sourceReference = FindReference(path, line, column);
+        if (documents.TryGetValue(path, out var document))
+        {
+            var cursor = GetDocumentOffset(document.Text, line, column);
+            var token = sourceReference == null || sourceReference.Span.Start < 0 || sourceReference.Span.Start >= document.Text.Length
+                ? "<none>"
+                : document.Text.Substring(sourceReference.Span.Start, Math.Min(sourceReference.Span.Length, document.Text.Length - sourceReference.Span.Start));
+            Console.Error.WriteLine($"definition path={path} line={line} column={column} tokenText={TokenAt(document.Text, cursor)} matchedReference={sourceReference?.DslSymbol?.Name ?? sourceReference?.CSharpSymbol?.Name ?? "<none>"} matchedSpan={sourceReference?.Span.Line}:{sourceReference?.Span.Column} start={sourceReference?.Span.Start} length={sourceReference?.Span.Length} result={token}");
+        }
         if (sourceReference?.CSharpSymbol != null)
         {
             var location = sourceReference.CSharpSymbol.Locations.FirstOrDefault() ?? Location.None;
@@ -241,21 +249,31 @@ public sealed class DslSemanticWorkspace
 
     private DslSemanticReference? FindReference(string path, int line, int column)
     {
-        if (!referencesByPath.TryGetValue(path, out var references)) return null;
-        var low = 0; var high = references.Length - 1;
-        while (low <= high)
-        {
-            var middle = low + ((high - low) / 2);
-            var candidate = references[middle];
-            if (candidate.Span.Line < line || (candidate.Span.Line == line && candidate.Span.Column + Math.Max(1, candidate.Span.Length) < column)) low = middle + 1;
-            else high = middle - 1;
-        }
-        for (var i = Math.Max(0, low - 2); i < Math.Min(references.Length, low + 3); i++)
-        {
-            var span = references[i].Span;
-            if (span.Line == line && column >= span.Column && column <= span.Column + Math.Max(1, span.Length)) return references[i];
-        }
-        return null;
+        if (!referencesByPath.TryGetValue(path, out var references) || !documents.TryGetValue(path, out var document)) return null;
+        var cursor = GetDocumentOffset(document.Text, line, column);
+        return references
+            .Where(reference => reference.Span.Start <= cursor && cursor < reference.Span.Start + Math.Max(1, reference.Span.Length))
+            .OrderBy(reference => Math.Max(1, reference.Span.Length))
+            .ThenByDescending(reference => reference.Span.Start)
+            .FirstOrDefault();
+    }
+
+    private static int GetDocumentOffset(string text, int line, int column)
+    {
+        var sourceText = SourceText.From(text);
+        var lineIndex = Math.Clamp(line - 1, 0, Math.Max(0, sourceText.Lines.Count - 1));
+        var textLine = sourceText.Lines[lineIndex];
+        return Math.Clamp(textLine.Start + Math.Max(0, column - 1), textLine.Start, textLine.End);
+    }
+
+    private static string TokenAt(string text, int offset)
+    {
+        if (offset >= text.Length) return "<eof>";
+        var start = offset;
+        while (start > 0 && (char.IsLetterOrDigit(text[start - 1]) || text[start - 1] == '_')) start--;
+        var end = offset;
+        while (end < text.Length && (char.IsLetterOrDigit(text[end]) || text[end] == '_')) end++;
+        return start == end ? text[offset].ToString() : text[start..end];
     }
 
     private static IReadOnlyList<string> RankCompletions(IEnumerable<string> names, string query)

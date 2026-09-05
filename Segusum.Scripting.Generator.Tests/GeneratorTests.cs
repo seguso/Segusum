@@ -101,6 +101,47 @@ public sealed class GeneratorTests
     }
 
     [Fact]
+    public void SemanticWorkspaceResolvesDirtyDslDefinitionByCurrentTokenOffset()
+    {
+        const string diskText = "world game\ndef creaCicloMikeNonRipete ret bool:\n    ret true\nend\ndef caller ret bool:\n    ret creaCicloMikeNonRipete\nend\n";
+        const string dirtyText = "world game\n\n\n\ndef creaCicloMikeNonRipete ret bool:\n    ret true\nend\ndef caller ret bool:\n    ret creaCicloMikeNonRipete\nend\n";
+        var workspace = CreateSemanticWorkspace(dirtyText, "public Character olivia = null!;");
+        var referenceOffset = dirtyText.LastIndexOf("creaCicloMikeNonRipete", StringComparison.Ordinal);
+        var reference = SourceSpan.From("Gameplay/Dirty.seg", dirtyText, referenceOffset, "creaCicloMikeNonRipete".Length);
+        var definition = workspace.GetDefinition("Gameplay/Dirty.seg", reference.Line, reference.Column);
+
+        Assert.NotNull(definition);
+        Assert.True(definition != null && definition.DisplayName == "creaCicloMikeNonRipete",
+            $"actual={definition?.DisplayName}; " + string.Join("; ", workspace.FindReferences("Gameplay/Dirty.seg", reference.Line, reference.Column)
+                .Select(x => $"{x.DisplayName}@{x.Location.Span.Start}:{x.Location.Span.Line}:{x.Location.Span.Column}:{x.Location.Span.Length}")));
+        Assert.Equal("dsl-definition", definition!.Location.Kind);
+        Assert.Equal(5, definition.Location.Span.Line);
+
+        var removedLines = diskText;
+        var removedWorkspace = CreateSemanticWorkspace(removedLines, "public Character olivia = null!;");
+        var removedOffset = removedLines.LastIndexOf("creaCicloMikeNonRipete", StringComparison.Ordinal);
+        var removedReference = SourceSpan.From("Gameplay/Dirty.seg", removedLines, removedOffset, "creaCicloMikeNonRipete".Length);
+        var removedDefinition = removedWorkspace.GetDefinition("Gameplay/Dirty.seg", removedReference.Line, removedReference.Column);
+        Assert.NotNull(removedDefinition);
+        Assert.Equal("creaCicloMikeNonRipete", removedDefinition!.DisplayName);
+        Assert.All(workspace.FindReferences("Gameplay/Dirty.seg", reference.Line, reference.Column), x => Assert.Equal("creaCicloMikeNonRipete", x.DisplayName));
+    }
+
+    [Fact]
+    public void SemanticWorkspaceResolvesDirtyDslReferenceToCSharpMember()
+    {
+        const string dirtyText = "world game\n\n\nuse olivia here:\n    if namedCutSceneIsSeen ncsMikeStalloneIlBenefattore:\n    end\nend\n";
+        var workspace = CreateSemanticWorkspace(dirtyText, "public Character olivia = null!; public NamedCutSceneId ncsMikeStalloneIlBenefattore = new();");
+        var offset = dirtyText.LastIndexOf("ncsMikeStalloneIlBenefattore", StringComparison.Ordinal);
+        var reference = SourceSpan.From("Gameplay/Dirty.seg", dirtyText, offset, "ncsMikeStalloneIlBenefattore".Length);
+        var definition = workspace.GetDefinition("Gameplay/Dirty.seg", reference.Line, reference.Column);
+
+        Assert.NotNull(definition);
+        Assert.Equal("ncsMikeStalloneIlBenefattore", definition!.DisplayName);
+        Assert.NotNull(definition.CSharpSymbol);
+    }
+
+    [Fact]
     public void SemanticWorkspaceTreatsNamedCutsceneIdAsAnImplicitDslIdentity()
     {
         const string dslText = "world game\nuse thing here:\n    named-cutscene ncsTest \"Titolo\" curRoom thing:\n        nar: Testo\n    end\nend\ndef seen ret bool:\n    ret namedCutSceneIsSeen ncsTest\nend\n";
@@ -752,6 +793,15 @@ public NamedCutSceneId ncsMikeStalloneIlBenefattore = null!;
         var generatorDiagnostics = driver.GetRunResult().Diagnostics;
         var generated = driver.GetRunResult().Results.SelectMany(x => x.GeneratedSources).ToImmutableArray();
         return new RunResult(generatorDiagnostics, generated, updated);
+    }
+
+    private static DslSemanticWorkspace CreateSemanticWorkspace(string dslText, string worldSource)
+    {
+        var references = ((string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES"))!.Split(Path.PathSeparator).Select(path => MetadataReference.CreateFromFile(path)).Cast<MetadataReference>().ToList();
+        references.Add(MetadataReference.CreateFromFile(typeof(Seg.WorldBase).Assembly.Location));
+        var tree = CSharpSyntaxTree.ParseText($"using System; using Seg; namespace Demo {{ public partial class Pinco : WorldBase {{ public Pinco() : base(\"en\") {{ }} {worldSource} }} }}", path: "World.cs");
+        var compilation = CSharpCompilation.Create("DirtyPositionTooling", new[] { tree }, references, new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        return new DslSemanticWorkspace(compilation, compilation.GetTypeByMetadataName("Demo.Pinco")!, new[] { new DslSource("Gameplay/Dirty.seg", dslText) });
     }
 
     private static string Generated(RunResult result) => string.Join("\n", result.GeneratedSources.Select(x => x.SourceText.ToString()));
