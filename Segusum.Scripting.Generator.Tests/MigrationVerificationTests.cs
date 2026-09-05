@@ -101,7 +101,7 @@ public sealed class MigrationVerificationTests
     [Fact]
     public void MansoMigrationKeepsExplanationAndNamedCutsceneTitle()
     {
-        const string csharp = "void Configure() { addHandlerUseFor(armaturaCriptaDracula, puTrovareMansoDeZuniga, exPercheRicordaLeCrociate, e => { using (namedCutScene(ncsTrovateMansoDeZuniga, curRoom, ilSantoGraal, cliffDeserto, dracula)) { dial(olivia, \"Camilla, hai notato che strana questa armatura?\"); } }); }";
+        const string csharp = "NamedCutSceneId ncsTrovateMansoDeZuniga = new NamedCutSceneId { serId = \"ncsTrovateMansoDeZuniga\", titleUntranslated = \"Trovate Sir Manso De Zuniga\".translatable() }; void Configure() { addHandlerUseFor(armaturaCriptaDracula, puTrovareMansoDeZuniga, exPercheRicordaLeCrociate, e => { using (namedCutScene(ncsTrovateMansoDeZuniga, curRoom, ilSantoGraal, cliffDeserto, dracula)) { dial(olivia, \"Camilla, hai notato che strana questa armatura?\"); } }); }";
         const string dslText = "world game\nuse armaturaCriptaDracula for puTrovareMansoDeZuniga:\n    exp exPercheRicordaLeCrociate\n    named-cutscene ncsTrovateMansoDeZuniga \"Trovate Sir Manso De Zuniga\" curRoom ilSantoGraal cliffDeserto dracula:\n        olivia: Camilla, hai notato che strana questa armatura?\n    end\nend\n";
 
         var csharpRegistration = Assert.Single(MigrationVerifier.ExtractCSharpRegistrations("worldActionHandlers.cs", csharp));
@@ -114,6 +114,33 @@ public sealed class MigrationVerificationTests
         Assert.Equal("Trovate Sir Manso De Zuniga", dslStrings[0]);
         Assert.Equal(csharpStrings, dslStrings.Skip(1));
         Assert.Equal(EquivalenceStatus.Pass, MigrationVerifier.CompareStrings(csharpStrings, dslStrings.Skip(1).ToArray()).Status);
+        Assert.Equal(EquivalenceStatus.Pass, MigrationVerifier.CompareNamedCutscenes(
+            MigrationVerifier.ExtractCSharpNamedCutscenes("worldObjects.cs", csharp),
+            MigrationVerifier.ExtractDslNamedCutscenes(new DslSource("Gameplay/ActionHandlers.seg", dslText))).Status);
+    }
+
+    [Theory]
+    [InlineData("ncsSBAGLIATO \"Trovate Sir Manso De Zuniga\" curRoom ilSantoGraal cliffDeserto dracula")]
+    [InlineData("ncsTrovateMansoDeZuniga \"Titolo sbagliato\" curRoom ilSantoGraal cliffDeserto dracula")]
+    [InlineData("ncsTrovateMansoDeZuniga \"Trovate Sir Manso De Zuniga\" curRoom ilSantoGraal dracula")]
+    [InlineData("ncsTrovateMansoDeZuniga \"Trovate Sir Manso De Zuniga\" curRoom cliffDeserto ilSantoGraal dracula")]
+    public void NamedCutsceneFingerprintFailsWhenOnePartChanges(string header)
+    {
+        const string csharp = "NamedCutSceneId ncsTrovateMansoDeZuniga = new NamedCutSceneId { serId = \"ncsTrovateMansoDeZuniga\", titleUntranslated = \"Trovate Sir Manso De Zuniga\".translatable() }; using (namedCutScene(ncsTrovateMansoDeZuniga, curRoom, ilSantoGraal, cliffDeserto, dracula)) { dial(olivia, \"Testo\"); }";
+        var dsl = new DslSource("changed.seg", $"world game\nuse armaturaCriptaDracula for puTrovareMansoDeZuniga:\n    named-cutscene {header}:\n        olivia: Testo\n    end\nend\n");
+        Assert.Equal(EquivalenceStatus.Fail, MigrationVerifier.CompareNamedCutscenes(
+            MigrationVerifier.ExtractCSharpNamedCutscenes("original.cs", csharp),
+            MigrationVerifier.ExtractDslNamedCutscenes(dsl)).Status);
+    }
+
+    [Fact]
+    public void NamedCutsceneFingerprintFailsWhenTheStatementIsRemoved()
+    {
+        const string csharp = "NamedCutSceneId ncsTest = new NamedCutSceneId { serId = \"ncsTest\", titleUntranslated = \"Titolo\".translatable() }; using (namedCutScene(ncsTest, curRoom)) { dial(olivia, \"Testo\"); }";
+        const string dsl = "world game\nuse armaturaCriptaDracula for puTrovareMansoDeZuniga:\n    olivia: Testo\nend\n";
+        Assert.Equal(EquivalenceStatus.Fail, MigrationVerifier.CompareNamedCutscenes(
+            MigrationVerifier.ExtractCSharpNamedCutscenes("original.cs", csharp),
+            MigrationVerifier.ExtractDslNamedCutscenes(new DslSource("removed.seg", dsl))).Status);
     }
 
     [Fact]

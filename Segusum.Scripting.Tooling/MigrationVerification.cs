@@ -23,6 +23,14 @@ public sealed record HandlerRegistrationFingerprint(
 
 public sealed record VerificationCheck(string Name, EquivalenceStatus Status, string? Detail = null);
 
+public sealed record NamedCutsceneFingerprint(
+    string Id,
+    string? Title,
+    IReadOnlyList<string> RuntimeArguments,
+    string BodyShape,
+    string SourcePath,
+    int SourceLine);
+
 public sealed record HandlerEquivalenceResult(
     HandlerRegistrationFingerprint? CSharpRegistration,
     HandlerRegistrationFingerprint? DslRegistration,
@@ -42,6 +50,63 @@ public sealed record HandlerEquivalenceResult(
 /// </summary>
 public static class MigrationVerifier
 {
+    public static IReadOnlyList<NamedCutsceneFingerprint> ExtractCSharpNamedCutscenes(string path, string text)
+    {
+        var tree = CSharpSyntaxTree.ParseText(text, path: path);
+        var root = tree.GetRoot();
+        var titles = root.DescendantNodes().OfType<VariableDeclaratorSyntax>()
+            .Where(x => x.Initializer?.Value is ObjectCreationExpressionSyntax creation
+                && creation.Type.ToString() == "NamedCutSceneId")
+            .Select(x => (Id: x.Identifier.ValueText, Title: NamedCutsceneTitle(x.Initializer!.Value as ObjectCreationExpressionSyntax)))
+            .ToDictionary(x => x.Id, x => x.Title, StringComparer.Ordinal);
+
+        return root.DescendantNodes().OfType<UsingStatementSyntax>()
+            .Select(x => (Using: x, Invocation: x.Expression as InvocationExpressionSyntax))
+            .Where(x => x.Invocation != null && InvocationName(x.Invocation!) == "namedCutScene")
+            .Select(x =>
+            {
+                var invocation = x.Invocation!;
+                var arguments = invocation.ArgumentList.Arguments.Select(a => a.Expression.ToString()).ToArray();
+                var id = arguments.ElementAtOrDefault(0) ?? "";
+                return new NamedCutsceneFingerprint(id, titles.GetValueOrDefault(id), arguments.Skip(1).ToArray(), CSharpBodyShape(x.Using.Statement), path,
+                    x.Using.GetLocation().GetLineSpan().StartLinePosition.Line + 1);
+            })
+            .ToArray();
+    }
+
+    public static IReadOnlyList<NamedCutsceneFingerprint> ExtractDslNamedCutscenes(DslSource source)
+    {
+        var result = new List<NamedCutsceneFingerprint>();
+        var parsed = DslParser.Parse(source);
+        foreach (var declaration in parsed.Document.Declarations)
+        {
+            switch (declaration)
+            {
+                case HandlerDeclaration handler: CollectDslNamedCutscenes(handler.Body, source.Path, result); break;
+                case FunctionDeclaration function: CollectDslNamedCutscenes(function.Body, source.Path, result); break;
+                case CycleElementDeclaration element: CollectDslNamedCutscenes(element.Body, source.Path, result); break;
+            }
+        }
+        return result;
+    }
+
+    public static VerificationCheck CompareNamedCutscenes(
+        IReadOnlyList<NamedCutsceneFingerprint> csharp,
+        IReadOnlyList<NamedCutsceneFingerprint> dsl)
+    {
+        if (csharp.Count != dsl.Count)
+            return new("named-cutscene presence", EquivalenceStatus.Fail, $"C# count={csharp.Count}; DSL count={dsl.Count}");
+        for (var i = 0; i < csharp.Count; i++)
+        {
+            var left = csharp[i];
+            var right = dsl[i];
+            if (left.Id != right.Id || left.Title != right.Title || !left.RuntimeArguments.SequenceEqual(right.RuntimeArguments, StringComparer.Ordinal) || left.BodyShape != right.BodyShape)
+                return new("named-cutscene", EquivalenceStatus.Fail,
+                    $"C#={left.Id}|{left.Title}|({string.Join(",", left.RuntimeArguments)})|{left.BodyShape}; DSL={right.Id}|{right.Title}|({string.Join(",", right.RuntimeArguments)})|{right.BodyShape}");
+        }
+        return new("named-cutscene", EquivalenceStatus.Pass);
+    }
+
     public static IReadOnlyList<HandlerRegistrationFingerprint> ExtractCSharpRegistrations(string path, string text)
     {
         var tree = CSharpSyntaxTree.ParseText(text, path: path);
@@ -197,6 +262,52 @@ public static class MigrationVerifier
             LiteralText(phrase), LiteralText(explanation), possible, path,
             invocation.GetLocation().GetLineSpan().StartLinePosition.Line + 1);
     }
+
+    private static string? NamedCutsceneTitle(ObjectCreationExpressionSyntax? creation)
+    {
+        var assignment = creation?.Initializer?.Expressions.OfType<AssignmentExpressionSyntax>()
+            .FirstOrDefault(x => x.Left.ToString() == "titleUntranslated");
+        if (assignment?.Right is InvocationExpressionSyntax invocation
+            && InvocationName(invocation) == "translatable"
+            && invocation.Expression is MemberAccessExpressionSyntax member
+            && member.Expression is LiteralExpressionSyntax literal
+            && literal.IsKind(SyntaxKind.StringLiteralExpression))
+            return literal.Token.ValueText;
+        return null;
+    }
+
+    private static string CSharpBodyShape(StatementSyntax statement)
+        => string.Join("|", statement.DescendantNodes().OfType<InvocationExpressionSyntax>().Select(InvocationName));
+
+    private static void CollectDslNamedCutscenes(IEnumerable<DslStatement> statements, string path, List<NamedCutsceneFingerprint> result)
+    {
+        foreach (var statement in statements)
+        {
+            switch (statement)
+            {
+                case NamedCutsceneStatement named:
+                    result.Add(new NamedCutsceneFingerprint(named.Id, StringValue(named.Title), named.Arguments.Select(x => ExpressionText(x) ?? "").ToArray(), DslBodyShape(named.Body), path, named.Span.Line));
+                    CollectDslNamedCutscenes(named.Body, path, result);
+                    break;
+                case IfStatement conditional:
+                    foreach (var branch in conditional.Branches) CollectDslNamedCutscenes(branch.Body, path, result);
+                    if (conditional.ElseBody != null) CollectDslNamedCutscenes(conditional.ElseBody, path, result);
+                    break;
+                case AddCycleElementStatement cycle: CollectDslNamedCutscenes(cycle.Body, path, result); break;
+            }
+        }
+    }
+
+    private static string DslBodyShape(IEnumerable<DslStatement> statements)
+        => string.Join("|", statements.Select(statement => statement switch
+        {
+            DialogueStatement => "dial",
+            NarStatement => "nar",
+            NarRoomStatement => "nar-room",
+            NarImgStatement => "nar-img",
+            IfStatement conditional => "if(" + string.Join(";", conditional.Branches.Select(x => DslBodyShape(x.Body))) + ")",
+            _ => statement.GetType().Name
+        }));
 
     private static string? RegistrationKind(InvocationExpressionSyntax invocation) => InvocationName(invocation) switch
     {
