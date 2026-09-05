@@ -673,8 +673,17 @@ public NamedCutSceneId ncsMikeStalloneIlBenefattore = null!;
         var generated = Generated(result);
         Assert.Contains("using (namedCutScene(ncsTest, curRoom, thing))", generated);
         Assert.Contains("narImg(\"Una narrazione.\", \"img/test.png\", NarSize.Medium, alsoShowGraphicsInTextMode: true)", generated);
+        Assert.DoesNotContain("narImg(\"\\\"Una narrazione.", generated, StringComparison.Ordinal);
         Assert.Contains("e.textInputToShow = ti;", generated);
         AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
+    public void UseForExplanationIsPreservedInGeneratedRegistration()
+    {
+        var result = Run("use thing for objective:\n    exp explanation\n    nar: Testo\nend", "public LogicObj thing = null!; public Objective objective = null!; public Explanation explanation = null!;");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL", StringComparison.Ordinal));
+        Assert.Contains("addHandlerUseFor(thing,objective, explanation", Generated(result));
     }
 
     [Fact]
