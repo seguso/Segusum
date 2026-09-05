@@ -345,11 +345,13 @@ public static class MigrationVerifier
                 case DialogueStatement dialogue: AddString(dialogue.Text, result); break;
                 case NarStatement nar: AddString(nar.Text, result); break;
                 case NarRoomStatement narRoom: AddString(narRoom.Text, result); break;
+                case NarImgStatement narImg: AddString(narImg.Text, result); break;
                 case IfStatement conditional:
                     foreach (var branch in conditional.Branches) Walk(branch.Body, result);
                     if (conditional.ElseBody != null) Walk(conditional.ElseBody, result);
                     break;
                 case AddCycleElementStatement cycle: Walk(cycle.Body, result); break;
+                case NamedCutsceneStatement namedCutscene: Walk(namedCutscene.Body, result); break;
             }
         }
     }

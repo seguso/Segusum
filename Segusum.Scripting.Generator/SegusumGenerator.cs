@@ -65,6 +65,8 @@ public sealed class SegusumGenerator : IIncrementalGenerator
         foreach (var cycle in declarations.OfType<CycleDeclaration>()) { EmitLine(sb, cycle.Span); sb.Append(" private readonly Cycle ").Append(Name(cycle.Variable)).AppendLine(" = new Cycle();"); EmitDefaultLine(sb); }
         foreach (var element in declarations.SelectMany(AllCycleElements).GroupBy(x => Name(x.Id), StringComparer.Ordinal).Select(x => x.First()))
         { EmitLine(sb, element.Span); sb.Append(" public CycleElemId ").Append(Name(element.Id)).AppendLine(" { get; set; } = new();"); EmitDefaultLine(sb); }
+        foreach (var id in declarations.SelectMany(AllNamedCutscenes).GroupBy(x => Name(x.Id), StringComparer.Ordinal).Select(x => x.First()))
+            if (!world.GetMembers(Name(id.Id)).Any()) { EmitLine(sb, id.Span); sb.Append(" public NamedCutSceneId ").Append(Name(id.Id)).Append(" = new NamedCutSceneId { serId = \"").Append(EscapeString(id.Id)).AppendLine("\", titleUntranslated = \"" + EscapeString(id.Id) + "\" };" ); EmitDefaultLine(sb); }
         foreach (var function in declarations.OfType<FunctionDeclaration>()) EmitFunction(sb, function, binder.Model);
         sb.AppendLine("#line hidden\n protected override void configureGeneratedActionHandlers()\n {");
         foreach (var handler in declarations.OfType<HandlerDeclaration>()) EmitHandler(sb, handler, sp, binder.Model);
@@ -125,7 +127,19 @@ public sealed class SegusumGenerator : IIncrementalGenerator
             case CallStatement c: sb.Append(indent).Append(Emit(c.Expression, model)).AppendLine(";"); break;
             case NarStatement n: sb.Append(indent).Append("narText(").Append(Emit(n.Text, model)).AppendLine(");"); break;
             case NarRoomStatement n: sb.Append(indent).Append("narRoom(").Append(Emit(n.Text, model)).Append(", curRoom, false, false);").AppendLine(); break;
+            case NarImgStatement n:
+                sb.Append(indent).Append("narImg(").Append(Emit(n.Text, model)).Append(", ").Append(Emit(n.ImagePath, model));
+                if (n.Size == "medium") sb.Append(", NarSize.Medium"); else if (n.Size == "fullscreen") sb.Append(", NarSize.FullScreen");
+                if (n.ShowInText) sb.Append(", alsoShowGraphicsInTextMode: true");
+                sb.AppendLine(");"); break;
             case DialogueStatement d: sb.Append(indent).Append("dial(").Append(EmitIdentifier(d.Character, model)).Append(',').Append(Emit(d.Text, model)).AppendLine(");"); break;
+            case TextInputStatement t: sb.Append(indent).Append(input ?? "e").Append(".textInputToShow = ").Append(Emit(t.TextInput, model)).AppendLine(";"); break;
+            case NamedCutsceneStatement n:
+                sb.Append(indent).Append("using (namedCutScene(").Append(EmitIdentifier(n.Id, model));
+                if (n.Arguments.Count != 0) sb.Append(", ").Append(string.Join(", ", n.Arguments.Select(x => Emit(x, model))));
+                sb.AppendLine("))"); sb.Append(indent).AppendLine("{");
+                foreach (var child in n.Body) EmitStatement(sb, child, indent + "  ", input, model);
+                sb.Append(indent).AppendLine("}"); break;
             case NextCycleStatement n: sb.Append(indent).Append("execNextInCycle(").Append(Emit(n.Cycle, model)).AppendLine(");"); break;
             case AddCycleElementStatement a: EmitAdd(sb, a.Cycle, a.Id, a.Important, a.Repeat, a.Condition, a.Body, a.Span, default, indent, model); break;
             case IfStatement i:
@@ -175,6 +189,15 @@ public sealed class SegusumGenerator : IIncrementalGenerator
     {
         AddCycleElementStatement a => new[] { new CycleElementDeclaration(a.Cycle, a.Id, a.Important, a.Repeat, a.Condition, a.Body, a.Span) }.Concat(FindNested(a.Body)),
         IfStatement i => i.Branches.SelectMany(x => FindNested(x.Body)).Concat(i.ElseBody == null ? Enumerable.Empty<CycleElementDeclaration>() : FindNested(i.ElseBody)),
+        NamedCutsceneStatement n => FindNested(n.Body),
         _ => Enumerable.Empty<CycleElementDeclaration>()
+    });
+    private static IEnumerable<NamedCutsceneStatement> AllNamedCutscenes(DslDeclaration declaration) => declaration switch
+    {
+        HandlerDeclaration h => FindNamedCutscenes(h.Body), FunctionDeclaration f => FindNamedCutscenes(f.Body), CycleElementDeclaration c => FindNamedCutscenes(c.Body), _ => Enumerable.Empty<NamedCutsceneStatement>()
+    };
+    private static IEnumerable<NamedCutsceneStatement> FindNamedCutscenes(IEnumerable<DslStatement> statements) => statements.SelectMany(s => s switch
+    {
+        NamedCutsceneStatement n => new[] { n }.Concat(FindNamedCutscenes(n.Body)), IfStatement i => i.Branches.SelectMany(x => FindNamedCutscenes(x.Body)).Concat(i.ElseBody == null ? Enumerable.Empty<NamedCutsceneStatement>() : FindNamedCutscenes(i.ElseBody)), AddCycleElementStatement a => FindNamedCutscenes(a.Body), _ => Enumerable.Empty<NamedCutsceneStatement>()
     });
 }

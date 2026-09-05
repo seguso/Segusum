@@ -109,6 +109,9 @@ public static class DslParser
                 case "var": { var name = Word(); Need("="); return new VariableDeclaration(name, Expression(), span); }
                 case "next": return new NextCycleStatement(Expression(), span); case "add": return ParseAdd(span);
                 case "makes-no-sense": return new MakesNoSenseStatement(span); case "finish-game": return new FinishGameStatement(span); case "do-not-advance-time": return new DoNotAdvanceTimeStatement(span);
+                case "named-cutscene": return ParseNamedCutscene(span);
+                case "text-input": return new TextInputStatement(Expression(), span);
+                case "nar-img": return ParseNarImg(span);
                 default:
                     if (Is(":")) { var colon = Take(); return new DialogueStatement(keyword, RawText(colon.Span.Start + colon.Span.Length), span) { CharacterSpan = span }; }
                     if (Is("++")) { Take(); return new IncrementStatement(keyword, span); }
@@ -123,6 +126,32 @@ public static class DslParser
                     if (Is("=") || Is("+=") || Is("-=")) { var op = Take().Text; return new AssignmentStatement(keyword, op, Expression(), span); }
                     var args = new List<DslArgument>(); while (CanStartArgument()) args.Add(ParseArgument()); return new CallStatement(new CallExpression(keyword, args, span) { NameSpan = span }, span);
             }
+        }
+        private NamedCutsceneStatement ParseNamedCutscene(SourceSpan span)
+        {
+            var id = WordToken(); var args = new List<DslExpression>();
+            while (!Is(":") && Current.Kind != DslTokenKind.NewLine && Current.Kind != DslTokenKind.EndOfFile) args.Add(ParseSimpleExpression());
+            Need(":"); return new NamedCutsceneStatement(id.Text, args, ParseBody(false), span) { IdSpan = id.Span };
+        }
+        private NarImgStatement ParseNarImg(SourceSpan span)
+        {
+            var path = ParseSimpleExpression(); string? size = null; var show = false;
+            while (!Is(":") && Current.Kind != DslTokenKind.NewLine && Current.Kind != DslTokenKind.EndOfFile)
+            {
+                var modifier = Word();
+                if (modifier == "size") size = Word();
+                else if (modifier == "show-in-text") show = true;
+                else Error($"Unknown nar-img modifier '{modifier}'.");
+            }
+            Need(":"); return new NarImgStatement(path, size, show, RawTextAfterKeyword(), span);
+        }
+        private DslExpression ParseSimpleExpression()
+        {
+            var span = Current.Span;
+            if (Current.Kind == DslTokenKind.String) return new LiteralExpression(Take().Text, "string", span);
+            if (Current.Kind == DslTokenKind.Number) return new LiteralExpression(Take().Text, "number", span);
+            if (Is("null")) { Take(); return new LiteralExpression("null", "null", span); }
+            var token = WordToken(); return new IdentifierExpression(token.Text, token.Span);
         }
         private IfStatement ParseIf(SourceSpan span)
         {

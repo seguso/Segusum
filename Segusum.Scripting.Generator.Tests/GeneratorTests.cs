@@ -101,6 +101,31 @@ public sealed class GeneratorTests
     }
 
     [Fact]
+    public void SemanticWorkspaceTreatsNamedCutsceneIdAsAnImplicitDslIdentity()
+    {
+        const string dslText = "world game\nuse thing here:\n    named-cutscene ncsTest curRoom thing:\n        nar: Testo\n    end\nend\ndef seen ret bool:\n    ret namedCutSceneIsSeen ncsTest\nend\n";
+        var references = ((string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES"))!.Split(Path.PathSeparator).Select(path => MetadataReference.CreateFromFile(path)).Cast<MetadataReference>().ToList();
+        references.Add(MetadataReference.CreateFromFile(typeof(Seg.WorldBase).Assembly.Location));
+        var tree = CSharpSyntaxTree.ParseText("using Seg; namespace Demo { public partial class Pinco : WorldBase { public Pinco() : base(\"en\") { } public LogicObj thing = null!; } }", path: "World.cs");
+        var compilation = CSharpCompilation.Create("ToolingNamedCutsceneTest", new[] { tree }, references, new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        var workspace = new DslSemanticWorkspace(compilation, compilation.GetTypeByMetadataName("Demo.Pinco")!, new[] { new DslSource("Gameplay/Named.seg", dslText) });
+
+        Assert.DoesNotContain(workspace.Diagnostics, d => d.Id.StartsWith("SEGDSL", StringComparison.Ordinal));
+        var definition = workspace.GetDefinition("Gameplay/Named.seg", 3, 20);
+        Assert.NotNull(definition);
+        Assert.Equal("ncsTest", definition!.DisplayName);
+        Assert.Equal("dsl-definition", definition.Location.Kind);
+        var symbolReferences = workspace.FindReferences("Gameplay/Named.seg", 8, 29);
+        Assert.Contains(symbolReferences, x => x.Location.Span.Line == 3 && x.Location.Span.Column == 20);
+        Assert.Contains(symbolReferences, x => x.Location.Span.Line == 8);
+        Assert.Contains("ncsTest", workspace.GetCompletions("Gameplay/Named.seg", 8, 29));
+
+        var rename = workspace.RenameSymbol("Gameplay/Named.seg", 3, 20, "ncsNuova");
+        Assert.True(rename.Succeeded, string.Join(Environment.NewLine, rename.Diagnostics));
+        Assert.Equal(2, rename.Edits.Count(x => x.Path == "Gameplay/Named.seg" && x.NewText == "ncsNuova"));
+    }
+
+    [Fact]
     public void SemanticWorkspaceKeepsDslLocalIdentityScopedToItsFunction()
     {
         const string dslText = "world game\ndef first ret int:\n    var value = 1\n    ret value\nend\ndef second ret int:\n    var value = 2\n    ret value\nend\n";
@@ -638,6 +663,32 @@ public NamedCutSceneId ncsMikeStalloneIlBenefattore = null!;
     {
         if (!dsl.StartsWith("world ", StringComparison.Ordinal)) dsl = "world game\n" + dsl;
         return RunWithWorld(dsl, $"[SegusumWorld(\"game\")] public abstract partial class World : WorldBase {{ protected World() : base(\"en\") {{ }} public void helper(int nomeParametro) {{ }} public void helper(CycleElemId id) {{ }} {additionalMembers} protected override void configureActionHandlers() {{ }} }}");
+    }
+
+    [Fact]
+    public void NamedCutsceneAndDomainStatementsAreEmitted()
+    {
+        var result = Run("use thing here:\n    named-cutscene ncsTest curRoom thing:\n        nar-img \"img/test.png\" size medium show-in-text: Una narrazione.\n        text-input ti\n    end\nend", "public LogicObj thing = null!; public TextInput ti = null!; public NamedCutSceneId ncsTest = new();");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL"));
+        var generated = Generated(result);
+        Assert.Contains("using (namedCutScene(ncsTest, curRoom, thing))", generated);
+        Assert.Contains("narImg(\"Una narrazione.\", \"img/test.png\", NarSize.Medium, alsoShowGraphicsInTextMode: true)", generated);
+        Assert.Contains("e.textInputToShow = ti;", generated);
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
+    public void NamedCutsceneIdsMustBeUnique()
+    {
+        var result = Run("use thing here:\n    named-cutscene ncsTest curRoom thing:\n    end\n    named-cutscene ncsTest curRoom thing:\n    end\n    named-cutscene missing curRoom thing:\n    end\nend", "public LogicObj thing = null!;");
+        Assert.Contains(result.Diagnostics, d => d.GetMessage().Contains("Duplicate named-cutscene id 'ncsTest'", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TextInputOutsideHandlerIsDiagnostic()
+    {
+        var result = Run("def helper:\n    text-input ti\nend", "public TextInput ti = null!;");
+        Assert.Contains(result.Diagnostics, d => d.GetMessage().Contains("text-input is only valid inside an action handler", StringComparison.Ordinal));
     }
 
     private static RunResult RunWithWorld(string dsl, string worldSource)

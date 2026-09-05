@@ -8,7 +8,7 @@ using Segusum.Scripting.Core;
 
 namespace Segusum.Scripting.Semantics;
 
-public enum BoundSymbolKind { Local, Parameter, State, Function, Cycle, CycleElementId, CSharpField, CSharpProperty, CSharpMethod, ContextualIt }
+public enum BoundSymbolKind { Local, Parameter, State, Function, Cycle, CycleElementId, NamedCutsceneId, CSharpField, CSharpProperty, CSharpMethod, ContextualIt }
 public sealed record BoundValue(ITypeSymbol? Type, string CSharpName, ISymbol? Symbol, BoundSymbolKind Kind);
 public sealed record BoundArgument(DslArgument Source, IParameterSymbol? Parameter, string ParameterName);
 public sealed record BoundCall(IMethodSymbol? Method, string TargetName, IReadOnlyList<BoundArgument> Arguments, ITypeSymbol? ReturnType, DslExpression? Receiver = null);
@@ -46,11 +46,13 @@ public sealed class DslBinder
     private readonly Action<DslDiagnostic> report;
     private readonly Dictionary<string, ITypeSymbol> globals = new(StringComparer.Ordinal);
     private readonly Dictionary<string, ITypeSymbol> cycleElementGlobals = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, ITypeSymbol> namedCutsceneGlobals = new(StringComparer.Ordinal);
     private readonly Dictionary<string, BoundSymbolKind> globalKinds = new(StringComparer.Ordinal);
     private readonly Dictionary<string, FunctionDeclaration> functions = new(StringComparer.Ordinal);
     private readonly BoundModel model = new();
     private readonly INamedTypeSymbol? cycle;
     private readonly INamedTypeSymbol? cycleElementId;
+    private readonly INamedTypeSymbol? namedCutsceneId;
     private readonly ITypeSymbol? dateTimeNullable;
     private readonly INamedTypeSymbol? logicObj;
     private readonly INamedTypeSymbol? objective;
@@ -69,7 +71,7 @@ public sealed class DslBinder
     public DslBinder(Compilation compilation, INamedTypeSymbol world, Action<DslDiagnostic> report)
     {
         this.compilation = compilation; this.world = world; this.report = report;
-        cycle = compilation.GetTypeByMetadataName("Seg.Cycle"); cycleElementId = compilation.GetTypeByMetadataName("Seg.CycleElemId");
+        cycle = compilation.GetTypeByMetadataName("Seg.Cycle"); cycleElementId = compilation.GetTypeByMetadataName("Seg.CycleElemId"); namedCutsceneId = compilation.GetTypeByMetadataName("Seg.NamedCutSceneId");
         logicObj = compilation.GetTypeByMetadataName("Seg.LogicObj"); objective = compilation.GetTypeByMetadataName("Seg.Objective"); room = compilation.GetTypeByMetadataName("Seg.Room"); explanation = compilation.GetTypeByMetadataName("Seg.Explanation");
         var dateTime = compilation.GetSpecialType(SpecialType.System_DateTime); dateTimeNullable = compilation.GetSpecialType(SpecialType.System_Nullable_T).Construct(dateTime);
     }
@@ -84,10 +86,12 @@ public sealed class DslBinder
                 case CycleElementDeclaration element: AddDslIdentity(element.Id, "cycle-element", element.Span); break;
             }
         }
+        foreach (var id in declarations.SelectMany(FindNamedCutscenes)) AddDslIdentity(id.Id, "named-cutscene", id.Span);
         foreach (var state in declarations.OfType<StateDeclaration>()) AddGlobal(state.Name, TypeOf(state.Type), state.Span, BoundSymbolKind.State);
         foreach (var cycleDeclaration in declarations.OfType<CycleDeclaration>()) AddGlobal(cycleDeclaration.Variable, cycle, cycleDeclaration.Span, BoundSymbolKind.Cycle);
         foreach (var element in declarations.OfType<CycleElementDeclaration>()) AddGlobal(element.Id, cycleElementId, element.Span, BoundSymbolKind.CycleElementId);
         foreach (var element in declarations.SelectMany(FindNestedElements)) AddGlobal(element.Id, cycleElementId, element.Span, BoundSymbolKind.CycleElementId);
+        foreach (var id in declarations.SelectMany(FindNamedCutscenes)) AddNamedCutsceneGlobal(id);
         foreach (var function in declarations.OfType<FunctionDeclaration>()) { var key = NormalizeKey(function.Name); if (functions.ContainsKey(key)) Report("SEGDSL303", "Duplicate DSL function.", function.Span); else functions[key] = function; }
         foreach (var declaration in declarations)
         {
@@ -105,7 +109,7 @@ public sealed class DslBinder
         CheckCSharpRoomChangedDuplicates(declarations);
     }
     private void AddGlobal(string name, ITypeSymbol? type, SourceSpan span, BoundSymbolKind kind)
-    { if (kind == BoundSymbolKind.CycleElementId) { if (!Microsoft.CodeAnalysis.CSharp.SyntaxFacts.IsValidIdentifier(name) || name.Contains('-')) { Report("SEGDSL318", "CycleElementId must be a stable C# identifier and cannot contain '-'.", span); return; } if (cycleElementGlobals.ContainsKey(name)) { Report("SEGDSL314", $"Duplicate CycleElementId '{name}'.", span); return; } if (ResolveCSharpCandidates(name).Count != 0) Report("SEGDSL317", $"CycleElementId '{name}' collides with an existing World member.", span); if (type != null) cycleElementGlobals[name] = type; AddDslIdentity(name, "cycle-element", span); model.References[name] = name; return; } var key = NormalizeKey(name); if (globals.ContainsKey(key)) Report("SEGDSL304", $"Duplicate or normalized-colliding global '{name}'.", span); else if (type != null) { globals[key] = type; globalKinds[key] = kind; model.References[name] = Name(name); } }
+    { if (kind == BoundSymbolKind.CycleElementId) { if (!Microsoft.CodeAnalysis.CSharp.SyntaxFacts.IsValidIdentifier(name) || name.Contains('-')) { Report("SEGDSL318", "CycleElementId must be a stable C# identifier and cannot contain '-'.", span); return; } if (cycleElementGlobals.ContainsKey(name)) { Report("SEGDSL314", $"Duplicate CycleElementId '{name}'.", span); return; } if (ResolveCSharpCandidates(name).Count != 0) Report("SEGDSL317", $"CycleElementId '{name}' collides with an existing World member.", span); if (type != null) cycleElementGlobals[name] = type; AddDslIdentity(name, "cycle-element", span); model.References[name] = name; return; } var key = NormalizeKey(name); if (globals.ContainsKey(key)) Report(kind == BoundSymbolKind.NamedCutsceneId ? "SEGDSL324" : "SEGDSL304", $"Duplicate or normalized-colliding global '{name}'.", span); else if (type != null) { globals[key] = type; globalKinds[key] = kind; model.References[name] = Name(name); } }
     private void BindFunction(FunctionDeclaration f)
     { var scope = new Dictionary<string, ITypeSymbol>(StringComparer.Ordinal); currentParameters.Clear(); activeDslSymbols.Clear(); foreach (var p in f.Parameters) { scope[NormalizeKey(p.Name)] = TypeOf(p.Type)!; currentParameters.Add(NormalizeKey(p.Name)); AddLocalIdentity(p.Name, "parameter", f.Span); } BindStatements(f.Body, scope, f.ReturnType == null ? null : TypeOf(f.ReturnType)); currentParameters.Clear(); activeDslSymbols.Clear(); }
     private void BindHandler(HandlerDeclaration h)
@@ -121,7 +125,10 @@ public sealed class DslBinder
         }
         if (h.Explanation != null) Require(BindExpression(h.Explanation, new()), explanation, h.Explanation.Span, "exp must be Explanation.");
         if (h.Condition != null) Require(BindExpression(h.Condition, new()), compilation.GetSpecialType(SpecialType.System_Boolean), h.Condition.Span, "possible-when must be bool.");
+        var previousInputType = inputType;
+        inputType = compilation.GetTypeByMetadataName("Seg.HandlerInput");
         BindStatements(h.Body, new(), null);
+        inputType = previousInputType;
     }
     private void BindCycle(string cycleName, string? repeat, DslExpression? condition, IReadOnlyList<DslStatement> body, SourceSpan span, Dictionary<string, ITypeSymbol>? scope = null)
     { scope ??= new(); Require(BindName(cycleName, span, scope), cycle, span, "add requires a Cycle."); if (repeat != null && repeat is not ("once" or "forever")) Report("SEGDSL316", $"Unknown Repeat modifier '{repeat}'.", span); if (condition != null) Require(BindExpression(condition, scope, dateTimeNullable), compilation.GetSpecialType(SpecialType.System_Boolean), condition.Span, "when must be bool."); BindStatements(body, new(scope), null); }
@@ -154,8 +161,33 @@ public sealed class DslBinder
                 case DialogueStatement d: Require(BindName(d.Character, d.CharacterSpan, scope), compilation.GetTypeByMetadataName("Seg.Character"), d.Span, "dialogue speaker must be Character."); Require(BindExpression(d.Text, scope), compilation.GetSpecialType(SpecialType.System_String), d.Text.Span, "dialogue text must be string."); break;
                 case NarStatement n: Require(BindExpression(n.Text, scope), compilation.GetSpecialType(SpecialType.System_String), n.Text.Span, "nar text must be string."); break;
                 case NarRoomStatement n: Require(BindExpression(n.Text, scope), compilation.GetSpecialType(SpecialType.System_String), n.Text.Span, "nar-room text must be string."); break;
+                case NarImgStatement n:
+                    Require(BindExpression(n.ImagePath, scope), compilation.GetSpecialType(SpecialType.System_String), n.ImagePath.Span, "nar-img path must be string.");
+                    Require(BindExpression(n.Text, scope), compilation.GetSpecialType(SpecialType.System_String), n.Text.Span, "nar-img text must be string.");
+                    if (n.Size is not (null or "medium" or "fullscreen")) Report("SEGDSL322", "nar-img size must be 'medium' or 'fullscreen'.", n.Span);
+                    break;
+                case TextInputStatement t:
+                    if (inputType == null) Report("SEGDSL323", "text-input is only valid inside an action handler.", t.Span);
+                    else { var expected = MembersOf(inputType, "textInputToShow").OfType<IFieldSymbol>().FirstOrDefault()?.Type ?? MembersOf(inputType, "textInputToShow").OfType<IPropertySymbol>().FirstOrDefault()?.Type; RequireExpression(t.TextInput, BindExpression(t.TextInput, scope), expected, "text-input type mismatch."); }
+                    break;
+                case NamedCutsceneStatement n: BindNamedCutscene(n, scope); break;
             }
         }
+    }
+    private ITypeSymbol? inputType;
+    private void BindNamedCutscene(NamedCutsceneStatement statement, Dictionary<string, ITypeSymbol>? scope = null)
+    {
+        var idType = BindName(statement.Id, statement.IdSpan, scope);
+        Require(idType, namedCutsceneId, statement.IdSpan, "named-cutscene id must be a declared NamedCutSceneId.");
+        foreach (var argument in statement.Arguments) BindExpression(argument, scope ?? new());
+        BindStatements(statement.Body, scope == null ? new() : new(scope), null);
+    }
+    private void AddNamedCutsceneGlobal(NamedCutsceneStatement statement)
+    {
+        var key = NormalizeKey(statement.Id);
+        if (namedCutsceneGlobals.ContainsKey(key) || globals.ContainsKey(key)) { Report("SEGDSL324", $"Duplicate named-cutscene id '{statement.Id}'.", statement.IdSpan); return; }
+        if (namedCutsceneId != null) namedCutsceneGlobals[key] = namedCutsceneId;
+        model.References[statement.Id] = Name(statement.Id);
     }
     private ITypeSymbol? BindExpression(DslExpression expression, Dictionary<string, ITypeSymbol> scope, ITypeSymbol? contextualIt = null)
     {
@@ -235,6 +267,7 @@ public sealed class DslBinder
         var key = NormalizeKey(name);
         if (scope != null && scope.TryGetValue(key, out var local)) { lastKind = currentParameters.Contains(key) ? BoundSymbolKind.Parameter : BoundSymbolKind.Local; model.References[name] = Name(name); RecordName(name, span); return local; }
         if (cycleElementGlobals.TryGetValue(name, out var cycleElement)) { lastKind = BoundSymbolKind.CycleElementId; lastCSharpName = name; model.References[name] = name; RecordName(name, span); return cycleElement; }
+        if (namedCutsceneGlobals.TryGetValue(key, out var namedCutscene)) { lastKind = BoundSymbolKind.NamedCutsceneId; lastCSharpName = Name(name); model.References[name] = lastCSharpName; RecordName(name, span); return namedCutscene; }
         if (globals.TryGetValue(key, out var global)) { lastKind = globalKinds[key]; lastCSharpName = Name(name); model.References[name] = lastCSharpName; RecordName(name, span); return global; }
         var exact = ResolveCSharpMembers(name);
         var candidates = exact.Count != 0 ? exact : DslNames.Candidates(name).Skip(1).SelectMany(AllMembers).ToArray();
@@ -284,6 +317,7 @@ public sealed class DslBinder
         var key = NormalizeKey(name);
         if (globals.TryGetValue(key, out var global)) return global;
         if (cycleElementGlobals.TryGetValue(name, out var element)) return element;
+        if (namedCutsceneGlobals.TryGetValue(key, out var namedCutscene)) return namedCutscene;
         if (functions.TryGetValue(key, out var function) && function.Parameters.Count == 0) return TypeOf(function.ReturnType ?? "void");
         var candidates = ResolveCSharpMembers(name);
         if (candidates.Count == 1) return MemberType(candidates[0]);
@@ -357,6 +391,16 @@ public sealed class DslBinder
         FunctionDeclaration f => FindNested(f.Body),
         _ => Enumerable.Empty<CycleElementDeclaration>()
     };
+    private static IEnumerable<NamedCutsceneStatement> FindNamedCutscenes(DslDeclaration declaration) => declaration switch
+    {
+        HandlerDeclaration h => FindNamedCutscenes(h.Body), FunctionDeclaration f => FindNamedCutscenes(f.Body), CycleElementDeclaration c => FindNamedCutscenes(c.Body), _ => Enumerable.Empty<NamedCutsceneStatement>()
+    };
+    private static IEnumerable<NamedCutsceneStatement> FindNamedCutscenes(IEnumerable<DslStatement> statements) => statements.SelectMany(s => s switch
+    {
+        NamedCutsceneStatement n => new[] { n }.Concat(FindNamedCutscenes(n.Body)),
+        IfStatement i => i.Branches.SelectMany(x => FindNamedCutscenes(x.Body)).Concat(i.ElseBody == null ? Enumerable.Empty<NamedCutsceneStatement>() : FindNamedCutscenes(i.ElseBody)),
+        AddCycleElementStatement a => FindNamedCutscenes(a.Body), _ => Enumerable.Empty<NamedCutsceneStatement>()
+    });
     private IReadOnlyList<ISymbol> ResolveCSharpCandidates(string name)
     {
         var exact = ResolveCSharpMembers(name);

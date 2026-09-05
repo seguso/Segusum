@@ -38,6 +38,16 @@ end
         Assert.All(extracted, x => Assert.Equal("fixture.seg", x.RelativePath));
     }
 
+    [Fact]
+    public void ExtractsNarrativeTextFromNamedCutsceneNarImgAndIgnoresPathAndId()
+    {
+        const string dsl = "world game\nuse camilla here:\n    named-cutscene ncsTest curRoom thing:\n        nar-img \"img/test.png\" size medium show-in-text: Immagine narrativa\n        nar: Dopo\n    end\nend\n";
+        var extracted = Extract(dsl);
+        Assert.Equal(new[] { "Immagine narrativa", "Dopo" }, extracted.Select(x => x.Value));
+        Assert.DoesNotContain(extracted, x => x.Value.Contains("img/test.png", StringComparison.Ordinal));
+        Assert.DoesNotContain(extracted, x => x.Value.Contains("ncsTest", StringComparison.Ordinal));
+    }
+
     private static IReadOnlyList<SourceString> Extract(string dsl)
     {
         var root = Path.Combine(Path.GetTempPath(), "segusum-dsl-raw-" + Guid.NewGuid().ToString("N"));

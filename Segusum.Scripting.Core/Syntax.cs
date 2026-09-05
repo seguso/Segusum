@@ -52,6 +52,12 @@ public sealed record AddCycleElementStatement(string Cycle,string Id,bool Import
 public sealed record MakesNoSenseStatement(SourceSpan Span) : DslStatement(Span);
 public sealed record FinishGameStatement(SourceSpan Span) : DslStatement(Span);
 public sealed record DoNotAdvanceTimeStatement(SourceSpan Span) : DslStatement(Span);
+public sealed record NamedCutsceneStatement(string Id,IReadOnlyList<DslExpression> Arguments,IReadOnlyList<DslStatement> Body,SourceSpan Span) : DslStatement(Span)
+{
+    public SourceSpan IdSpan { get; init; } = Span;
+}
+public sealed record TextInputStatement(DslExpression TextInput,SourceSpan Span) : DslStatement(Span);
+public sealed record NarImgStatement(DslExpression ImagePath,string? Size,bool ShowInText,DslExpression Text,SourceSpan Span) : DslStatement(Span);
 public abstract record DslExpression(SourceSpan Span) : DslNode(Span);
 public sealed record IdentifierExpression(string Name,SourceSpan Span) : DslExpression(Span);
 public sealed record LiteralExpression(string Value,string Kind,SourceSpan Span) : DslExpression(Span);

@@ -5,6 +5,17 @@ namespace Segusum.Translator.Core.Tests;
 public sealed class DslParserStructureTests
 {
     [Fact]
+    public void NamedCutsceneDeclarationAndBodyAreStructured()
+    {
+        var result = DslParser.Parse(new DslSource("named.seg", "world game\nuse camilla here:\n named-cutscene ncsTest curRoom thing:\n  nar-img \"img/test.png\" show-in-text: testo\n end\nend"));
+        Assert.Empty(result.Diagnostics);
+        var handler = Assert.IsType<HandlerDeclaration>(result.Document.Declarations[0]);
+        var cutscene = Assert.IsType<NamedCutsceneStatement>(handler.Body.Single());
+        Assert.Equal("ncsTest", cutscene.Id);
+        Assert.Equal(2, cutscene.Arguments.Count);
+        Assert.IsType<NarImgStatement>(cutscene.Body.Single());
+    }
+    [Fact]
     public void MultilineExpressionsContinueOnlyThroughOperatorsOrParentheses()
     {
         const string text = "world game\ndef first a: bool ret bool:\n ret a\n     and a\n     and a\nend\ndef second a: bool ret bool:\n ret a and\n     a\nend\ndef third a: bool ret bool:\n ret (a\n     and a)\nend";
