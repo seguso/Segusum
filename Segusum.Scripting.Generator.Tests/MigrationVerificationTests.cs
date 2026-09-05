@@ -211,6 +211,20 @@ public sealed class MigrationVerificationTests
             MigrationVerifier.ExtractDslNamedCutscenes(new DslSource("Gameplay/ActionHandlers.seg", dslText))).Status);
     }
 
+    [Fact]
+    public void BeforeRoomChangeFingerprintComparesCSharpPrefixWithDsl()
+    {
+        const string csharp = "class W { void beforeRoomChangeManual(Room from, Room to, WalkPath segment, WalkPath path, BeforeRoomChangeInput e) { if (to == roomCamilla) { dial(camilla, \"Vieni, Olivia!\"); } if (from == roomLibrary && to == roomMuseumOut) { setIfNeverHappened(ref ftDente); } } }";
+        const string dsl = "world game\nbefore-room-change:\n    if to == roomCamilla:\n        camilla: Vieni, Olivia!\n    end\n    if from == roomLibrary and to == roomMuseumOut:\n        mark-happened-once ftDente\n    end\nend\n";
+        var left = Assert.Single(MigrationVerifier.ExtractCSharpBeforeRoomChange("worldBeforeRoomChange.cs", csharp));
+        var right = Assert.Single(MigrationVerifier.ExtractDslBeforeRoomChange(new DslSource("BeforeRoomChange.seg", dsl)));
+        Assert.Equal(EquivalenceStatus.Pass, MigrationVerifier.CompareBeforeRoomChange(left, right).Status);
+
+        var changed = new DslSource("BeforeRoomChange.seg", dsl.Replace("ftDente", "ftOther", StringComparison.Ordinal));
+        Assert.Equal(EquivalenceStatus.Fail, MigrationVerifier.CompareBeforeRoomChange(left,
+            Assert.Single(MigrationVerifier.ExtractDslBeforeRoomChange(changed))).Status);
+    }
+
     [Theory]
     [InlineData("ncsSBAGLIATO \"Trovate Sir Manso De Zuniga\" curRoom ilSantoGraal cliffDeserto dracula")]
     [InlineData("ncsTrovateMansoDeZuniga \"Titolo sbagliato\" curRoom ilSantoGraal cliffDeserto dracula")]

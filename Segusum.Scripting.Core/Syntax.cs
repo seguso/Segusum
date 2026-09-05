@@ -18,6 +18,7 @@ public sealed record HandlerDeclaration(string Kind,string First,string? Second,
     public SourceSpan? SecondSpan { get; init; }
     public SourceSpan? TargetSpan { get; init; }
 }
+public sealed record BeforeRoomChangeDeclaration(IReadOnlyList<DslStatement> Body,SourceSpan Span) : DslDeclaration(Span);
 public sealed record CycleDeclaration(string Variable,SourceSpan Span) : DslDeclaration(Span);
 public sealed record NextCycleDeclaration(DslExpression Cycle,SourceSpan Span) : DslDeclaration(Span);
 public sealed record CycleElementDeclaration(string Cycle,string Id,bool Important,string? Repeat,DslExpression? Condition,IReadOnlyList<DslStatement> Body,SourceSpan Span) : DslDeclaration(Span)
@@ -55,6 +56,7 @@ public sealed record MarkHappenedOnceStatement(DslExpression Target,SourceSpan S
 public sealed record MarkHappenedStatement(DslExpression Target,SourceSpan Span) : DslStatement(Span);
 public sealed record FinishGameStatement(SourceSpan Span) : DslStatement(Span);
 public sealed record DoNotAdvanceTimeStatement(SourceSpan Span) : DslStatement(Span);
+public sealed record PreventRoomChangeStatement(SourceSpan Span) : DslStatement(Span);
 public sealed record NamedCutsceneStatement(string Id,DslExpression Title,IReadOnlyList<DslExpression> Arguments,IReadOnlyList<DslStatement> Body,SourceSpan Span) : DslStatement(Span)
 {
     public SourceSpan IdSpan { get; init; } = Span;

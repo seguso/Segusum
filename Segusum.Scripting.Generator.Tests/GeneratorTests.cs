@@ -321,6 +321,28 @@ public sealed class GeneratorTests
     }
 
     [Fact]
+    public void BeforeRoomChangeBindsContextAndEmitsPrivateBridge()
+    {
+        var result = Run("before-room-change:\n if from == roomA and to == roomB:\n  prevent-room-change\n end\nend", "public Room roomA = null!; public Room roomB = null!;");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL"));
+        var generated = Generated(result);
+        Assert.Contains("private void beforeRoomChangeSegusum(Room from, Room to, BeforeRoomChangeInput e)", generated);
+        Assert.Contains("if (from == roomA && to == roomB)", generated);
+        Assert.Contains("e.canChangeRoom = false;", generated);
+        Assert.DoesNotContain("foreach", generated, StringComparison.Ordinal);
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
+    public void BeforeRoomChangeIsUniqueAndPreventIsContextual()
+    {
+        var duplicate = Run("before-room-change:\nend\nbefore-room-change:\nend");
+        Assert.Contains(duplicate.Diagnostics, d => d.GetMessage().Contains("Duplicate before-room-change", StringComparison.Ordinal));
+        var outside = Run("def f:\n prevent-room-change\nend");
+        Assert.Contains(outside.Diagnostics, d => d.GetMessage().Contains("only valid inside before-room-change", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void RoomChangedAlreadyRegisteredByCSharpIsDiagnostic()
     {
         var world = "[SegusumWorld(\"game\")] public abstract partial class World : WorldBase { protected World() : base(\"en\") { } public Room roomA = null!; protected override void configureActionHandlers() { addRoomChangedHandler(roomA, e => { }); } }";

@@ -22,4 +22,18 @@ public sealed class DslExtractionTests
         var ids = result.Document.Declarations.OfType<CycleElementDeclaration>().Select(x => x.Id).ToArray();
         Assert.Equal(new[] { "same", "same" }, ids);
     }
+
+    [Fact]
+    public void BeforeRoomChangeNarrativeIsExtractedLikeOtherDslBodies()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "segusum-before-room-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            File.WriteAllText(Path.Combine(root, "BeforeRoomChange.seg"), "world game\nbefore-room-change:\n    camilla: Una frase nel cambio stanza.\nend\n");
+            var values = new DslSourceStringExtractor().Extract(root).Select(x => x.Value).ToArray();
+            Assert.Equal(new[] { "Una frase nel cambio stanza." }, values);
+        }
+        finally { Directory.Delete(root, true); }
+    }
 }

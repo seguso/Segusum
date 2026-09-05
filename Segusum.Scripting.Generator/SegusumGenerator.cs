@@ -68,6 +68,7 @@ public sealed class SegusumGenerator : IIncrementalGenerator
         foreach (var id in declarations.SelectMany(AllNamedCutscenes).GroupBy(x => Name(x.Id), StringComparer.Ordinal).Select(x => x.First()))
         { EmitLine(sb, id.Span); sb.Append(" public NamedCutSceneId ").Append(Name(id.Id)).Append(" = new NamedCutSceneId { serId = \"").Append(EscapeString(id.Id)).Append("\", titleUntranslated = ").Append(Emit(id.Title, binder.Model)).AppendLine(".translatable() };"); EmitDefaultLine(sb); }
         foreach (var function in declarations.OfType<FunctionDeclaration>()) EmitFunction(sb, function, binder.Model);
+        foreach (var before in declarations.OfType<BeforeRoomChangeDeclaration>().Take(1)) EmitBeforeRoomChange(sb, before, binder.Model);
         sb.AppendLine("#line hidden\n protected override void configureGeneratedActionHandlers()\n {");
         foreach (var handler in declarations.OfType<HandlerDeclaration>()) EmitHandler(sb, handler, sp, binder.Model);
         foreach (var element in declarations.OfType<CycleElementDeclaration>()) EmitCycleElement(sb, element, sp, "  ", binder.Model);
@@ -88,6 +89,14 @@ public sealed class SegusumGenerator : IIncrementalGenerator
         foreach (var statement in function.Body) EmitStatement(sb, statement, "  ", null, model);
         sb.AppendLine(" #line hidden\n }");
         EmitDefaultLine(sb);
+    }
+    private static void EmitBeforeRoomChange(StringBuilder sb, BeforeRoomChangeDeclaration declaration, BoundModel model)
+    {
+        EmitLine(sb, declaration.Span);
+        sb.AppendLine(" private void beforeRoomChangeSegusum(Room from, Room to, BeforeRoomChangeInput e)");
+        sb.AppendLine(" {"); EmitDefaultLine(sb);
+        foreach (var statement in declaration.Body) EmitStatement(sb, statement, "  ", "e", model);
+        sb.AppendLine(" #line hidden\n }"); EmitDefaultLine(sb);
     }
     private static void EmitHandler(StringBuilder sb, HandlerDeclaration handler, SourceProductionContext sp, BoundModel model)
     {
@@ -157,6 +166,7 @@ public sealed class SegusumGenerator : IIncrementalGenerator
             case MakesNoSenseStatement when input != null: sb.Append(indent).Append(input).AppendLine(".makesNoSenseAtThisTime = true;"); break;
             case FinishGameStatement when input != null: sb.Append(indent).Append(input).AppendLine(".gameFinished = true;"); break;
             case DoNotAdvanceTimeStatement when input != null: sb.Append(indent).Append(input).AppendLine(".timeMustAdvance = false;"); break;
+            case PreventRoomChangeStatement when input != null: sb.Append(indent).Append(input).AppendLine(".canChangeRoom = false;"); break;
             default: sb.Append(indent).AppendLine("/* SEGDSL: unsupported statement */"); break;
         }
         EmitDefaultLine(sb);

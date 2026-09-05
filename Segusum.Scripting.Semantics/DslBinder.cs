@@ -60,6 +60,7 @@ public sealed class DslBinder
     private readonly INamedTypeSymbol? objective;
     private readonly INamedTypeSymbol? room;
     private readonly INamedTypeSymbol? explanation;
+    private readonly ITypeSymbol? beforeRoomChangeInput;
     private ISymbol? lastSymbol;
     private BoundSymbolKind lastKind;
     private string lastCSharpName = "";
@@ -74,7 +75,7 @@ public sealed class DslBinder
     {
         this.compilation = compilation; this.world = world; this.report = report;
         cycle = compilation.GetTypeByMetadataName("Seg.Cycle"); cycleElementId = compilation.GetTypeByMetadataName("Seg.CycleElemId"); namedCutsceneId = compilation.GetTypeByMetadataName("Seg.NamedCutSceneId");
-        logicObj = compilation.GetTypeByMetadataName("Seg.LogicObj"); objective = compilation.GetTypeByMetadataName("Seg.Objective"); room = compilation.GetTypeByMetadataName("Seg.Room"); explanation = compilation.GetTypeByMetadataName("Seg.Explanation");
+        logicObj = compilation.GetTypeByMetadataName("Seg.LogicObj"); objective = compilation.GetTypeByMetadataName("Seg.Objective"); room = compilation.GetTypeByMetadataName("Seg.Room"); explanation = compilation.GetTypeByMetadataName("Seg.Explanation"); beforeRoomChangeInput = compilation.GetTypeByMetadataName("Seg.BeforeRoomChangeInput");
         dateTime = compilation.GetSpecialType(SpecialType.System_DateTime); dateTimeNullable = compilation.GetSpecialType(SpecialType.System_Nullable_T).Construct(dateTime); textHandlerInput = compilation.GetTypeByMetadataName("Seg.TextHandlerInput");
     }
     public void Bind(IReadOnlyList<DslDeclaration> declarations)
@@ -104,12 +105,31 @@ public sealed class DslBinder
                 case HandlerDeclaration h: BindHandler(h); break;
                 case CycleElementDeclaration c: BindCycle(c.Cycle, c.Repeat, c.Condition, c.Body, c.Span, new()); break;
                 case NextCycleDeclaration n: Require(BindExpression(n.Cycle, new()), cycle, n.Cycle.Span, "next requires a Cycle."); break;
+                case BeforeRoomChangeDeclaration b: BindBeforeRoomChange(b); break;
             }
         }
         CheckDuplicateCombines(declarations);
         CheckDuplicateRoomChanged(declarations);
         CheckDuplicateUnaryHandlers(declarations);
         CheckCSharpRoomChangedDuplicates(declarations);
+        CheckDuplicateBeforeRoomChange(declarations);
+    }
+    private void BindBeforeRoomChange(BeforeRoomChangeDeclaration declaration)
+    {
+        var previous = new Dictionary<string, DslSymbolIdentity>(activeDslSymbols, StringComparer.Ordinal);
+        activeDslSymbols.Clear();
+        var scope = new Dictionary<string, ITypeSymbol>(StringComparer.Ordinal)
+        {
+            [NormalizeKey("from")] = room!,
+            [NormalizeKey("to")] = room!
+        };
+        AddLocalIdentity("from", "contextual", declaration.Span);
+        AddLocalIdentity("to", "contextual", declaration.Span);
+        var oldInput = inputType; var oldAllowed = inputContextAllowed;
+        inputType = beforeRoomChangeInput; inputContextAllowed = false;
+        BindStatements(declaration.Body, scope, null);
+        inputType = oldInput; inputContextAllowed = oldAllowed;
+        activeDslSymbols.Clear(); foreach (var item in previous) activeDslSymbols[item.Key] = item.Value;
     }
     private void AddGlobal(string name, ITypeSymbol? type, SourceSpan span, BoundSymbolKind kind)
     { if (kind == BoundSymbolKind.CycleElementId) { if (!Microsoft.CodeAnalysis.CSharp.SyntaxFacts.IsValidIdentifier(name) || name.Contains('-')) { Report("SEGDSL318", "CycleElementId must be a stable C# identifier and cannot contain '-'.", span); return; } if (cycleElementGlobals.ContainsKey(name)) { Report("SEGDSL314", $"Duplicate CycleElementId '{name}'.", span); return; } if (ResolveCSharpCandidates(name).Count != 0) Report("SEGDSL317", $"CycleElementId '{name}' collides with an existing World member.", span); if (type != null) cycleElementGlobals[name] = type; AddDslIdentity(name, "cycle-element", span); model.References[name] = name; return; } var key = NormalizeKey(name); if (globals.ContainsKey(key)) Report(kind == BoundSymbolKind.NamedCutsceneId ? "SEGDSL324" : "SEGDSL304", $"Duplicate or normalized-colliding global '{name}'.", span); else if (type != null) { globals[key] = type; globalKinds[key] = kind; model.References[name] = Name(name); } }
@@ -189,6 +209,9 @@ public sealed class DslBinder
                 case TextInputStatement t:
                     if (inputType == null) Report("SEGDSL323", "text-input is only valid inside an action handler.", t.Span);
                     else { var expected = MembersOf(inputType, "textInputToShow").OfType<IFieldSymbol>().FirstOrDefault()?.Type ?? MembersOf(inputType, "textInputToShow").OfType<IPropertySymbol>().FirstOrDefault()?.Type; RequireExpression(t.TextInput, BindExpression(t.TextInput, scope), expected, "text-input type mismatch."); }
+                    break;
+                case PreventRoomChangeStatement p:
+                    if (beforeRoomChangeInput == null || inputType != beforeRoomChangeInput) Report("SEGDSL333", "prevent-room-change is only valid inside before-room-change.", p.Span);
                     break;
                 case NamedCutsceneStatement n: BindNamedCutscene(n, scope); break;
                 case MarkHappenedOnceStatement mark:
@@ -439,6 +462,8 @@ public sealed class DslBinder
         return max;
     }
     private void CheckDuplicateCombines(IEnumerable<DslDeclaration> declarations) { var combines = declarations.OfType<HandlerDeclaration>().Where(x => x.Kind == "combine").GroupBy(x => NormalizeKey(x.First) + "\0" + NormalizeKey(x.Second!)); foreach (var group in combines.Where(x => x.Count() > 1)) foreach (var item in group.Skip(1)) Report("SEGDSL315", "Duplicate combine handler.", item.Span); }
+    private void CheckDuplicateBeforeRoomChange(IEnumerable<DslDeclaration> declarations)
+    { foreach (var item in declarations.OfType<BeforeRoomChangeDeclaration>().Skip(1)) Report("SEGDSL334", "Duplicate before-room-change declaration for the same world.", item.Span); }
     private void CheckDuplicateRoomChanged(IEnumerable<DslDeclaration> declarations) { foreach (var group in declarations.OfType<HandlerDeclaration>().Where(x => x.Kind == "room-changed").GroupBy(x => NormalizeKey(x.First))) foreach (var item in group.Skip(1)) Report("SEGDSL319", "Duplicate room-changed handler for the same Room.", item.Span); }
     private void CheckDuplicateUnaryHandlers(IEnumerable<DslDeclaration> declarations)
     {

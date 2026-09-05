@@ -34,6 +34,7 @@ public sealed record NamedCutsceneFingerprint(
 public sealed record MarkHappenedOnceFingerprint(string Target, string SourcePath, int SourceLine);
 public sealed record MarkHappenedFingerprint(string Target, string SourcePath, int SourceLine);
 public sealed record DialogueFingerprint(string Speaker, string Text, string? Insta, string SourcePath, int SourceLine);
+public sealed record BeforeRoomChangeFingerprint(IReadOnlyList<string> OrderedOperations, IReadOnlyList<string> Strings, string SourcePath, int SourceLine);
 
 public sealed record HandlerEquivalenceResult(
     HandlerRegistrationFingerprint? CSharpRegistration,
@@ -207,6 +208,43 @@ public static class MigrationVerifier
         return new("dialogues", EquivalenceStatus.Pass);
     }
 
+    public static IReadOnlyList<BeforeRoomChangeFingerprint> ExtractDslBeforeRoomChange(DslSource source)
+    {
+        var result = new List<BeforeRoomChangeFingerprint>();
+        foreach (var hook in DslParser.Parse(source).Document.Declarations.OfType<BeforeRoomChangeDeclaration>())
+        {
+            var operations = new List<string>(); var strings = new List<string>();
+            CollectBeforeRoomChange(hook.Body, operations, strings);
+            result.Add(new BeforeRoomChangeFingerprint(operations, strings, source.Path, hook.Span.Line));
+        }
+        return result;
+    }
+
+    public static IReadOnlyList<BeforeRoomChangeFingerprint> ExtractCSharpBeforeRoomChange(string path, string text)
+    {
+        var tree = CSharpSyntaxTree.ParseText(text, path: path);
+        var result = new List<BeforeRoomChangeFingerprint>();
+        foreach (var method in tree.GetRoot().DescendantNodes().OfType<MethodDeclarationSyntax>()
+            .Where(x => x.Identifier.ValueText is "beforeRoomChangeManual" or "beforeRoomChangeSegusum"))
+        {
+            var operations = new List<string>(); var strings = new List<string>();
+            if (method.Body != null) CollectCSharpBeforeRoomChange(method.Body.Statements, operations, strings);
+            result.Add(new BeforeRoomChangeFingerprint(operations, strings, path,
+                method.GetLocation().GetLineSpan().StartLinePosition.Line + 1));
+        }
+        return result;
+    }
+
+    public static VerificationCheck CompareBeforeRoomChange(BeforeRoomChangeFingerprint csharp, BeforeRoomChangeFingerprint dsl)
+    {
+        var operations = csharp.OrderedOperations.SequenceEqual(dsl.OrderedOperations, StringComparer.Ordinal);
+        var strings = csharp.Strings.SequenceEqual(dsl.Strings, StringComparer.Ordinal);
+        return operations && strings
+            ? new("before-room-change", EquivalenceStatus.Pass)
+            : new("before-room-change", EquivalenceStatus.Fail,
+                $"operations C#=[{string.Join(";", csharp.OrderedOperations)}] DSL=[{string.Join(";", dsl.OrderedOperations)}]; strings C#=[{string.Join(";", csharp.Strings)}] DSL=[{string.Join(";", dsl.Strings)}]");
+    }
+
     public static IReadOnlyList<MarkHappenedOnceFingerprint> ExtractCSharpMarkHappenedOnce(string path, string text)
     {
         var tree = CSharpSyntaxTree.ParseText(text, path: path);
@@ -342,6 +380,7 @@ public static class MigrationVerifier
             if (declaration is HandlerDeclaration handler && handler.Phrase != null) AddString(handler.Phrase, result);
             if (declaration is HandlerDeclaration h) Walk(h.Body, result);
             if (declaration is FunctionDeclaration f) Walk(f.Body, result);
+            if (declaration is BeforeRoomChangeDeclaration b) Walk(b.Body, result);
         }
         return result;
     }
@@ -425,6 +464,67 @@ public static class MigrationVerifier
                 case NamedCutsceneStatement named: CollectDslDialogues(named.Body, path, result); break;
             }
     }
+
+    private static void CollectBeforeRoomChange(IEnumerable<DslStatement> statements, List<string> operations, List<string> strings)
+    {
+        foreach (var statement in statements)
+        {
+            switch (statement)
+            {
+                case DialogueStatement dialogue: operations.Add("dial:" + dialogue.Character + ":" + ExpressionText(dialogue.Text)); strings.Add(StringValue(dialogue.Text) ?? ""); break;
+                case NarStatement nar: operations.Add("nar:" + ExpressionText(nar.Text)); strings.Add(StringValue(nar.Text) ?? ""); break;
+                case NarRoomStatement narRoom: operations.Add("nar-room:" + ExpressionText(narRoom.Text)); strings.Add(StringValue(narRoom.Text) ?? ""); break;
+                case PreventRoomChangeStatement: operations.Add("prevent-room-change"); break;
+                case MarkHappenedOnceStatement mark: operations.Add("mark-happened-once:" + ExpressionText(mark.Target)); break;
+                case MarkHappenedStatement mark: operations.Add("mark-happened:" + ExpressionText(mark.Target)); break;
+                case AssignmentStatement assignment: operations.Add("assign:" + (assignment.Receiver == null ? assignment.Name : ExpressionText(assignment.Receiver) + "." + assignment.MemberName) + assignment.Operator + ExpressionText(assignment.Value)); break;
+                case CallStatement call: operations.Add("call:" + ExpressionText(call.Expression)); break;
+                case IfStatement conditional:
+                    operations.Add("if:" + string.Join("|", conditional.Branches.Select(x => CanonicalCondition(ExpressionText(x.Condition) ?? ""))));
+                    foreach (var branch in conditional.Branches) CollectBeforeRoomChange(branch.Body, operations, strings);
+                    if (conditional.ElseBody != null) CollectBeforeRoomChange(conditional.ElseBody, operations, strings);
+                    break;
+            }
+        }
+    }
+
+    private static void CollectCSharpBeforeRoomChange(IEnumerable<StatementSyntax> statements, List<string> operations, List<string> strings)
+    {
+        foreach (var statement in statements)
+        {
+            switch (statement)
+            {
+                case ExpressionStatementSyntax expression when expression.Expression is InvocationExpressionSyntax invocation:
+                    var name = InvocationName(invocation);
+                    if (name == "dial" && invocation.ArgumentList.Arguments.Count >= 2)
+                    {
+                        var text = LiteralText(invocation.ArgumentList.Arguments[1].Expression.ToString()) ?? invocation.ArgumentList.Arguments[1].Expression.ToString();
+                        operations.Add("dial:" + invocation.ArgumentList.Arguments[0].Expression + ":" + text);
+                        strings.Add(text);
+                    }
+                    else if (name == "setIfNeverHappened" && invocation.ArgumentList.Arguments.Count == 1)
+                        operations.Add("mark-happened-once:" + invocation.ArgumentList.Arguments[0].Expression);
+                    else
+                        operations.Add("call:" + name + "(" + string.Join(",", invocation.ArgumentList.Arguments.Select(x => x.Expression.ToString())) + ")");
+                    break;
+                case ExpressionStatementSyntax expression when expression.Expression is AssignmentExpressionSyntax assignment:
+                    operations.Add("assign:" + assignment.Left + assignment.OperatorToken.Text + assignment.Right);
+                    break;
+                case IfStatementSyntax conditional:
+                    operations.Add("if:" + CanonicalCondition(conditional.Condition.ToString()));
+                    CollectCSharpBeforeRoomChange(conditional.Statement is BlockSyntax block ? block.Statements : new[] { conditional.Statement }, operations, strings);
+                    if (conditional.Else?.Statement is { } elseStatement)
+                        CollectCSharpBeforeRoomChange(elseStatement is BlockSyntax elseBlock ? elseBlock.Statements : new[] { elseStatement }, operations, strings);
+                    break;
+            }
+        }
+    }
+
+    private static string CanonicalCondition(string condition)
+        => condition.Replace("&&", " and ", StringComparison.Ordinal)
+            .Replace("||", " or ", StringComparison.Ordinal)
+            .Replace("!", "not ", StringComparison.Ordinal)
+            .Replace("  ", " ", StringComparison.Ordinal).Trim();
 
     private static void CollectDslNamedCutscenes(IEnumerable<DslStatement> statements, string path, List<NamedCutsceneFingerprint> result)
     {

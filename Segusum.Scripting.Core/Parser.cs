@@ -48,6 +48,7 @@ public static class DslParser
                     case "cancel-text-input": result.Add(ParseHandler("cancel-text-input", span)); break;
                     case "submit-text-input": result.Add(ParseHandler("submit-text-input", span)); break;
                     case "room-changed": result.Add(ParseHandler("room-changed", span)); break;
+                    case "before-room-change": result.Add(new BeforeRoomChangeDeclaration(ParseBody(true), span)); break;
                     case "add": result.Add(ParseCycleElement(span)); break;
                     case "var": { var name = Word(); Need("="); Need("new-cycle"); result.Add(new CycleDeclaration(name, span)); break; }
                     case "next": result.Add(new NextCycleDeclaration(Expression(), span)); break;
@@ -113,7 +114,7 @@ public static class DslParser
                 case "nar-room": if (Is(":")) Take(); return new NarRoomStatement(RawTextAfterKeyword(), span); case "call": Error("The 'call' keyword is no longer part of the DSL syntax."); return new CallStatement(new IdentifierExpression("_error", span), span);
                 case "var": { var name = Word(); Need("="); return new VariableDeclaration(name, Expression(), span); }
                 case "next": return new NextCycleStatement(Expression(), span); case "add": return ParseAdd(span);
-                case "makes-no-sense": return new MakesNoSenseStatement(span); case "mark-happened-once": return new MarkHappenedOnceStatement(Expression(), span); case "mark-happened": return new MarkHappenedStatement(Expression(), span); case "finish-game": return new FinishGameStatement(span); case "do-not-advance-time": return new DoNotAdvanceTimeStatement(span);
+                case "makes-no-sense": return new MakesNoSenseStatement(span); case "prevent-room-change": return new PreventRoomChangeStatement(span); case "mark-happened-once": return new MarkHappenedOnceStatement(Expression(), span); case "mark-happened": return new MarkHappenedStatement(Expression(), span); case "finish-game": return new FinishGameStatement(span); case "do-not-advance-time": return new DoNotAdvanceTimeStatement(span);
                 case "named-cutscene": return ParseNamedCutscene(span);
                 case "text-input": return new TextInputStatement(Expression(), span);
                 case "nar-img": return ParseNarImg(span);
