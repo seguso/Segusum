@@ -42,13 +42,22 @@ public sealed record HandlerEquivalenceResult(
 /// </summary>
 public static class MigrationVerifier
 {
-    public static IReadOnlyList<HandlerRegistrationFingerprint> ExtractCSharpRegistrations(
-        string path, string text, SemanticModel? semanticModel = null)
+    public static IReadOnlyList<HandlerRegistrationFingerprint> ExtractCSharpRegistrations(string path, string text)
     {
         var tree = CSharpSyntaxTree.ParseText(text, path: path);
+        return ExtractCSharpRegistrationsCore(tree, null);
+    }
+
+    public static IReadOnlyList<HandlerRegistrationFingerprint> ExtractCSharpRegistrations(
+        SyntaxTree tree, SemanticModel semanticModel)
+        => ExtractCSharpRegistrationsCore(tree, semanticModel);
+
+    private static IReadOnlyList<HandlerRegistrationFingerprint> ExtractCSharpRegistrationsCore(
+        SyntaxTree tree, SemanticModel? semanticModel)
+    {
         return tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>()
             .Where(x => RegistrationKind(x) != null)
-            .Select(x => Registration(path, x, semanticModel?.GetOperation(x)))
+            .Select(x => Registration(tree.FilePath, x, semanticModel?.GetOperation(x)))
             .ToArray();
     }
 
@@ -99,7 +108,8 @@ public static class MigrationVerifier
     {
         var tree = CSharpSyntaxTree.ParseText(text, path: path);
         var strings = new List<string>();
-        foreach (var invocation in tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>())
+        foreach (var invocation in tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>()
+            .Where(x => !x.Ancestors().OfType<InvocationExpressionSyntax>().Any()))
             ExtractStrings(invocation, strings);
         return strings;
     }
@@ -113,7 +123,11 @@ public static class MigrationVerifier
                 && OperandText(x.ArgumentList.Arguments, 0) == first
                 && (kind == "room-changed" || OperandText(x.ArgumentList.Arguments, 1) == secondOrTarget));
         var strings = new List<string>();
-        if (registration != null) ExtractStrings(registration, strings);
+        if (registration != null)
+        {
+            ExtractStrings(registration, strings);
+            AddReferencedMethodStrings(tree.GetRoot(), registration, strings, new HashSet<string>(StringComparer.Ordinal));
+        }
         return strings;
     }
 
@@ -246,6 +260,27 @@ public static class MigrationVerifier
             strings.Add(literal.Token.ValueText);
     }
 
+    private static void AddReferencedMethodStrings(SyntaxNode root, SyntaxNode owner, List<string> strings, HashSet<string> visited)
+    {
+        var invocations = owner.DescendantNodes().OfType<InvocationExpressionSyntax>()
+            .Where(x => !x.Ancestors().OfType<InvocationExpressionSyntax>().Any(a => a != owner));
+        foreach (var invocation in invocations)
+        {
+            var name = InvocationName(invocation);
+            var method = root.DescendantNodes().OfType<MethodDeclarationSyntax>()
+                .FirstOrDefault(x => x.Identifier.ValueText == name);
+            if (method == null || !visited.Add(name)) continue;
+
+            var bodyInvocations = method.Body == null
+                ? Enumerable.Empty<InvocationExpressionSyntax>()
+                : method.Body.DescendantNodes().OfType<InvocationExpressionSyntax>()
+                    .Where(x => !x.Ancestors().OfType<InvocationExpressionSyntax>().Any());
+            foreach (var nested in bodyInvocations)
+                ExtractStrings(nested, strings);
+            AddReferencedMethodStrings(root, method.Body ?? (SyntaxNode)method, strings, visited);
+        }
+    }
+
     private static VerificationCheck Equal(string name, string? left, string? right)
         => left == null && right == null
             ? new(name, EquivalenceStatus.Pass)
@@ -285,11 +320,28 @@ public static class MigrationVerifier
                 break;
             case IFieldReferenceOperation field: result.Add("field:" + field.Field.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)); break;
             case IPropertyReferenceOperation property: result.Add("property:" + property.Property.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)); break;
+            case IParameterReferenceOperation parameter: result.Add("parameter:" + parameter.Parameter.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)); break;
+            case ILocalReferenceOperation local: result.Add("local:" + local.Local.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)); break;
             case ILiteralOperation literal: result.Add(literal.ConstantValue.HasValue ? "literal:" + literal.ConstantValue.Value?.ToString() : "literal:null"); break;
-            case ISimpleAssignmentOperation: result.Add("assign"); break;
+            case IUnaryOperation unary: result.Add("unary:" + unary.OperatorKind); break;
+            case IBinaryOperation binary: result.Add("binary:" + binary.OperatorKind); break;
+            case ICompoundAssignmentOperation compound: result.Add("compound-assign:" + compound.OperatorKind); break;
+            case IIncrementOrDecrementOperation increment: result.Add("increment:" + (increment.IsPostfix ? "postfix" : "prefix")); break;
+            case ISimpleAssignmentOperation assignment:
+                result.Add("assign-target:" + ReferencedSymbol(assignment.Target));
+                break;
             case IConditionalOperation: result.Add("conditional"); break;
             case IReturnOperation: result.Add("return"); break;
         }
         foreach (var child in operation.ChildOperations) Visit(child, result);
     }
+
+    private static string ReferencedSymbol(IOperation operation) => operation switch
+    {
+        IFieldReferenceOperation field => field.Field.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+        IPropertyReferenceOperation property => property.Property.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+        IParameterReferenceOperation parameter => parameter.Parameter.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+        ILocalReferenceOperation local => local.Local.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+        _ => operation.Type?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) ?? "<unknown>"
+    };
 }
