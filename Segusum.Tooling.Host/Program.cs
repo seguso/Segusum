@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.CodeAnalysis;
 using Segusum.Scripting.Core;
+using Segusum.Scripting.Semantics;
 using Segusum.Scripting.Tooling;
 
 var host = new ToolingHost();
@@ -90,14 +91,24 @@ internal sealed class ToolingHost
 
     private async Task InitializeAsync(string? requestedProject, CancellationToken cancellationToken)
     {
+        var initializeTimer = Stopwatch.StartNew();
         projectPath = requestedProject ?? DiscoverProject(Environment.CurrentDirectory);
         if (projectPath == null) throw new InvalidOperationException("No .csproj containing .seg files was found.");
+        var openStarted = initializeTimer.Elapsed;
         context?.Dispose();
         context = await MsBuildWorkspaceContext.OpenProjectAsync(projectPath, cancellationToken);
+        var openMs = (initializeTimer.Elapsed - openStarted).TotalMilliseconds;
+        var generatedTrees = context.Compilation.SyntaxTrees
+            .Where(x => SegusumGeneratedSource.IsGenerated(x))
+            .Select(x => x.FilePath ?? "<generated>")
+            .ToArray();
+        var mikeGenerated = context.Compilation.SyntaxTrees.Any(x => SegusumGeneratedSource.IsGenerated(x) && x.GetText().ToString().Contains("creaCicloMikeNonRipete", StringComparison.Ordinal));
         await RebuildAsync(cancellationToken);
         // Sources (including world directives) must be loaded before selecting the
         // default world; otherwise a multi-world project leaves this cache key null.
         world = FindWorld(context.Compilation, null);
+        Console.Error.WriteLine($"initialize project={projectPath} openProject={openMs:0}ms generatedSegusumTrees={generatedTrees.Length} mikeHelper={mikeGenerated} total={initializeTimer.Elapsed.TotalMilliseconds:0}ms");
+        foreach (var tree in generatedTrees) Console.Error.WriteLine($"generatedSegusumTree={tree}");
     }
 
     private async Task RebuildAsync(CancellationToken cancellationToken)
@@ -122,8 +133,10 @@ internal sealed class ToolingHost
         }
         if (semantic == null || !SymbolEqualityComparer.Default.Equals(target, semanticTarget))
         {
+            var semanticStarted = Stopwatch.StartNew();
             semantic = new DslSemanticWorkspace(context, target, sources);
             semanticTarget = target;
+            Console.Error.WriteLine($"semanticBuild project={projectPath} world={target.ToDisplayString()} elapsed={semanticStarted.Elapsed.TotalMilliseconds:0}ms sources={sources.Count}");
         }
         return semantic;
     }

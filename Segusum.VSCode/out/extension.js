@@ -39,7 +39,7 @@ const vscode = __importStar(require("vscode"));
 const child_process_1 = require("child_process");
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
-const BUILD_ID = 'extension build = references-definition-completion-2026-09-05';
+const BUILD_ID = 'extension build = rename-validation-startup-2026-09-05';
 let output;
 let status;
 function log(message) { output?.appendLine(`[${new Date().toISOString()}] ${message}`); }
@@ -61,6 +61,7 @@ class HostClient {
         return this.startTask;
     }
     async startCore() {
+        const started = Date.now();
         const configured = vscode.workspace.getConfiguration('segusum').get('toolingHostPath');
         const dll = configured || path.join(this.workspacePath, 'Segusum.Tooling.Host', 'bin', 'Debug', 'net8.0', 'Segusum.Tooling.Host.dll');
         log(`${BUILD_ID}`);
@@ -68,6 +69,7 @@ class HostClient {
         if (!fs.existsSync(dll))
             throw new Error(`Tooling host not found: ${dll}`);
         this.child = (0, child_process_1.spawn)('dotnet', [dll], { cwd: this.workspacePath, stdio: ['pipe', 'pipe', 'pipe'] });
+        log(`host process spawned project=${this.projectPath} elapsed=${Date.now() - started}ms`);
         let buffer = '';
         this.child.stdout.on('data', data => { buffer += data.toString(); let end; while ((end = buffer.indexOf('\n')) >= 0) {
             const line = buffer.slice(0, end);
@@ -89,7 +91,7 @@ class HostClient {
         this.child.stderr.on('data', data => log(`host stderr: ${data.toString().trim()}`));
         const initialized = await this.request('initialize', { projectPath: this.projectPath });
         this.worlds = initialized?.worlds ?? [];
-        log(`Host initialized project=${initialized?.projectPath ?? this.projectPath} worlds=${this.worlds.map((x) => x.id).join(',')}`);
+        log(`Host initialized project=${initialized?.projectPath ?? this.projectPath} worlds=${this.worlds.map((x) => x.id).join(',')} elapsed=${Date.now() - started}ms`);
     }
     request(method, params, token) { const id = this.next++; log(`RPC start #${id} ${method} project=${this.projectPath}`); return new Promise((resolve, reject) => { this.pending.set(id, { resolve: value => { log(`RPC end #${id} ${method}`); resolve(value); }, reject: error => { log(`RPC error #${id} ${method}: ${error}`); reject(error); } }); this.child?.stdin.write(JSON.stringify({ id, method, params }) + '\n'); if (token)
         token.onCancellationRequested(() => this.cancel(id)); }); }
@@ -106,9 +108,13 @@ const refs = new Map();
 class ReferenceNode extends vscode.TreeItem {
     value;
     constructor(value) {
-        super(value.path ? `${value.line}: ${value.preview ?? value.displayName}` : value.file, value.path ? vscode.TreeItemCollapsibleState.None : vscode.TreeItemCollapsibleState.Expanded);
+        const file = value.file ?? value.path;
+        const folder = file ? vscode.workspace.getWorkspaceFolder(vscode.Uri.file(file)) : undefined;
+        const relative = file && folder ? path.relative(folder.uri.fsPath, file) : file;
+        super(value.path ? `${value.line}: ${value.preview ?? value.displayName}` : path.basename(file ?? ''), value.path ? vscode.TreeItemCollapsibleState.None : vscode.TreeItemCollapsibleState.Expanded);
         this.value = value;
-        this.description = value.language;
+        this.description = value.path ? value.language : relative;
+        this.tooltip = relative;
         if (value.path)
             this.command = { command: 'segusum.openReference', title: 'Open reference', arguments: [value] };
     }
@@ -176,6 +182,7 @@ catch {
     await vscode.commands.executeCommand('workbench.view.extension.segusum.references');
 } }
 async function activate(context) {
+    const activationStarted = Date.now();
     output = vscode.window.createOutputChannel('Segusum');
     context.subscriptions.push(output);
     status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
@@ -187,6 +194,7 @@ async function activate(context) {
         return;
     }
     log(`${BUILD_ID}`);
+    log(`activation complete elapsed=${Date.now() - activationStarted}ms; host initialization is lazy.`);
     context.subscriptions.push(vscode.languages.registerDefinitionProvider({ language: 'segusum' }, { provideDefinition: async (document, pos) => { try {
             const client = await clientFor(document);
             const result = await client.request('definition', { path: document.uri.fsPath, line: pos.line + 1, column: pos.character + 1 });
@@ -199,6 +207,7 @@ async function activate(context) {
             return undefined;
         } } }));
     context.subscriptions.push(vscode.languages.registerCompletionItemProvider({ language: 'segusum' }, { provideCompletionItems: async (document, pos, token) => {
+            log(`completion provider invoked document=${document.uri.fsPath} line=${pos.line + 1} column=${pos.character + 1}`);
             const key = document.uri.toString();
             completionCts.get(key)?.cancel();
             completionCts.get(key)?.dispose();
@@ -211,7 +220,7 @@ async function activate(context) {
                 if (cts.token.isCancellationRequested)
                     return [];
                 const result = await client.request('completion', { path: document.uri.fsPath, line: pos.line + 1, column: pos.character + 1, text: document.getText() }, cts.token);
-                log(`completion document=${document.uri.fsPath} total=${Date.now() - started}ms`);
+                log(`completion document=${document.uri.fsPath} items=${(result ?? []).length} total=${Date.now() - started}ms`);
                 return (result ?? []).map((item) => new vscode.CompletionItem(item.label));
             }
             catch (e) {
@@ -285,8 +294,12 @@ async function activate(context) {
         projectByFolder.clear();
         log('Workspace folders changed; cleared project discovery cache.');
     }));
-    context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(editor => { if (editor)
-        void clientFor(editor.document).catch(e => log(`Active document selection failed: ${e}`)); }));
+    context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(editor => { if (editor) {
+        status.text = 'Segusum: Idle';
+        status.tooltip = `Project will load on semantic request\nDocument: ${editor.document.uri.fsPath}`;
+        status.show();
+        log(`Active document selected document=${editor.document.uri.fsPath}; semantic host start deferred.`);
+    } }));
 }
 function deactivate() { for (const client of clients.values())
     client.dispose(); requestCts?.dispose(); for (const cts of completionCts.values())
