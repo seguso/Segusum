@@ -118,6 +118,12 @@ public static class MigrationVerifier
         string path, string text, string kind, string first, string? secondOrTarget)
     {
         var tree = CSharpSyntaxTree.ParseText(text, path: path);
+        return ExtractCSharpStringsForRegistration(tree, kind, first, secondOrTarget);
+    }
+
+    public static IReadOnlyList<string> ExtractCSharpStringsForRegistration(
+        SyntaxTree tree, SemanticModel semanticModel, string kind, string first, string? secondOrTarget)
+    {
         var registration = tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>()
             .FirstOrDefault(x => RegistrationKind(x) == kind
                 && OperandText(x.ArgumentList.Arguments, 0) == first
@@ -126,7 +132,24 @@ public static class MigrationVerifier
         if (registration != null)
         {
             ExtractStrings(registration, strings);
-            AddReferencedMethodStrings(tree.GetRoot(), registration, strings, new HashSet<string>(StringComparer.Ordinal));
+            AddReferencedMethodStrings(tree.GetRoot(), registration, strings,
+                new HashSet<string>(StringComparer.Ordinal), semanticModel);
+        }
+        return strings;
+    }
+
+    private static IReadOnlyList<string> ExtractCSharpStringsForRegistration(
+        SyntaxTree tree, string kind, string first, string? secondOrTarget)
+    {
+        var registration = tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>()
+            .FirstOrDefault(x => RegistrationKind(x) == kind
+                && OperandText(x.ArgumentList.Arguments, 0) == first
+                && (kind == "room-changed" || OperandText(x.ArgumentList.Arguments, 1) == secondOrTarget));
+        var strings = new List<string>();
+        if (registration != null)
+        {
+            ExtractStrings(registration, strings);
+            AddReferencedMethodStrings(tree.GetRoot(), registration, strings, new HashSet<string>(StringComparer.Ordinal), null);
         }
         return strings;
     }
@@ -260,16 +283,36 @@ public static class MigrationVerifier
             strings.Add(literal.Token.ValueText);
     }
 
-    private static void AddReferencedMethodStrings(SyntaxNode root, SyntaxNode owner, List<string> strings, HashSet<string> visited)
+    private static void AddReferencedMethodStrings(SyntaxNode root, SyntaxNode owner, List<string> strings, HashSet<string> visited, SemanticModel? semanticModel)
     {
         var invocations = owner.DescendantNodes().OfType<InvocationExpressionSyntax>()
             .Where(x => !x.Ancestors().OfType<InvocationExpressionSyntax>().Any(a => a != owner));
         foreach (var invocation in invocations)
         {
             var name = InvocationName(invocation);
-            var method = root.DescendantNodes().OfType<MethodDeclarationSyntax>()
-                .FirstOrDefault(x => x.Identifier.ValueText == name);
-            if (method == null || !visited.Add(name)) continue;
+            MethodDeclarationSyntax? method;
+            if (semanticModel != null)
+            {
+                var operation = semanticModel.GetOperation(invocation) as IInvocationOperation;
+                method = operation?.TargetMethod.DeclaringSyntaxReferences
+                    .Select(reference => reference.GetSyntax())
+                    .OfType<MethodDeclarationSyntax>()
+                    .FirstOrDefault(x => root.SyntaxTree == x.SyntaxTree);
+                if (method == null) continue;
+            }
+            else
+            {
+                var candidates = root.DescendantNodes().OfType<MethodDeclarationSyntax>()
+                    .Where(x => x.Identifier.ValueText == name).ToArray();
+                // Syntax-only extraction cannot safely choose among overloads.
+                if (candidates.Length != 1) continue;
+                method = candidates[0];
+            }
+
+            var visitKey = semanticModel == null
+                ? name
+                : method.GetLocation().GetLineSpan().Path + ":" + method.GetLocation().GetLineSpan().StartLinePosition.Line;
+            if (!visited.Add(visitKey)) continue;
 
             var bodyInvocations = method.Body == null
                 ? Enumerable.Empty<InvocationExpressionSyntax>()
@@ -277,7 +320,7 @@ public static class MigrationVerifier
                     .Where(x => !x.Ancestors().OfType<InvocationExpressionSyntax>().Any());
             foreach (var nested in bodyInvocations)
                 ExtractStrings(nested, strings);
-            AddReferencedMethodStrings(root, method.Body ?? (SyntaxNode)method, strings, visited);
+            AddReferencedMethodStrings(root, method.Body ?? (SyntaxNode)method, strings, visited, semanticModel);
         }
     }
 
@@ -326,7 +369,9 @@ public static class MigrationVerifier
             case IUnaryOperation unary: result.Add("unary:" + unary.OperatorKind); break;
             case IBinaryOperation binary: result.Add("binary:" + binary.OperatorKind); break;
             case ICompoundAssignmentOperation compound: result.Add("compound-assign:" + compound.OperatorKind); break;
-            case IIncrementOrDecrementOperation increment: result.Add("increment:" + (increment.IsPostfix ? "postfix" : "prefix")); break;
+            case IIncrementOrDecrementOperation increment:
+                result.Add("increment:" + (increment.Kind == OperationKind.Increment ? "increment" : "decrement") + ":" + (increment.IsPostfix ? "postfix" : "prefix"));
+                break;
             case ISimpleAssignmentOperation assignment:
                 result.Add("assign-target:" + ReferencedSymbol(assignment.Target));
                 break;

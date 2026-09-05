@@ -110,6 +110,20 @@ public sealed class MigrationVerificationTests
     }
 
     [Fact]
+    public void SemanticRegistrationStringExtractionFollowsTheResolvedHelperOverload()
+    {
+        const string csharp = "class W { void Configure() { addHandlerUseFor(item, objective, e => { helper(1); }); } void helper(int value) { dial(camilla, \"Int\"); } void helper(string value) { dial(camilla, \"String\"); } }";
+        var tree = CSharpSyntaxTree.ParseText(csharp, path: "handlers.cs");
+        var refs = ((string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES"))!.Split(System.IO.Path.PathSeparator).Select(path => MetadataReference.CreateFromFile(path)).ToArray();
+        var compilation = CSharpCompilation.Create("HelperOverloads", new[] { tree }, refs);
+        var model = compilation.GetSemanticModel(tree);
+
+        var strings = MigrationVerifier.ExtractCSharpStringsForRegistration(tree, model, "use-for", "item", "objective");
+
+        Assert.Equal(new[] { "Int" }, strings);
+    }
+
+    [Fact]
     public void OperatorFingerprintReportsUnaryBinaryAndAssignmentOperators()
     {
         var (model, methods) = CompileMethods("class C { int x; void Foo() {} void A(bool ok, int a, int b) { if (ok) Foo(); x = a + b; x += 1; x++; } void B(bool ok, int a, int b) { if (!ok) Foo(); x = a - b; x -= 1; x--; } }");
@@ -134,6 +148,19 @@ public sealed class MigrationVerificationTests
         Assert.Contains("binary:", binary.Detail, StringComparison.Ordinal);
         Assert.Equal(EquivalenceStatus.Fail, arithmetic.Status);
         Assert.Contains("binary:", arithmetic.Detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void IncrementAndDecrementHaveDifferentFingerprints()
+    {
+        var (model, methods) = CompileMethods("class C { int x; void A() { x++; } void B() { x--; } void PrefixA() { ++x; } void PrefixB() { --x; } }");
+
+        Assert.Equal(EquivalenceStatus.Fail, MigrationVerifier.CompareOperations(
+            model.GetOperation(methods.Single(x => x.Identifier.ValueText == "A").Body!),
+            model.GetOperation(methods.Single(x => x.Identifier.ValueText == "B").Body!)).Status);
+        Assert.Equal(EquivalenceStatus.Fail, MigrationVerifier.CompareOperations(
+            model.GetOperation(methods.Single(x => x.Identifier.ValueText == "PrefixA").Body!),
+            model.GetOperation(methods.Single(x => x.Identifier.ValueText == "PrefixB").Body!)).Status);
     }
 
     [Fact]
