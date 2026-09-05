@@ -39,7 +39,7 @@ const vscode = __importStar(require("vscode"));
 const child_process_1 = require("child_process");
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
-const BUILD_ID = 'extension build = multi-root-routing-2026-09-05';
+const BUILD_ID = 'extension build = completion-fastpath-2026-09-05';
 let output;
 let status;
 function log(message) { output?.appendLine(`[${new Date().toISOString()}] ${message}`); }
@@ -50,11 +50,17 @@ class HostClient {
     next = 1;
     pending = new Map();
     worlds = [];
+    startTask;
     constructor(projectPath, workspacePath) {
         this.projectPath = projectPath;
         this.workspacePath = workspacePath;
     }
     async start() {
+        if (!this.startTask)
+            this.startTask = this.startCore();
+        return this.startTask;
+    }
+    async startCore() {
         const configured = vscode.workspace.getConfiguration('segusum').get('toolingHostPath');
         const dll = configured || path.join(this.workspacePath, 'Segusum.Tooling.Host', 'bin', 'Debug', 'net8.0', 'Segusum.Tooling.Host.dll');
         log(`${BUILD_ID}`);
@@ -94,6 +100,8 @@ class HostClient {
 }
 let requestCts;
 const clients = new Map();
+const projectByFolder = new Map();
+const completionCts = new Map();
 const refs = new Map();
 class ReferenceNode extends vscode.TreeItem {
     value;
@@ -123,10 +131,18 @@ function folderFor(document) { const folder = vscode.workspace.getWorkspaceFolde
     throw new Error(`No workspace folder owns ${document.uri.fsPath}`); return folder; }
 function worldId(document) { const match = document.getText().match(/^\s*world\s+([A-Za-z_][A-Za-z0-9_-]*)/m); return match?.[1] ?? '(unknown)'; }
 async function clientFor(document) {
+    const started = Date.now();
     const folder = folderFor(document);
-    const projectPath = await discoverProject(folder);
+    const folderKey = folder.uri.toString();
+    let projectPath = projectByFolder.get(folderKey);
+    if (!projectPath) {
+        projectPath = await discoverProject(folder);
+        if (projectPath)
+            projectByFolder.set(folderKey, projectPath);
+    }
     if (!projectPath)
         throw new Error(`No consumer .csproj containing .seg files found under ${folder.uri.fsPath}`);
+    const discoveryMs = Date.now() - started;
     const key = path.normalize(projectPath).toLowerCase();
     let client = clients.get(key);
     if (!client) {
@@ -141,6 +157,7 @@ async function clientFor(document) {
             throw e;
         }
     }
+    log(`project discovery=${discoveryMs}ms client=${Date.now() - started}ms`);
     const selectedWorld = document.languageId === 'segusum' ? worldId(document) : '(C# target from source)';
     log(`selection document=${document.uri.fsPath} workspace=${folder.uri.fsPath} project=${projectPath} world=${selectedWorld}`);
     status.text = 'Segusum: Ready';
@@ -181,15 +198,34 @@ async function activate(context) {
             vscode.window.showErrorMessage(`Segusum definition failed: ${e}`);
             return undefined;
         } } }));
-    context.subscriptions.push(vscode.languages.registerCompletionItemProvider({ language: 'segusum' }, { provideCompletionItems: async (document, pos) => { try {
-            const client = await clientFor(document);
-            const result = await client.request('completion', { path: document.uri.fsPath, line: pos.line + 1, column: pos.character + 1, text: document.getText() });
-            return (result ?? []).map((item) => new vscode.CompletionItem(item.label));
-        }
-        catch (e) {
-            log(`Completion failed: ${e}`);
-            return [];
-        } } }, '.'));
+    context.subscriptions.push(vscode.languages.registerCompletionItemProvider({ language: 'segusum' }, { provideCompletionItems: async (document, pos, token) => {
+            const key = document.uri.toString();
+            completionCts.get(key)?.cancel();
+            completionCts.get(key)?.dispose();
+            const cts = new vscode.CancellationTokenSource();
+            completionCts.set(key, cts);
+            const subscription = token.onCancellationRequested(() => cts.cancel());
+            const started = Date.now();
+            try {
+                const client = await clientFor(document);
+                if (cts.token.isCancellationRequested)
+                    return [];
+                const result = await client.request('completion', { path: document.uri.fsPath, line: pos.line + 1, column: pos.character + 1, text: document.getText() }, cts.token);
+                log(`completion document=${document.uri.fsPath} total=${Date.now() - started}ms`);
+                return (result ?? []).map((item) => new vscode.CompletionItem(item.label));
+            }
+            catch (e) {
+                if (!cts.token.isCancellationRequested)
+                    log(`Completion failed: ${e}`);
+                return [];
+            }
+            finally {
+                subscription.dispose();
+                if (completionCts.get(key) === cts)
+                    completionCts.delete(key);
+                cts.dispose();
+            }
+        } }, '.'));
     context.subscriptions.push(vscode.commands.registerCommand('segusum.findAllReferences', async () => { try {
         const query = await savedPosition();
         const client = await clientFor(query.editor.document);
@@ -237,17 +273,18 @@ async function activate(context) {
     } }));
     context.subscriptions.push(vscode.commands.registerCommand('segusum.openReference', async (item) => { const document = await vscode.workspace.openTextDocument(vscode.Uri.file(item.path)); const editor = await vscode.window.showTextDocument(document); editor.selection = new vscode.Selection(item.line - 1, item.column - 1, item.line - 1, item.column - 1 + item.length); editor.revealRange(editor.selection); }));
     context.subscriptions.push(vscode.window.registerTreeDataProvider('segusum.referencesView', referenceProvider));
-    const watcher = vscode.workspace.createFileSystemWatcher('**/*.{seg,cs}');
-    watcher.onDidChange(uri => { log(`File changed ${uri.fsPath}; invalidating clients.`); for (const client of clients.values())
-        client.invalidate(); });
-    watcher.onDidCreate(uri => { log(`File created ${uri.fsPath}; invalidating clients.`); for (const client of clients.values())
-        client.invalidate(); });
-    watcher.onDidDelete(uri => { log(`File deleted ${uri.fsPath}; invalidating clients.`); for (const client of clients.values())
-        client.invalidate(); });
+    const invalidate = (uri, kind) => { log(`File ${kind} ${uri.fsPath}; invalidating clients.`); if (uri.fsPath.toLowerCase().endsWith('.csproj'))
+        projectByFolder.clear(); for (const client of clients.values())
+        client.invalidate(); };
+    const watcher = vscode.workspace.createFileSystemWatcher('**/*.{seg,cs,csproj}');
+    watcher.onDidChange(uri => invalidate(uri, 'changed'));
+    watcher.onDidCreate(uri => invalidate(uri, 'created'));
+    watcher.onDidDelete(uri => invalidate(uri, 'deleted'));
     context.subscriptions.push(watcher);
     context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(editor => { if (editor)
         void clientFor(editor.document).catch(e => log(`Active document selection failed: ${e}`)); }));
 }
 function deactivate() { for (const client of clients.values())
-    client.dispose(); requestCts?.dispose(); }
+    client.dispose(); requestCts?.dispose(); for (const cts of completionCts.values())
+    cts.dispose(); }
 //# sourceMappingURL=extension.js.map

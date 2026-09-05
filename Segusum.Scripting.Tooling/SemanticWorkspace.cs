@@ -35,6 +35,7 @@ public sealed class DslSemanticWorkspace
     private readonly BoundModel model;
     private readonly DslBinder binder;
     private readonly Dictionary<string, DslSource> documents;
+    private readonly string[] completionNames;
     private readonly List<DslDiagnostic> diagnostics = new();
     private Solution roslynSolution => workspaceContext.Solution;
 
@@ -58,6 +59,11 @@ public sealed class DslSemanticWorkspace
         binder = new DslBinder(compilation, world, diagnostics.Add);
         binder.Bind(declarations);
         model = binder.Model;
+        completionNames = model.DslSymbolsByName.Keys
+            .Concat(binder.GetAccessibleWorldMembers().Select(x => x.Name))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .ToArray();
     }
 
     public IReadOnlyList<DslDiagnostic> Diagnostics => diagnostics;
@@ -162,10 +168,11 @@ public sealed class DslSemanticWorkspace
             : new RenameResult(Array.Empty<WorkspaceTextEdit>(), validation);
     }
 
-    public IReadOnlyList<string> GetCompletions(string path, int line, int column)
+    public IReadOnlyList<string> GetCompletions(string path, int line, int column, string? currentText = null)
     {
         if (!documents.TryGetValue(path, out var source)) return Array.Empty<string>();
-        var lineText = source.Text.Split('\n').ElementAtOrDefault(Math.Max(0, line - 1))?.TrimEnd('\r') ?? "";
+        var text = currentText ?? source.Text;
+        var lineText = text.Split('\n').ElementAtOrDefault(Math.Max(0, line - 1))?.TrimEnd('\r') ?? "";
         var cursor = Math.Clamp(column - 1, 0, lineText.Length);
         var before = lineText[..cursor];
         var prefix = ReadIdentifierBackward(before, before.Length);
@@ -178,8 +185,9 @@ public sealed class DslSemanticWorkspace
                 return binder.GetAccessibleMembers(receiverType).Select(x => x.Name).Where(x => x.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).Distinct(StringComparer.Ordinal).OrderBy(x => x, StringComparer.Ordinal).ToArray();
             return Array.Empty<string>();
         }
-        return model.DslSymbolsByName.Keys.Concat(binder.GetAccessibleWorldMembers().Select(x => x.Name))
-            .Where(x => x.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).Distinct(StringComparer.Ordinal).OrderBy(x => x, StringComparer.Ordinal).ToArray();
+        return completionNames
+            .Where(x => x.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
     }
 
     private static string ReadIdentifierBackward(string text, int end)

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.CodeAnalysis;
 using Segusum.Scripting.Core;
@@ -30,18 +31,18 @@ internal sealed class ToolingHost
             catch (Exception ex) { await ErrorAsync(null, "Invalid JSON: " + ex.Message); continue; }
             if (request == null) continue;
             if (request.Method == "cancel") { Cancel(request.Params?.RequestId); continue; }
-            work.Add(ProcessAsync(request));
+            work.Add(ProcessAsync(request, Stopwatch.GetTimestamp()));
         }
         await Task.WhenAll(work);
     }
 
-    private async Task ProcessAsync(HostRequest request)
+    private async Task ProcessAsync(HostRequest request, long receivedAt)
     {
         using var cts = new CancellationTokenSource();
         requests[request.Id] = cts;
         try
         {
-            var result = await ExecuteAsync(request, cts.Token);
+            var result = await ExecuteAsync(request, cts.Token, receivedAt);
             await WriteAsync(new HostResponse(request.Id, result, null));
         }
         catch (OperationCanceledException) { await WriteAsync(new HostResponse(request.Id, null, new HostError("cancelled", "Operation cancelled."))); }
@@ -51,7 +52,9 @@ internal sealed class ToolingHost
 
     private void Cancel(int? id) { if (id.HasValue && requests.TryGetValue(id.Value, out var cts)) cts.Cancel(); }
 
-    private async Task<object?> ExecuteAsync(HostRequest request, CancellationToken cancellationToken)
+    private readonly SemaphoreSlim completionGate = new(1, 1);
+
+    private async Task<object?> ExecuteAsync(HostRequest request, CancellationToken cancellationToken, long receivedAt)
     {
         switch (request.Method)
         {
@@ -68,7 +71,9 @@ internal sealed class ToolingHost
             case "rename":
                 return Rename(request.Params, cancellationToken);
             case "completion":
-                return Completions(request.Params, cancellationToken);
+                await completionGate.WaitAsync(cancellationToken);
+                try { return Completions(request.Params, cancellationToken, receivedAt); }
+                finally { completionGate.Release(); }
             default: throw new InvalidOperationException($"Unknown method '{request.Method}'.");
         }
     }
@@ -124,8 +129,24 @@ internal sealed class ToolingHost
         return new { succeeded = result.Succeeded, edits = result.Edits.Select(x => new { path = x.Path, line = x.Span.Line, column = x.Span.Column, start = x.Span.Start, length = x.Span.Length, newText = x.NewText }), diagnostics = result.Diagnostics.Select(x => new { id = x.Id, message = x.Message, path = x.Span.Path, line = x.Span.Line, column = x.Span.Column }) };
     }
 
-    private object Completions(HostParams? p, CancellationToken ct)
-        => Workspace(p, ct).GetCompletions(p?.Path ?? "", p?.Line ?? 1, p?.Column ?? 1).Select(x => new { label = x }).ToArray();
+    private object Completions(HostParams? p, CancellationToken ct, long receivedAt)
+    {
+        var total = Stopwatch.StartNew();
+        ct.ThrowIfCancellationRequested();
+        var hadSemantic = semantic != null;
+        var build = Stopwatch.StartNew();
+        var stable = p == null ? null : p with { Text = null };
+        var workspace = Workspace(stable, ct);
+        build.Stop();
+        ct.ThrowIfCancellationRequested();
+        var query = Stopwatch.StartNew();
+        var result = workspace.GetCompletions(p?.Path ?? "", p?.Line ?? 1, p?.Column ?? 1, p?.Text);
+        ct.ThrowIfCancellationRequested();
+        query.Stop(); total.Stop();
+        var queueWait = Stopwatch.GetElapsedTime(receivedAt).TotalMilliseconds;
+        Console.Error.WriteLine($"completion project={projectPath} queueWait={queueWait:0}ms overlay=0ms semanticBuild={(hadSemantic ? 0 : build.Elapsed.TotalMilliseconds):0}ms completionQuery={query.Elapsed.TotalMilliseconds:0}ms total={total.Elapsed.TotalMilliseconds:0}ms");
+        return result.Select(x => new { label = x }).ToArray();
+    }
 
     private static object ToDto(SemanticReference x) => new { displayName = x.DisplayName, path = x.Location.Path, line = x.Location.Span.Line, column = x.Location.Span.Column, length = x.Location.Span.Length, language = x.Location.Language, kind = x.Location.Kind };
     private static object ToDto(SemanticDefinition x) => new { displayName = x.DisplayName, path = x.Location.Path, line = x.Location.Span.Line, column = x.Location.Span.Column, length = x.Location.Span.Length, language = x.Location.Language, kind = x.Location.Kind };
