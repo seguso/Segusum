@@ -328,7 +328,7 @@ public sealed class GeneratorTests
         var generated = Generated(result);
         Assert.Contains("private void beforeRoomChangeSegusum(Room from, Room to, WalkPath fromToSegment, WalkPath fullPath, BeforeRoomChangeInput e)", generated);
         Assert.Contains("if (from == roomA && to == roomB)", generated);
-        Assert.True(generated.Contains("e.canChangeRoom=false;", StringComparison.Ordinal), generated);
+        Assert.Contains("e.canChangeRoom = false;", generated);
         Assert.DoesNotContain("foreach", generated, StringComparison.Ordinal);
         AssertGeneratedCompilationSucceeds(result);
     }
