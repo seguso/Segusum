@@ -24,6 +24,7 @@ for (var i = 2; i < args.Length; i++)
 var result = CSharpToSegTranspiler.Transpile(input, File.ReadAllText(input), partial, method);
 Console.WriteLine($"file: {input}");
 Console.WriteLine($"status: {(result.IsFullyTranslated ? "TRANSLATED" : partial ? "PARTIAL" : "UNSUPPORTED")}");
+foreach (var group in result.Units.GroupBy(x => x.Status).OrderBy(x => x.Key)) Console.WriteLine($"units {group.Key}: {group.Count()}");
 foreach (var d in result.Diagnostics) Console.WriteLine($"{d.Status}: {d.Path}:{d.Line}: {d.Reason}");
 if (!audit && output != null && !dryRun)
 {
