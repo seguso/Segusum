@@ -291,7 +291,93 @@ public sealed class TranslationCatalogSynchronizerTests
         Assert.Contains("Text", result.Statistics.DuplicateActiveObsoleteStrings);
     }
 
+    [Fact]
+    public void ConsolidatesUntranslatedActiveWithTranslatedObsolete()
+    {
+        var original = "Ti sconfiggeremo, Mike Stallone!";
+        var result = new TranslationCatalogSynchronizer().Synchronize(new[] { original }, DuplicateCatalog(
+            (original, "+", false), (original, "We will defeat you, Mike Stallone!", true)));
+        var entry = Assert.Single(result.Document.Root!.Elements("str"));
+        Assert.Equal("We will defeat you, Mike Stallone!", entry.Attribute("transl")!.Value);
+        Assert.Null(entry.Attribute("obsolete"));
+        Assert.Equal(new[] { original }, result.Statistics.ConsolidatedActiveObsoleteStrings);
+        Assert.Empty(result.Statistics.ConflictingActiveObsoleteStrings);
+        Assert.Equal(0, result.Statistics.NewlyUntranslated);
+        Assert.Equal(0, result.Statistics.NewlyObsolete);
+        Assert.Equal(0, result.Statistics.Reactivated);
+        Assert.Empty(result.Statistics.CanonicalizedStrings);
+    }
+
+    [Fact]
+    public void ConsolidatesActiveAndObsoleteWithSameTranslation()
+    {
+        var result = new TranslationCatalogSynchronizer().Synchronize(new[] { "X" }, DuplicateCatalog(
+            ("X", "Translation", false), ("X", "Translation", true)));
+        Assert.Single(result.Document.Root!.Elements("str"));
+        Assert.Single(result.Statistics.ConsolidatedActiveObsoleteStrings);
+        Assert.Empty(result.Statistics.DuplicateActiveObsoleteStrings);
+    }
+
+    [Fact]
+    public void KeepsDifferentActiveAndObsoleteTranslationsAndReportsConflict()
+    {
+        var result = new TranslationCatalogSynchronizer().Synchronize(new[] { "X" }, DuplicateCatalog(
+            ("X", "Translation A", false), ("X", "Translation B", true)));
+        Assert.Equal(2, result.Document.Root!.Elements("str").Count());
+        var conflict = Assert.Single(result.Statistics.ConflictingActiveObsoleteStrings);
+        Assert.Equal("X", conflict.Original);
+        Assert.Equal("Translation A", conflict.ActiveTranslation);
+        Assert.Equal(new[] { "Translation B" }, conflict.ObsoleteTranslations);
+        Assert.Contains("X", result.Statistics.DuplicateActiveObsoleteStrings);
+    }
+
+    [Fact]
+    public void ConsolidatesMultipleObsoleteEntriesWhenTheirTranslationIsUnique()
+    {
+        var result = new TranslationCatalogSynchronizer().Synchronize(new[] { "X" }, DuplicateCatalog(
+            ("X", "+", false), ("X", "Translation", true), ("X", "Translation", true)));
+        var entry = Assert.Single(result.Document.Root!.Elements("str"));
+        Assert.Equal("Translation", entry.Attribute("transl")!.Value);
+        Assert.Empty(result.Statistics.ConflictingActiveObsoleteStrings);
+    }
+
+    [Fact]
+    public void DoesNotChooseAmongDifferentObsoleteTranslations()
+    {
+        var result = new TranslationCatalogSynchronizer().Synchronize(new[] { "X" }, DuplicateCatalog(
+            ("X", "+", false), ("X", "Translation A", true), ("X", "Translation B", true)));
+        Assert.Equal(3, result.Document.Root!.Elements("str").Count());
+        Assert.Empty(result.Statistics.ConsolidatedActiveObsoleteStrings);
+        Assert.Contains("X", result.Statistics.DuplicateActiveObsoleteStrings);
+        Assert.Single(result.Statistics.ConflictingActiveObsoleteStrings);
+    }
+
+    [Fact]
+    public void ConsolidationIsIdempotentAndDoesNotCreateTransitionStatistics()
+    {
+        var first = new TranslationCatalogSynchronizer().Synchronize(new[] { "X" }, DuplicateCatalog(
+            ("X", "+", false), ("X", "Translation", true)));
+        var second = new TranslationCatalogSynchronizer().Synchronize(new[] { "X" }, first.Document);
+        Assert.False(second.Changed);
+        Assert.Empty(second.Statistics.ConsolidatedActiveObsoleteStrings);
+        Assert.Equal(0, second.Statistics.NewlyUntranslated);
+        Assert.Equal(0, second.Statistics.NewlyObsolete);
+        Assert.Equal(0, second.Statistics.Reactivated);
+        Assert.Empty(second.Statistics.CanonicalizedStrings);
+        Assert.Equal(first.Document.Root!.Attribute("last-sync-id")!.Value, second.Document.Root!.Attribute("last-sync-id")!.Value);
+    }
+
+    [Fact]
+    public void DifferentOriginalObsoleteEntryRemainsPreserved()
+    {
+        var result = new TranslationCatalogSynchronizer().Synchronize(new[] { "Current" },
+            DuplicateCatalog(("Current", "Translation", false), ("Old", "Old translation", true)));
+        Assert.Equal(new[] { "Current", "Old" }, Originals(result.Document));
+        Assert.Empty(result.Statistics.ConsolidatedActiveObsoleteStrings);
+    }
+
     private static XDocument Catalog(params (string Original, string Translation)[] values) => Catalog(values.Select(x => (x.Original, x.Translation, false, (string?)null)).ToArray());
     private static XDocument Catalog(params (string Original, string Translation, bool Obsolete, string? Metadata)[] values) => new(new XElement("root", values.Select(x => new XElement("str", new XAttribute("orig", x.Original), new XAttribute("transl", x.Translation), x.Obsolete ? new XAttribute("obsolete", "true") : null, x.Metadata is null ? null : new XAttribute("metadata", x.Metadata)))));
+    private static XDocument DuplicateCatalog(params (string Original, string Translation, bool Obsolete)[] values) => new(new XElement("root", values.Select(x => new XElement("str", new XAttribute("orig", x.Original), new XAttribute("transl", x.Translation), x.Obsolete ? new XAttribute("obsolete", "true") : null))));
     private static string[] Originals(XDocument document) => document.Root!.Elements("str").Select(x => x.Attribute("orig")!.Value).ToArray();
 }

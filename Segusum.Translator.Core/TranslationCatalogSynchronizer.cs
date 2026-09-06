@@ -31,6 +31,7 @@ public sealed record TranslationEntry(string Original, string Translation,
 }
 
 public sealed record ChangedPair(string OldValue, string NewValue, int Distance, double Similarity);
+public sealed record ActiveObsoleteConflict(string Original, string ActiveTranslation, IReadOnlyList<string> ObsoleteTranslations);
 
 public sealed class SyncStatistics
 {
@@ -47,6 +48,9 @@ public sealed class SyncStatistics
     public List<string> ReactivatedStrings { get; } = new();
     public List<string> CanonicalizedStrings { get; } = new();
     public List<string> DuplicateActiveObsoleteStrings { get; } = new();
+    public int ConsolidatedActiveObsolete { get; internal set; }
+    public List<string> ConsolidatedActiveObsoleteStrings { get; } = new();
+    public List<ActiveObsoleteConflict> ConflictingActiveObsoleteStrings { get; } = new();
     public string? SyncId { get; internal set; }
     public string? SyncAt { get; internal set; }
     public List<ChangedPair> ChangedPairs { get; } = new();
@@ -193,6 +197,8 @@ public sealed class TranslationCatalogSynchronizer
         foreach (var entry in all.Where(x => x.IsObsolete && x.IsTranslated && !retainedObsolete.Contains(x.Original)))
             output.Add(entry);
 
+        ConsolidateExactDuplicates(output, stats);
+
         var root = new XElement(current.Root?.Name ?? "root", current.Root?.Attributes() ?? Enumerable.Empty<XAttribute>(), output.Select(x => x.ToXml()));
         var doc = new XDocument(new XDeclaration("1.0", "utf-8", null), root);
         var changed = !DocumentsEquivalent(current, doc);
@@ -207,10 +213,66 @@ public sealed class TranslationCatalogSynchronizer
             stats.SyncId = current.Root?.Attribute("last-sync-id")?.Value;
             stats.SyncAt = current.Root?.Attribute("last-sync-at")?.Value;
         }
-        stats.DuplicateActiveObsoleteStrings.AddRange(output.GroupBy(x => x.Original, StringComparer.Ordinal)
-            .Where(x => x.Any(e => !e.IsObsolete) && x.Any(e => e.IsObsolete))
-            .Select(x => x.Key));
+        foreach (var group in output.GroupBy(x => x.Original, StringComparer.Ordinal)
+                     .Where(x => x.Any(e => !e.IsObsolete) && x.Any(e => e.IsObsolete)))
+        {
+            stats.DuplicateActiveObsoleteStrings.Add(group.Key);
+            if (stats.ConflictingActiveObsoleteStrings.All(x => x.Original != group.Key))
+                stats.ConflictingActiveObsoleteStrings.Add(CreateConflict(group));
+        }
         return new SyncResult(doc, stats, changed);
+    }
+
+    private static void ConsolidateExactDuplicates(List<TranslationEntry> output, SyncStatistics stats)
+    {
+        foreach (var group in output.GroupBy(x => x.Original, StringComparer.Ordinal).ToArray())
+        {
+            var active = group.Where(x => !x.IsObsolete).ToList();
+            var obsolete = group.Where(x => x.IsObsolete).ToList();
+            if (active.Count != 1 || obsolete.Count == 0 || obsolete.Any(x => !x.IsTranslated)) continue;
+
+            var activeEntry = active[0];
+            var obsoleteTranslations = obsolete.Select(x => x.Translation).Distinct(StringComparer.Ordinal).ToArray();
+            var canConsolidate = activeEntry.IsTranslated
+                ? obsoleteTranslations.Length == 1 && obsoleteTranslations[0] == activeEntry.Translation
+                : obsoleteTranslations.Length == 1;
+            if (!canConsolidate)
+            {
+                stats.ConflictingActiveObsoleteStrings.Add(new ActiveObsoleteConflict(
+                    group.Key, activeEntry.Translation, obsoleteTranslations));
+                continue;
+            }
+
+            var replacement = activeEntry.IsTranslated
+                ? activeEntry
+                : MergeUsefulMetadata(activeEntry.With(translation: obsoleteTranslations[0]), obsolete);
+            var firstIndex = output.IndexOf(activeEntry);
+            output.RemoveAll(x => x.Original == group.Key);
+            output.Insert(firstIndex, replacement);
+            stats.ConsolidatedActiveObsolete++;
+            stats.ConsolidatedActiveObsoleteStrings.Add(group.Key);
+        }
+    }
+
+    private static TranslationEntry MergeUsefulMetadata(TranslationEntry active, IReadOnlyList<TranslationEntry> obsolete)
+    {
+        var attributes = new Dictionary<string, string>(active.Attributes, StringComparer.Ordinal);
+        foreach (var key in new[] { TranslationChainAttribute, PreviousTranslatedAttribute })
+            if (!attributes.ContainsKey(key))
+            {
+                var value = obsolete.Select(x => x.Attributes.GetValueOrDefault(key))
+                    .FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
+                if (value is not null) attributes[key] = value;
+            }
+        return active with { Attributes = attributes };
+    }
+
+    private static ActiveObsoleteConflict CreateConflict(IEnumerable<TranslationEntry> group)
+    {
+        var entries = group.ToList();
+        return new ActiveObsoleteConflict(entries.First(x => !x.IsObsolete).Original,
+            entries.First(x => !x.IsObsolete).Translation,
+            entries.Where(x => x.IsObsolete).Select(x => x.Translation).Distinct(StringComparer.Ordinal).ToArray());
     }
 
     private static void AppendPreviousTranslated(TranslationEntry current, IReadOnlyList<TranslationEntry> all,

@@ -37,10 +37,20 @@
                     <h4>Canonicalizzate (@lastStatistics.CanonicalizedStrings.Count)</h4>
                     <ul>@foreach (var value in lastStatistics.CanonicalizedStrings) { <li>@value</li> }</ul>
                 }
-                @if (lastStatistics.DuplicateActiveObsoleteStrings.Count != 0)
+                @if (lastStatistics.ConsolidatedActiveObsoleteStrings.Count != 0)
                 {
-                    <h4>Attenzione: @lastStatistics.DuplicateActiveObsoleteStrings.Count stringa/e presente/i sia attiva/e sia obsolete</h4>
-                    <ul>@foreach (var value in lastStatistics.DuplicateActiveObsoleteStrings) { <li>@value</li> }</ul>
+                    <h4>Duplicati storici active+obsolete consolidati (@lastStatistics.ConsolidatedActiveObsoleteStrings.Count)</h4>
+                    <ul>@foreach (var value in lastStatistics.ConsolidatedActiveObsoleteStrings) { <li>@value</li> }</ul>
+                }
+                @if (lastStatistics.ConflictingActiveObsoleteStrings.Count != 0)
+                {
+                    <h4>Attenzione: conflitti active+obsolete non risolvibili automaticamente (@lastStatistics.ConflictingActiveObsoleteStrings.Count)</h4>
+                    <ul>
+                        @foreach (var conflict in lastStatistics.ConflictingActiveObsoleteStrings)
+                        {
+                            <li>@conflict.Original<br />active: "@conflict.ActiveTranslation"<br />obsolete: "@string.Join("; ", conflict.ObsoleteTranslations.Select(x => "\"" + x + "\""))"</li>
+                        }
+                    </ul>
                 }
                 @if (!string.IsNullOrWhiteSpace(lastStatistics.SyncId)) { <small>Sync: @lastStatistics.SyncId<br />Ora UTC: @lastStatistics.SyncAt</small> }
             </details>
