@@ -1,10 +1,25 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 namespace Segusum.Scripting.Core;
 public readonly record struct SourceSpan(string Path, int Start, int Length, int Line, int Column)
 {
-    public static SourceSpan From(string path, string text, int start, int length) { var line=1; var column=1; for(var i=0;i<start&&i<text.Length;i++){if(text[i]=='\n'){line++;column=1;}else column++;} return new(path,start,length,line,column); }
+    public static SourceSpan From(string path, string text, int start, int length)
+    {
+        var profile = DslParser.ActiveProfile;
+        var started = profile == null ? 0 : Stopwatch.GetTimestamp();
+        try
+        {
+            var line = 1; var column = 1;
+            for (var i = 0; i < start && i < text.Length; i++) { if (text[i] == '\n') { line++; column = 1; } else column++; }
+            return new(path, start, length, line, column);
+        }
+        finally
+        {
+            if (profile != null) profile.Add("SourceSpan.From", Stopwatch.GetTimestamp() - started);
+        }
+    }
 }
 public sealed record DslSource(string Path, string Text);
 public sealed record DslDiagnostic(string Id, string Message, SourceSpan Span);

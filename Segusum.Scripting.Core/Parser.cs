@@ -1,62 +1,132 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
 
 namespace Segusum.Scripting.Core;
 
+internal sealed class DslParserProfile
+{
+    private readonly Dictionary<string, (long Calls, long Ticks)> counters = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, (long Calls, long Ticks)> phases = new(StringComparer.Ordinal);
+
+    public void Count(string name, long amount = 1)
+    {
+        counters.TryGetValue(name, out var value);
+        value.Calls += amount;
+        counters[name] = value;
+    }
+
+    public void Add(string name, long ticks, long calls = 1)
+    {
+        counters.TryGetValue(name, out var value);
+        value.Calls += calls;
+        value.Ticks += ticks;
+        counters[name] = value;
+    }
+
+    public void AddPhase(string name, long ticks, long calls = 1)
+    {
+        phases.TryGetValue(name, out var value);
+        value.Calls += calls;
+        value.Ticks += ticks;
+        phases[name] = value;
+    }
+
+    public T Measure<T>(string name, Func<T> action)
+    {
+        var started = Stopwatch.GetTimestamp();
+        try { return action(); }
+        finally { Add(name, Stopwatch.GetTimestamp() - started); }
+    }
+
+    public string Format()
+    {
+        static string Table(Dictionary<string, (long Calls, long Ticks)> values)
+            => string.Join("; ", values.OrderByDescending(x => x.Value.Ticks)
+                .Select(x => $"{x.Key}:calls={x.Value.Calls},ms={x.Value.Ticks * 1000.0 / Stopwatch.Frequency:0.0}"));
+        return $"phases=[{Table(phases)}] counters=[{Table(counters)}]";
+    }
+}
+
 public static class DslParser
 {
+    [ThreadStatic]
+    internal static DslParserProfile? ActiveProfile;
+
     public static (DslDocument Document, IReadOnlyList<DslDiagnostic> Diagnostics) Parse(DslSource source)
     {
+        var profile = new DslParserProfile();
+        var allocatedBefore = GC.GetTotalMemory(false);
         var diagnostics = new List<DslDiagnostic>();
-        var parser = new Parser(DslLexer.Lex(source, diagnostics), diagnostics, source.Text);
-        return (parser.ParseDocument(), diagnostics);
+        ActiveProfile = profile;
+        try
+        {
+            var lexerTimer = Stopwatch.StartNew();
+            var tokens = DslLexer.Lex(source, diagnostics);
+            lexerTimer.Stop();
+            profile.AddPhase("lexer+token-list", lexerTimer.ElapsedTicks, tokens.Count);
+            var parser = new Parser(tokens, diagnostics, source.Text, profile);
+            var document = profile.Measure("ParseDocument", parser.ParseDocument);
+            var allocated = GC.GetTotalMemory(false) - allocatedBefore;
+            Console.Error.WriteLine($"dslParser path={source.Path} chars={source.Text.Length} lines={CountLines(source.Text)} tokens={tokens.Count} declarations={document.Declarations.Count} diagnostics={diagnostics.Count} managedMemoryDeltaBytes={allocated} profile={profile.Format()}");
+            return (document, diagnostics);
+        }
+        finally { ActiveProfile = null; }
     }
+
+    private static int CountLines(string text) => text.Length == 0 ? 0 : text.Count(x => x == '\n') + 1;
 
     private sealed class Parser
     {
         private readonly IReadOnlyList<DslToken> tokens;
         private readonly List<DslDiagnostic> diagnostics;
         private readonly string sourceText;
+        private readonly DslParserProfile profile;
         private int position;
-        public Parser(IReadOnlyList<DslToken> tokens, List<DslDiagnostic> diagnostics, string sourceText) { this.tokens = tokens; this.diagnostics = diagnostics; this.sourceText = sourceText; }
+        public Parser(IReadOnlyList<DslToken> tokens, List<DslDiagnostic> diagnostics, string sourceText, DslParserProfile profile) { this.tokens = tokens; this.diagnostics = diagnostics; this.sourceText = sourceText; this.profile = profile; }
         private DslToken Current => tokens[position];
-        private bool Is(string text) => Current.Text == text;
-        private DslToken Take() => tokens[position++];
+        private bool Is(string text) { profile.Count("Is"); return Current.Text == text; }
+        private DslToken Take() { profile.Count("Take"); return tokens[position++]; }
         private void SkipTerminators() { while (Current.Kind is DslTokenKind.NewLine or DslTokenKind.Semicolon) Take(); }
         private void Need(string text) { if (Is(text)) Take(); else Error($"Expected '{text}'."); }
         private string Word() => WordToken().Text;
-        private DslToken WordToken() { if (Current.Kind != DslTokenKind.Identifier) { Error("Expected identifier."); return Current; } return Take(); }
-        private void Error(string message) => diagnostics.Add(new DslDiagnostic("SEGDSL101", message, Current.Span));
-        private void RecoverLine() { while (Current.Kind is not (DslTokenKind.NewLine or DslTokenKind.Semicolon or DslTokenKind.EndOfFile)) Take(); }
+        private DslToken WordToken() { profile.Count("WordToken"); if (Current.Kind != DslTokenKind.Identifier) { Error("Expected identifier."); return Current; } return Take(); }
+        private void Error(string message) { profile.Count("diagnostics"); diagnostics.Add(new DslDiagnostic("SEGDSL101", message, Current.Span)); }
+        private void RecoverLine() { profile.Count("error-recovery"); while (Current.Kind is not (DslTokenKind.NewLine or DslTokenKind.Semicolon or DslTokenKind.EndOfFile)) Take(); }
 
         public DslDocument ParseDocument()
         {
             var result = new List<DslDeclaration>(); SkipTerminators(); string? worldId = null;
+            var headerStarted = Stopwatch.GetTimestamp();
             if (Is("world")) { Take(); worldId = Word(); SkipTerminators(); }
             else diagnostics.Add(new DslDiagnostic("SEGDSL103", "A .seg file must begin with a world directive.", Current.Span));
+            profile.AddPhase("world-header", Stopwatch.GetTimestamp() - headerStarted);
+            var declarationsStarted = Stopwatch.GetTimestamp();
             while (Current.Kind != DslTokenKind.EndOfFile)
             {
                 var span = Current.Span; var keyword = Word();
                 switch (keyword)
                 {
-                    case "state": result.Add(ParseState(span)); break;
-                    case "def": result.Add(ParseFunction(span)); break;
-                    case "combine": result.Add(ParseHandler("combine", span)); break;
-                    case "use": result.Add(ParseHandler("use", span)); break;
-                    case "pickup": result.Add(ParseHandler("pickup", span)); break;
-                    case "talk-here": result.Add(ParseHandler("talk-here", span)); break;
-                    case "cancel-text-input": result.Add(ParseHandler("cancel-text-input", span)); break;
-                    case "submit-text-input": result.Add(ParseHandler("submit-text-input", span)); break;
-                    case "room-changed": result.Add(ParseHandler("room-changed", span)); break;
-                    case "before-room-change": result.Add(new BeforeRoomChangeDeclaration(ParseBody(true), span)); break;
-                    case "add": result.Add(ParseCycleElement(span)); break;
-                    case "var": { var name = Word(); Need("="); Need("new-cycle"); result.Add(new CycleDeclaration(name, span)); break; }
-                    case "next": result.Add(new NextCycleDeclaration(Expression(), span)); break;
+                    case "state": result.Add(profile.Measure("ParseDeclaration.state", () => ParseState(span))); break;
+                    case "def": result.Add(profile.Measure("ParseDeclaration.def", () => ParseFunction(span))); break;
+                    case "combine": result.Add(profile.Measure("ParseDeclaration.handler.combine", () => ParseHandler("combine", span))); break;
+                    case "use": result.Add(profile.Measure("ParseDeclaration.handler.use", () => ParseHandler("use", span))); break;
+                    case "pickup": result.Add(profile.Measure("ParseDeclaration.handler.pickup", () => ParseHandler("pickup", span))); break;
+                    case "talk-here": result.Add(profile.Measure("ParseDeclaration.handler.talk-here", () => ParseHandler("talk-here", span))); break;
+                    case "cancel-text-input": result.Add(profile.Measure("ParseDeclaration.handler.cancel-text-input", () => ParseHandler("cancel-text-input", span))); break;
+                    case "submit-text-input": result.Add(profile.Measure("ParseDeclaration.handler.submit-text-input", () => ParseHandler("submit-text-input", span))); break;
+                    case "room-changed": result.Add(profile.Measure("ParseDeclaration.handler.room-changed", () => ParseHandler("room-changed", span))); break;
+                    case "before-room-change": result.Add(profile.Measure("ParseDeclaration.before-room-change", () => new BeforeRoomChangeDeclaration(ParseBody(true), span))); break;
+                    case "add": result.Add(profile.Measure("ParseDeclaration.add", () => ParseCycleElement(span))); break;
+                    case "var": { var name = Word(); Need("="); Need("new-cycle"); result.Add(profile.Measure("ParseDeclaration.var", () => new CycleDeclaration(name, span))); break; }
+                    case "next": result.Add(profile.Measure("ParseDeclaration.next", () => new NextCycleDeclaration(Expression(), span))); break;
                     case "world": diagnostics.Add(new DslDiagnostic("SEGDSL104", worldId == null ? "The world directive must appear before declarations." : "The world directive must appear exactly once before declarations.", span)); RecoverLine(); break;
                     default: Error($"Unexpected declaration '{keyword}'."); RecoverLine(); break;
                 }
                 SkipTerminators();
             }
+            profile.AddPhase("declaration-cycle", Stopwatch.GetTimestamp() - declarationsStarted, result.Count);
             return new DslDocument(worldId, result);
         }
         private StateDeclaration ParseState(SourceSpan span) { var name = Word(); Need(":"); var type = Word(); Need("="); return new(name, type, Expression(), span); }
@@ -107,6 +177,28 @@ public static class DslParser
             Need("end"); return body;
         }
         private DslStatement ParseStatement(string keyword, SourceSpan span)
+        {
+            profile.Count("statements");
+            var category = StatementCategory(keyword);
+            return profile.Measure("ParseStatement." + category, () => ParseStatementCore(keyword, span));
+        }
+        private string StatementCategory(string keyword)
+        {
+            if (keyword == "if") return "if";
+            if (keyword is "ret" or "return") return "return";
+            if (keyword is "var") return "variable-declaration";
+            if (keyword is "next") return "next";
+            if (keyword is "add") return "add-cycle";
+            if (keyword is "mark-happened" or "mark-happened-once") return "mark-happened";
+            if (keyword == "named-cutscene") return "named-cutscene";
+            if (keyword is "text-input") return "call";
+            if (Is(":")) return "dialogue";
+            if (Is("++")) return "increment";
+            if (Is(".") && position + 1 < tokens.Count && tokens[position + 1].Kind == DslTokenKind.Identifier) return "member-access/call";
+            if (Is("=") || Is("+=") || Is("-=")) return "assignment";
+            return "call";
+        }
+        private DslStatement ParseStatementCore(string keyword, SourceSpan span)
         {
             switch (keyword)
             {
@@ -251,10 +343,33 @@ public static class DslParser
             return text;
         }
         private DslExpression ParseCallAfterKeyword(SourceSpan span) { Error("The 'call' keyword is no longer part of the DSL syntax."); var name = Word(); return new CallExpression(name, Array.Empty<DslArgument>(), span); }
-        private bool CanStartArgument() => (Current.Kind is DslTokenKind.Identifier or DslTokenKind.Number or DslTokenKind.String or DslTokenKind.LParen or DslTokenKind.LBracket) && Current.Text is not ("and" or "or" or "else" or "elif" or "end" or "when" or "with" or "for" or "here");
+        private bool CanStartArgument()
+        {
+            profile.Count("CanStartArgument");
+            return (Current.Kind is DslTokenKind.Identifier or DslTokenKind.Number or DslTokenKind.String or DslTokenKind.LParen or DslTokenKind.LBracket) && Current.Text is not ("and" or "or" or "else" or "elif" or "end" or "when" or "with" or "for" or "here");
+        }
         private DslArgument ParseArgument()
-        { var span = Current.Span; if (Current.Kind == DslTokenKind.Identifier && position + 2 < tokens.Count && tokens[position + 1].Kind == DslTokenKind.Colon && tokens[position + 2].Kind != DslTokenKind.NewLine && tokens[position + 2].Kind != DslTokenKind.EndOfFile) { var name = Take().Text; Take(); return new DslArgument(name, Expression(), span); } return new DslArgument(null, Prefix(), span); }
+        {
+            profile.Count("ParseArgument");
+            var started = Stopwatch.GetTimestamp();
+            try
+            {
+                var span = Current.Span;
+                if (Current.Kind == DslTokenKind.Identifier && position + 2 < tokens.Count && tokens[position + 1].Kind == DslTokenKind.Colon && tokens[position + 2].Kind != DslTokenKind.NewLine && tokens[position + 2].Kind != DslTokenKind.EndOfFile)
+                {
+                    profile.Count("named-arguments");
+                    var name = Take().Text; Take(); return new DslArgument(name, Expression(), span);
+                }
+                return new DslArgument(null, Prefix(), span);
+            }
+            finally { profile.Add("ParseArgument", Stopwatch.GetTimestamp() - started, 0); }
+        }
         private DslExpression Expression(int minimumPrecedence = 0)
+        {
+            profile.Count("expressions");
+            return profile.Measure("Expression", () => ExpressionCore(minimumPrecedence));
+        }
+        private DslExpression ExpressionCore(int minimumPrecedence = 0)
         {
             var left = Prefix();
             while (true)
@@ -263,6 +378,7 @@ public static class DslParser
                 var precedence = Precedence(Current.Text);
                 if (precedence <= minimumPrecedence) break;
                 var op = Take().Text;
+                profile.Count("binary-expressions");
                 if (IsComparison(op) && ContainsComparison(left))
                     diagnostics.Add(new DslDiagnostic("SEGDSL105", "Chained comparisons are not supported; use an explicit logical expression.", Current.Span));
                 left = new BinaryExpression(op, left, Expression(precedence), left.Span);
@@ -276,12 +392,23 @@ public static class DslParser
         private static bool ContainsComparison(DslExpression expression) => expression is BinaryExpression binary && IsComparison(binary.Operator);
         private DslExpression Prefix()
         {
+            var category = Current.Kind switch
+            {
+                DslTokenKind.String or DslTokenKind.Number => "primary",
+                DslTokenKind.LBracket => "list-literal",
+                _ => Is("not") ? "unary" : "primary"
+            };
+            return profile.Measure("Expression." + category, PrefixCore);
+        }
+        private DslExpression PrefixCore()
+        {
             while (Current.Kind == DslTokenKind.NewLine) Take(); var span = Current.Span;
             if (Is("not")) { Take(); return new UnaryExpression("not", Expression(Precedence("not")), span); }
             if (Is("exists")) return ParseExists(span);
             if (Current.Kind == DslTokenKind.LParen) { Take(); var parenthesized = Expression(); Need(")"); return new ParenthesizedExpression(parenthesized, span); }
             if (Current.Kind == DslTokenKind.LBracket)
             {
+                profile.Count("list-literals");
                 Take(); SkipTerminators();
                 var elements = new List<DslExpression>();
                 while (!Is("]") && Current.Kind != DslTokenKind.EndOfFile)
@@ -306,10 +433,11 @@ public static class DslParser
                 Take(); var memberToken = WordToken();
                 if (CanStartArgument())
                 {
+                    profile.Count("member-calls");
                     var args = new List<DslArgument>(); while (CanStartArgument()) args.Add(ParseArgument());
                     expression = new CallExpression(memberToken.Text, args, span) { Receiver = expression, NameSpan = memberToken.Span };
                 }
-                else expression = new MemberAccessExpression(expression, memberToken.Text, span) { MemberSpan = memberToken.Span };
+                else { profile.Count("member-accesses"); expression = new MemberAccessExpression(expression, memberToken.Text, span) { MemberSpan = memberToken.Span }; }
             }
             if (expression is not IdentifierExpression)
                 return expression;
@@ -317,15 +445,19 @@ public static class DslParser
             if (Is("was-seen-at-least-once")) { Take(); return new CallExpression("was-seen-at-least-once", new[] { new DslArgument(null, identifier, span) }, span); }
             if (CanStartArgument() && !IsNamedArgumentStart())
             {
+                profile.Count("calls");
                 var args = new List<DslArgument>(); while (CanStartArgument()) args.Add(ParseArgument()); return new CallExpression(identifier.Name, args, span) { NameSpan = identifier.Span };
             }
             return identifier;
         }
         private bool IsNamedArgumentStart()
-            => Current.Kind == DslTokenKind.Identifier
+        {
+            profile.Count("IsNamedArgumentStart");
+            return Current.Kind == DslTokenKind.Identifier
                 && position + 2 < tokens.Count
                 && tokens[position + 1].Kind == DslTokenKind.Colon
                 && tokens[position + 2].Kind is not (DslTokenKind.NewLine or DslTokenKind.EndOfFile);
+        }
         private ExistsExpression ParseExists(SourceSpan span)
         {
             Take(); Need("["); SkipTerminators(); Need("from");

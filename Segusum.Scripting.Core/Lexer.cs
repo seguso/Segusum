@@ -8,6 +8,8 @@ public static class DslLexer
  public static IReadOnlyList<DslToken> Lex(DslSource source, List<DslDiagnostic> diagnostics)
  {
   var r=new List<DslToken>();var t=source.Text;var i=0;
+  var profile = DslParser.ActiveProfile;
+  var loopStarted = profile == null ? 0 : System.Diagnostics.Stopwatch.GetTimestamp();
   while(i<t.Length){var s=i;var c=t[i];
    if(c==' '||c=='\t'||c=='\r'){i++;continue;}
    if(c=='#'||(c=='/'&&i+1<t.Length&&t[i+1]=='/')){while(i<t.Length&&t[i]!='\n')i++;continue;}
@@ -24,6 +26,10 @@ public static class DslLexer
    if(char.IsLetter(c)||c=='_'){while(i<t.Length&&(char.IsLetterOrDigit(t[i])||t[i]=='_'||t[i]=='-'))i++;r.Add(new(DslTokenKind.Identifier,t.Substring(s,i-s),SourceSpan.From(source.Path,t,s,i-s)));continue;}
    var op=c.ToString();i++;if(i<t.Length&&"=+<>".IndexOf(t[i])>=0&&(c=='='||c=='+'||c=='<'||c=='>'||c=='!'))op+=t[i++];r.Add(new(DslTokenKind.Operator,op,SourceSpan.From(source.Path,t,s,i-s)));
   }
-  r.Add(new(DslTokenKind.EndOfFile,"",SourceSpan.From(source.Path,t,t.Length,0)));return r;
+  if (profile != null) profile.AddPhase("lexer-tokenization-loop", System.Diagnostics.Stopwatch.GetTimestamp() - loopStarted);
+  var eofStarted = profile == null ? 0 : System.Diagnostics.Stopwatch.GetTimestamp();
+  r.Add(new(DslTokenKind.EndOfFile,"",SourceSpan.From(source.Path,t,t.Length,0)));
+  if (profile != null) profile.AddPhase("token-list-finalization", System.Diagnostics.Stopwatch.GetTimestamp() - eofStarted);
+  return r;
  }
 }
