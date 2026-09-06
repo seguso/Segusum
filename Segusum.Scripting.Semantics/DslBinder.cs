@@ -123,6 +123,8 @@ public sealed class DslBinder
     private readonly INamedTypeSymbol? room;
     private readonly INamedTypeSymbol? explanation;
     private readonly ITypeSymbol? beforeRoomChangeInput;
+    private readonly ITypeSymbol? actionContext;
+    private readonly ITypeSymbol? cutScene;
     private readonly ITypeSymbol? walkPath;
     private ISymbol? lastSymbol;
     private BoundSymbolKind lastKind;
@@ -151,7 +153,7 @@ public sealed class DslBinder
         this.semanticIndexes = semanticIndexes;
         this.compilation = compilation; this.world = world; this.report = report;
         cycle = GetTypeByMetadataName("Seg.Cycle"); cycleElementId = GetTypeByMetadataName("Seg.CycleElemId"); namedCutsceneId = GetTypeByMetadataName("Seg.NamedCutSceneId");
-        logicObj = GetTypeByMetadataName("Seg.LogicObj"); objective = GetTypeByMetadataName("Seg.Objective"); room = GetTypeByMetadataName("Seg.Room"); explanation = GetTypeByMetadataName("Seg.Explanation"); beforeRoomChangeInput = GetTypeByMetadataName("Seg.BeforeRoomChangeInput"); walkPath = GetTypeByMetadataName("Seg.WalkPath");
+        logicObj = GetTypeByMetadataName("Seg.LogicObj"); objective = GetTypeByMetadataName("Seg.Objective"); room = GetTypeByMetadataName("Seg.Room"); explanation = GetTypeByMetadataName("Seg.Explanation"); beforeRoomChangeInput = GetTypeByMetadataName("Seg.BeforeRoomChangeInput"); walkPath = GetTypeByMetadataName("Seg.WalkPath"); actionContext = GetTypeByMetadataName("Seg.ActionContext"); cutScene = GetTypeByMetadataName("Seg.CutScene");
         dateTime = compilation.GetSpecialType(SpecialType.System_DateTime); dateTimeNullable = compilation.GetSpecialType(SpecialType.System_Nullable_T).Construct(dateTime); textHandlerInput = GetTypeByMetadataName("Seg.TextHandlerInput");
     }
     public void Bind(IReadOnlyList<DslDeclaration> declarations)
@@ -191,6 +193,7 @@ public sealed class DslBinder
                 case CycleElementDeclaration c: BindCycle(c.Cycle, c.Repeat, c.Condition, c.Body, c.Span, new()); break;
                 case NextCycleDeclaration n: Require(BindExpression(n.Cycle, new()), cycle, n.Cycle.Span, "next requires a Cycle."); break;
                 case BeforeRoomChangeDeclaration b: profile.MeasureAction("BindBeforeRoomChange", () => BindBeforeRoomChange(b)); break;
+                case AfterActionExecutedDeclaration a: profile.MeasureAction("BindAfterActionExecuted", () => BindAfterActionExecuted(a)); break;
             }
         }
         profile.AddPhase("Bind declarations total", Stopwatch.GetTimestamp() - phase);
@@ -199,6 +202,7 @@ public sealed class DslBinder
         profile.MeasureAction("CheckDuplicateUnaryHandlers", () => CheckDuplicateUnaryHandlers(declarations));
         profile.MeasureAction("CheckCSharpRoomChangedDuplicates", () => CheckCSharpRoomChangedDuplicates(declarations));
         profile.MeasureAction("CheckDuplicateBeforeRoomChange", () => CheckDuplicateBeforeRoomChange(declarations));
+        profile.MeasureAction("CheckDuplicateAfterActionExecuted", () => CheckDuplicateAfterActionExecuted(declarations));
     }
     private void BindBeforeRoomChange(BeforeRoomChangeDeclaration declaration)
     {
@@ -219,6 +223,23 @@ public sealed class DslBinder
         AddLocalIdentity("e", "contextual", declaration.Span);
         var oldInput = inputType; var oldAllowed = inputContextAllowed;
         inputType = beforeRoomChangeInput; inputContextAllowed = false;
+        BindStatements(declaration.Body, scope, null);
+        inputType = oldInput; inputContextAllowed = oldAllowed;
+        activeDslSymbols.Clear(); foreach (var item in previous) activeDslSymbols[item.Key] = item.Value;
+    }
+    private void BindAfterActionExecuted(AfterActionExecutedDeclaration declaration)
+    {
+        var previous = new Dictionary<string, DslSymbolIdentity>(activeDslSymbols, StringComparer.Ordinal);
+        activeDslSymbols.Clear();
+        var scope = new Dictionary<string, ITypeSymbol>(StringComparer.Ordinal)
+        {
+            [NormalizeKey("cs")] = cutScene!,
+            [NormalizeKey("actionContext")] = actionContext!
+        };
+        AddLocalIdentity("cs", "contextual", declaration.Span);
+        AddLocalIdentity("actionContext", "contextual", declaration.Span);
+        var oldInput = inputType; var oldAllowed = inputContextAllowed;
+        inputType = null; inputContextAllowed = false;
         BindStatements(declaration.Body, scope, null);
         inputType = oldInput; inputContextAllowed = oldAllowed;
         activeDslSymbols.Clear(); foreach (var item in previous) activeDslSymbols[item.Key] = item.Value;
@@ -774,6 +795,8 @@ public sealed class DslBinder
     private void CheckDuplicateCombines(IEnumerable<DslDeclaration> declarations) { var combines = declarations.OfType<HandlerDeclaration>().Where(x => x.Kind == "combine").GroupBy(x => NormalizeKey(x.First) + "\0" + NormalizeKey(x.Second!)); foreach (var group in combines.Where(x => x.Count() > 1)) foreach (var item in group.Skip(1)) Report("SEGDSL315", "Duplicate combine handler.", item.Span); }
     private void CheckDuplicateBeforeRoomChange(IEnumerable<DslDeclaration> declarations)
     { foreach (var item in declarations.OfType<BeforeRoomChangeDeclaration>().Skip(1)) Report("SEGDSL334", "Duplicate before-room-change declaration for the same world.", item.Span); }
+    private void CheckDuplicateAfterActionExecuted(IEnumerable<DslDeclaration> declarations)
+    { foreach (var item in declarations.OfType<AfterActionExecutedDeclaration>().Skip(1)) Report("SEGDSL335", "Duplicate after-action-executed declaration for the same world.", item.Span); }
     private void CheckDuplicateRoomChanged(IEnumerable<DslDeclaration> declarations) { foreach (var group in declarations.OfType<HandlerDeclaration>().Where(x => x.Kind == "room-changed").GroupBy(x => NormalizeKey(x.First))) foreach (var item in group.Skip(1)) Report("SEGDSL319", "Duplicate room-changed handler for the same Room.", item.Span); }
     private void CheckDuplicateUnaryHandlers(IEnumerable<DslDeclaration> declarations)
     {

@@ -118,6 +118,7 @@ public static class DslParser
                     case "submit-text-input": result.Add(profile.Measure("ParseDeclaration.handler.submit-text-input", () => ParseHandler("submit-text-input", span))); break;
                     case "room-changed": result.Add(profile.Measure("ParseDeclaration.handler.room-changed", () => ParseHandler("room-changed", span))); break;
                     case "before-room-change": result.Add(profile.Measure("ParseDeclaration.before-room-change", () => new BeforeRoomChangeDeclaration(ParseBody(true), span))); break;
+                    case "after-action-executed": result.Add(profile.Measure("ParseDeclaration.after-action-executed", () => new AfterActionExecutedDeclaration(ParseBody(true), span))); break;
                     case "add": result.Add(profile.Measure("ParseDeclaration.add", () => ParseCycleElement(span))); break;
                     case "var": { var name = Word(); Need("="); Need("new-cycle"); result.Add(profile.Measure("ParseDeclaration.var", () => new CycleDeclaration(name, span))); break; }
                     case "next": result.Add(profile.Measure("ParseDeclaration.next", () => new NextCycleDeclaration(Expression(), span))); break;

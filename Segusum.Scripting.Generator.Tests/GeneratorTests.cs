@@ -380,6 +380,26 @@ public sealed class GeneratorTests
     }
 
     [Fact]
+    public void AfterActionExecutedBindsNormalCutSceneAndActionContextMembers()
+    {
+        var result = Run("after-action-executed:\n    if actionContext.WasPerformedOn(dracula) or actionContext.IsMove:\n        olivia.Aspect = null\n    end\n    if cs.Count > 0:\n        olivia.Aspect = null\n    end\nend", "public Character olivia = null!; public Character dracula = null!;");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL"));
+        var generated = Generated(result);
+        Assert.Contains("public override void after_action_executed(CutScene cs, ActionContext actionContext)", generated);
+        Assert.Contains("actionContext.WasPerformedOn((dracula))", generated);
+        Assert.Contains("actionContext.IsMove", generated);
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
+    public void AfterActionExecutedIsUnique()
+    {
+        var result = Run("after-action-executed:\nend\nafter-action-executed:\nend");
+        Assert.Contains(result.Diagnostics, d => d.GetMessage().Contains("Duplicate after-action-executed", StringComparison.Ordinal));
+        Assert.Empty(result.GeneratedSources);
+    }
+
+    [Fact]
     public void BeforeRoomChangeIsUniqueAndPreventIsContextual()
     {
         var duplicate = Run("before-room-change:\nend\nbefore-room-change:\nend");
