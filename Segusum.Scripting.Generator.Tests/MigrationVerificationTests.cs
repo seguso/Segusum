@@ -13,6 +13,47 @@ namespace Segusum.Scripting.Generator.Tests;
 public sealed class MigrationVerificationTests
 {
     [Fact]
+    public void CycleFingerprintPreservesStartMetadataPredicateBodyAndElementOrder()
+    {
+        const string csharp = "class W { void M() { var cyc = startCycle(bb5, Importance.Important, Repeat.OnlyOnce, x => x.notSeenRecently(30), x => { }); cyc.addToCycle(mammaaiuti2, x => x.notSeenRecently(20), x => { }); } }";
+        const string dsl = "world game\ndef cycle:\n    var cyc = new-cycle\n    add cyc bb5 important once\n     when it not-seen-recently 30\n    end\n    add cyc mammaaiuti2\n     when it not-seen-recently 20\n    end\nend\n";
+        var left = MigrationVerifier.ExtractCSharpCycles("baseline.cs", csharp);
+        var right = MigrationVerifier.ExtractDslCycles(new DslSource("current.seg", dsl));
+        var check = MigrationVerifier.CompareCycles(left, right);
+        Assert.True(check.Status == EquivalenceStatus.Pass, check.Detail);
+    }
+
+    [Fact]
+    public void CycleFingerprintRejectsMetadataPredicateAndElementChanges()
+    {
+        const string csharp = "class W { void M() { var cyc = startCycle(bb5, Importance.Important, Repeat.OnlyOnce, x => x.notSeenRecently(30), x => { }); cyc.addToCycle(mammaaiuti2, x => x.notSeenRecently(20), x => { }); } }";
+        const string dsl = "world game\ndef cycle:\n    var cyc = new-cycle\n    add cyc bb5 once\n     when it not-seen-recently 20\n    end\n    add cyc otherId\n    end\nend\n";
+        Assert.Equal(EquivalenceStatus.Fail, MigrationVerifier.CompareCycles(
+            MigrationVerifier.ExtractCSharpCycles("baseline.cs", csharp),
+            MigrationVerifier.ExtractDslCycles(new DslSource("current.seg", dsl))).Status);
+    }
+
+    [Fact]
+    public void CycleLambdaParameterRenameIsIgnoredButOrderIsNot()
+    {
+        const string first = "class W { void M() { startCycle(bb5, x => x.notSeenRecently(30), x => { dial(camilla, \"First\"); }); } }";
+        const string second = "class W { void M() { startCycle(bb5, lastTime => lastTime.notSeenRecently(30), x => { dial(camilla, \"First\"); }); } }";
+        Assert.Equal(MigrationVerifier.ExtractCSharpCycles("a.cs", first)[0].Predicate, MigrationVerifier.ExtractCSharpCycles("b.cs", second)[0].Predicate);
+        const string reordered = "class W { void M() { startCycle(bb5, x => x.notSeenRecently(30), x => { dial(camilla, \"Changed\"); }); } }";
+        Assert.NotEqual(MigrationVerifier.ExtractCSharpCycles("a.cs", first)[0].BodyEffects, MigrationVerifier.ExtractCSharpCycles("c.cs", reordered)[0].BodyEffects);
+    }
+
+    [Fact]
+    public void HandlerRegistrationsMatchByStructureAndReportAddedMissingAndOrder()
+    {
+        const string csharp = "class W { void M() { addHandlerUseFor(a, oa, e => { }); addHandlerUseFor(b, ob, e => { }); } }";
+        const string dsl = "world game\nuse b for ob:\nend\nuse a for oa:\nend\nuse c for oc:\nend\n";
+        var results = MigrationVerifier.VerifyHandlerRegistrations("baseline.cs", csharp, new DslSource("current.seg", dsl));
+        Assert.Contains(results.SelectMany(x => x.Checks), x => x.Detail == "OrderMismatch");
+        Assert.Contains(results.SelectMany(x => x.Checks), x => x.Detail == "AddedHandlerRegistration");
+    }
+
+    [Fact]
     public void GameplayVerifierNormalizesEquivalentIfAndElseIfConditions()
     {
         const string csharp = "class W { void afterActionExecutedCSharp() { if (objectiveIsCurrent(puX) && !olivia.hasObject(obj)) { foo(obj); } else if (ready || !blocked) { bar(); } } }";

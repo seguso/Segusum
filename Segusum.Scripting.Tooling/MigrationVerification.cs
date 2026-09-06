@@ -20,7 +20,28 @@ public sealed record HandlerRegistrationFingerprint(
     string? PossibleWhen,
     string SourcePath,
     int SourceLine,
-    IReadOnlyList<string>? BodyEffects = null);
+    IReadOnlyList<string>? BodyEffects = null,
+    IReadOnlyList<CycleFingerprint>? Cycles = null);
+
+public sealed record CycleElementFingerprint(
+    string CycleId,
+    string Id,
+    string? Importance,
+    string? Repeat,
+    string? Predicate,
+    IReadOnlyList<string> BodyEffects,
+    string SourcePath,
+    int SourceLine);
+
+public sealed record CycleFingerprint(
+    string Id,
+    string? Importance,
+    string? Repeat,
+    string? Predicate,
+    IReadOnlyList<string> BodyEffects,
+    IReadOnlyList<CycleElementFingerprint> Elements,
+    string SourcePath,
+    int SourceLine);
 
 public sealed record VerificationCheck(string Name, EquivalenceStatus Status, string? Detail = null);
 
@@ -147,7 +168,8 @@ public static class MigrationVerifier
                 CanonicalDslExpression(declaration.Condition),
                 source.Path,
                 declaration.Span.Line,
-                ExtractDslHandlerEffects(declaration.Body)));
+                ExtractDslHandlerEffects(declaration.Body),
+                ExtractDslCyclesFromStatements(declaration.Body, source.Path)));
         }
         return result;
     }
@@ -170,6 +192,8 @@ public static class MigrationVerifier
         };
         if (csharp.BodyEffects is not null && dsl.BodyEffects is not null)
             checks.Add(SequenceCheck("body", csharp.BodyEffects, dsl.BodyEffects));
+        if (csharp.Cycles is not null && dsl.Cycles is not null)
+            checks.Add(CompareCycles(csharp.Cycles, dsl.Cycles));
         return new(csharp, dsl, checks);
     }
 
@@ -187,14 +211,30 @@ public static class MigrationVerifier
                 "Unverifiable SEG declaration/statement: " + string.Join("; ", parsed.Diagnostics.Select(x => x.Message))) }) };
         var csharp = ExtractCSharpRegistrations(csharpPath, csharpText);
         var dsl = ExtractDslRegistrations(dslSource);
-        var count = Math.Max(csharp.Count, dsl.Count);
         var results = new List<HandlerEquivalenceResult>();
-        for (var i = 0; i < count; i++)
-            results.Add(i >= csharp.Count ? new(null, dsl[i], new[] { new VerificationCheck("registration", EquivalenceStatus.Fail, "AddedHandlerRegistration") }) :
-                i >= dsl.Count ? new(csharp[i], null, new[] { new VerificationCheck("registration", EquivalenceStatus.Fail, "MissingHandlerRegistration") }) :
-                CompareRegistration(csharp[i], dsl[i]));
+        var used = new HashSet<int>();
+        var matches = new List<int>();
+        for (var i = 0; i < csharp.Count; i++)
+        {
+            var match = Enumerable.Range(0, dsl.Count).Where(j => !used.Contains(j) && SameRegistrationIdentity(csharp[i], dsl[j])).Cast<int?>().FirstOrDefault();
+            if (match is null)
+            {
+                results.Add(new(csharp[i], null, new[] { new VerificationCheck("registration", EquivalenceStatus.Fail, "MissingHandlerRegistration") }));
+                matches.Add(-1);
+                continue;
+            }
+            used.Add(match.Value); matches.Add(match.Value); results.Add(CompareRegistration(csharp[i], dsl[match.Value]));
+        }
+        for (var j = 0; j < dsl.Count; j++)
+            if (!used.Contains(j)) results.Add(new(null, dsl[j], new[] { new VerificationCheck("registration", EquivalenceStatus.Fail, "AddedHandlerRegistration") }));
+        var matchedOrder = matches.Where(x => x >= 0).ToArray();
+        if (!matchedOrder.SequenceEqual(matchedOrder.OrderBy(x => x)))
+            results.Add(new(null, null, new[] { new VerificationCheck("registration order", EquivalenceStatus.Fail, "OrderMismatch") }));
         return results;
     }
+
+    private static bool SameRegistrationIdentity(HandlerRegistrationFingerprint left, HandlerRegistrationFingerprint right)
+        => left.Kind == right.Kind && left.First == right.First && left.SecondOrTarget == right.SecondOrTarget;
 
     public static VerificationCheck CompareStrings(IReadOnlyList<string> csharp, IReadOnlyList<string> dsl)
         => csharp.SequenceEqual(dsl, StringComparer.Ordinal)
@@ -440,14 +480,147 @@ public static class MigrationVerifier
         var possibleExpression = args.FirstOrDefault(x => x.NameColon?.Name.Identifier.ValueText == "isPossibleNow")?.Expression;
         var possible = CanonicalCSharpExpression(possibleExpression is AnonymousFunctionExpressionSyntax possibleLambda
             ? possibleLambda.Body.ToString() : possibleExpression?.ToString());
-        var body = HandlerLambda(invocation) is { } lambda ? ExtractCSharpHandlerEffects(lambda) : Array.Empty<string>();
+        var lambda = HandlerLambda(invocation);
+        var body = lambda is { } handlerLambda ? ExtractCSharpHandlerEffects(handlerLambda) : Array.Empty<string>();
+        var cycles = lambda is { } cycleLambda ? ExtractCSharpCyclesFromStatements(cycleLambda, path) : Array.Empty<CycleFingerprint>();
         return new(kind, OperandText(args, 0), kind == "combine" ? OperandText(args, 1) : kind == "use-for" ? OperandText(args, 1) : null,
             LiteralText(phrase), CanonicalCSharpExpression(explanation), possible, path,
-            invocation.GetLocation().GetLineSpan().StartLinePosition.Line + 1, body);
+            invocation.GetLocation().GetLineSpan().StartLinePosition.Line + 1, body, cycles);
     }
 
     private static AnonymousFunctionExpressionSyntax? HandlerLambda(InvocationExpressionSyntax invocation)
         => invocation.ArgumentList.Arguments.Select(x => x.Expression).OfType<AnonymousFunctionExpressionSyntax>().LastOrDefault();
+
+    public static IReadOnlyList<CycleFingerprint> ExtractCSharpCycles(string path, string text)
+    {
+        var tree = CSharpSyntaxTree.ParseText(text, path: path);
+        return ExtractCSharpCyclesFromStatements(tree.GetRoot().DescendantNodes().OfType<MethodDeclarationSyntax>()
+            .SelectMany(x => x.Body?.Statements ?? Enumerable.Empty<StatementSyntax>()), path);
+    }
+
+    private static IReadOnlyList<CycleFingerprint> ExtractCSharpCyclesFromStatements(AnonymousFunctionExpressionSyntax lambda, string path)
+        => lambda.Body is BlockSyntax block ? ExtractCSharpCyclesFromStatements(block.Statements, path) : Array.Empty<CycleFingerprint>();
+
+    private static IReadOnlyList<CycleFingerprint> ExtractCSharpCyclesFromStatements(IEnumerable<StatementSyntax> statements, string path)
+    {
+        var cycles = new List<CycleFingerprint>();
+        foreach (var invocation in statements.SelectMany(x => x.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>())
+            .Where(x => InvocationName(x) == "startCycle"))
+        {
+            var args = invocation.ArgumentList.Arguments;
+            var lambdas = args.Select(x => x.Expression).OfType<AnonymousFunctionExpressionSyntax>().ToArray();
+            var id = OperandText(args, 0);
+            var importance = args.Select(x => x.Expression.ToString()).FirstOrDefault(x => x.EndsWith("Importance.Important", StringComparison.Ordinal))?.Split('.').Last();
+            var repeat = args.Select(x => x.Expression.ToString()).FirstOrDefault(x => x.EndsWith("Repeat.OnlyOnce", StringComparison.Ordinal) || x.EndsWith("Repeat.Forever", StringComparison.Ordinal))?.Split('.').Last();
+            var predicate = lambdas.Length > 1 ? CanonicalLambdaBody(lambdas[0], "$cycleElement") : null;
+            var body = lambdas.Length == 0 ? Array.Empty<string>() : ExtractCSharpHandlerEffects(lambdas[^1]);
+            var variable = invocation.Ancestors().OfType<VariableDeclaratorSyntax>().FirstOrDefault()?.Identifier.ValueText ?? id;
+            var elements = statements.SelectMany(x => x.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>())
+                .Where(x => InvocationName(x) == "addToCycle" && x.Expression is MemberAccessExpressionSyntax member && member.Expression.ToString() == variable)
+                .Select(x => CSharpCycleElement(x, path)).ToArray();
+            cycles.Add(new CycleFingerprint(id, importance, repeat, predicate, body, elements, path,
+                invocation.GetLocation().GetLineSpan().StartLinePosition.Line + 1));
+        }
+        return cycles;
+    }
+
+    private static CycleElementFingerprint CSharpCycleElement(InvocationExpressionSyntax invocation, string path)
+    {
+        var args = invocation.ArgumentList.Arguments;
+        var lambdas = args.Select(x => x.Expression).OfType<AnonymousFunctionExpressionSyntax>().ToArray();
+        var importance = args.Select(x => x.Expression.ToString()).FirstOrDefault(x => x.EndsWith("Importance.Important", StringComparison.Ordinal))?.Split('.').Last();
+        var repeat = args.Select(x => x.Expression.ToString()).FirstOrDefault(x => x.EndsWith("Repeat.OnlyOnce", StringComparison.Ordinal) || x.EndsWith("Repeat.Forever", StringComparison.Ordinal))?.Split('.').Last();
+        var predicate = lambdas.Length > 1 ? CanonicalLambdaBody(lambdas[0], "$cycleElement") : null;
+        var body = lambdas.Length == 0 ? Array.Empty<string>() : ExtractCSharpHandlerEffects(lambdas[^1]);
+        return new CycleElementFingerprint(invocation.Expression is MemberAccessExpressionSyntax member ? member.Expression.ToString() : "", OperandText(args, 0), importance, repeat, predicate, body, path,
+            invocation.GetLocation().GetLineSpan().StartLinePosition.Line + 1);
+    }
+
+    public static IReadOnlyList<CycleFingerprint> ExtractDslCycles(DslSource source)
+    {
+        var parsed = DslParser.Parse(source);
+        var statements = parsed.Document.Declarations.SelectMany(x => DeclarationStatements(x)).SelectMany(x => x).SelectMany(FlattenDslStatements).ToArray();
+        var starts = statements.OfType<VariableDeclaration>().Where(x => ExpressionText(x.Initializer) == "new-cycle").GroupBy(x => x.Name, StringComparer.Ordinal).Select(x => x.First()).ToDictionary(x => x.Name, StringComparer.Ordinal);
+        return starts.Values.Select(start => DslCycleFingerprint(start.Name, statements.OfType<AddCycleElementStatement>().Where(x => x.Cycle == start.Name).ToArray(), source.Path, start.Span.Line)).ToArray();
+    }
+
+    public static VerificationCheck CompareCycles(IReadOnlyList<CycleFingerprint> csharp, IReadOnlyList<CycleFingerprint> dsl)
+    {
+        if (csharp.Count != dsl.Count) return new("cycles", EquivalenceStatus.Fail, $"cycle count C#={csharp.Count} DSL={dsl.Count}");
+        for (var i = 0; i < csharp.Count; i++)
+        {
+            var a = csharp[i]; var b = dsl[i];
+            if (a.Id != b.Id || a.Importance != b.Importance || a.Repeat != b.Repeat || a.Predicate != b.Predicate)
+                return new("cycle", EquivalenceStatus.Fail, $"C#={a.Id}|{a.Importance}|{a.Repeat}|{a.Predicate}; DSL={b.Id}|{b.Importance}|{b.Repeat}|{b.Predicate}");
+            var body = SequenceCheck("cycle body", a.BodyEffects, b.BodyEffects); if (body.Status != EquivalenceStatus.Pass) return body;
+            if (a.Elements.Count != b.Elements.Count) return new("cycle elements", EquivalenceStatus.Fail, "cycle element count mismatch");
+            for (var j = 0; j < a.Elements.Count; j++)
+            {
+                var x = a.Elements[j]; var y = b.Elements[j];
+                if (x.Id != y.Id || x.Importance != y.Importance || x.Repeat != y.Repeat || x.Predicate != y.Predicate)
+                    return new("cycle element", EquivalenceStatus.Fail, $"element #{j + 1} mismatch C#={x.Id}|{x.Importance}|{x.Repeat}|{x.Predicate}; DSL={y.Id}|{y.Importance}|{y.Repeat}|{y.Predicate}");
+                var effects = SequenceCheck($"cycle element #{j + 1} body", x.BodyEffects, y.BodyEffects); if (effects.Status != EquivalenceStatus.Pass) return effects;
+            }
+        }
+        return new("cycles", EquivalenceStatus.Pass);
+    }
+
+    private static IReadOnlyList<CycleFingerprint> ExtractDslCyclesFromStatements(IEnumerable<DslStatement> input, string path)
+    {
+        var statements = input.SelectMany(FlattenDslStatements).ToArray();
+        var starts = statements.OfType<VariableDeclaration>().Where(x => ExpressionText(x.Initializer) == "new-cycle").GroupBy(x => x.Name, StringComparer.Ordinal).Select(x => x.First());
+        return starts.Select(start => DslCycleFingerprint(start.Name, statements.OfType<AddCycleElementStatement>().Where(x => x.Cycle == start.Name).ToArray(), path, start.Span.Line)).ToArray();
+    }
+
+    private static CycleFingerprint DslCycleFingerprint(string cycleName, IReadOnlyList<AddCycleElementStatement> all, string path, int line)
+    {
+        var initial = all.FirstOrDefault();
+        var elements = all.Skip(1).Select(x => new CycleElementFingerprint(cycleName, x.Id, x.Important ? "Important" : null,
+            x.Repeat is null ? null : x.Repeat == "once" ? "OnlyOnce" : "Forever", CanonicalCyclePredicate(x.Condition),
+            ExtractDslHandlerEffects(x.Body), path, x.Span.Line)).ToArray();
+        return new CycleFingerprint(initial?.Id ?? cycleName, initial?.Important == true ? "Important" : null,
+            initial?.Repeat is null ? null : initial.Repeat == "once" ? "OnlyOnce" : "Forever", CanonicalCyclePredicate(initial?.Condition),
+            initial is null ? Array.Empty<string>() : ExtractDslHandlerEffects(initial.Body), elements, path, line);
+    }
+
+    private static string? CanonicalCyclePredicate(DslExpression? expression)
+    {
+        var value = CanonicalDslExpression(expression);
+        if (value is null) return null;
+        value = System.Text.RegularExpressions.Regex.Replace(value, "not-seen-recently\\(it,(.*?)\\)", "$cycleElement.notSeenRecently($1)", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        return System.Text.RegularExpressions.Regex.Replace(value, "\\bit\\.", "$cycleElement.", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+    }
+
+    private static IEnumerable<IEnumerable<DslStatement>> DeclarationStatements(DslDeclaration declaration)
+    {
+        return declaration switch
+        {
+            FunctionDeclaration x => new[] { x.Body },
+            HandlerDeclaration x => new[] { x.Body },
+            BeforeRoomChangeDeclaration x => new[] { x.Body },
+            AfterActionExecutedDeclaration x => new[] { x.Body },
+            CycleElementDeclaration x => new[] { x.Body },
+            _ => Array.Empty<IEnumerable<DslStatement>>()
+        };
+    }
+
+    private static IEnumerable<DslStatement> FlattenDslStatements(DslStatement statement)
+    {
+        yield return statement;
+        switch (statement)
+        {
+            case IfStatement conditional:
+                foreach (var branch in conditional.Branches.SelectMany(x => x.Body).SelectMany(FlattenDslStatements)) yield return branch;
+                if (conditional.ElseBody is not null) foreach (var child in conditional.ElseBody.SelectMany(FlattenDslStatements)) yield return child;
+                break;
+            case AddCycleElementStatement cycle:
+                foreach (var child in cycle.Body.SelectMany(FlattenDslStatements)) yield return child;
+                break;
+            case NamedCutsceneStatement named:
+                foreach (var child in named.Body.SelectMany(FlattenDslStatements)) yield return child;
+                break;
+        }
+    }
 
     private static IReadOnlyList<string> ExtractCSharpHandlerEffects(AnonymousFunctionExpressionSyntax lambda)
     {
@@ -484,11 +657,15 @@ public static class MigrationVerifier
                     break;
                 case LocalDeclarationStatementSyntax local:
                     foreach (var variable in local.Declaration.Variables)
-                        if (variable.Initializer is not null) effects.Add("assign:" + variable.Identifier.ValueText + "=" + CanonicalCSharpExpression(variable.Initializer.Value.ToString()));
+                        if (variable.Initializer?.Value is InvocationExpressionSyntax start && InvocationName(start) == "startCycle")
+                            effects.Add("cycle-start:" + CycleInvocationFingerprint(start));
+                        else if (variable.Initializer is not null) effects.Add("assign:" + variable.Identifier.ValueText + "=" + CanonicalCSharpExpression(variable.Initializer.Value.ToString()));
+                    break;
+                case ExpressionStatementSyntax expression when expression.Expression is InvocationExpressionSyntax cycleAdd && InvocationName(cycleAdd) == "addToCycle":
+                    effects.Add("cycle-element:" + CycleElementInvocationFingerprint(cycleAdd));
                     break;
                 case UsingStatementSyntax usingStatement when usingStatement.Expression is InvocationExpressionSyntax namedCutscene && InvocationName(namedCutscene) == "namedCutScene":
-                    effects.Add("named-cutscene:" + CanonicalCSharpExpression(namedCutscene.ArgumentList.Arguments.FirstOrDefault()?.Expression.ToString()));
-                    if (usingStatement.Statement is BlockSyntax usingBlock) CollectCSharpHandlerEffects(usingBlock.Statements, effects);
+                    effects.Add(CSharpNamedCutsceneEffect(namedCutscene, usingStatement.Statement));
                     break;
                 case ReturnStatementSyntax ret: effects.Add("return:" + CanonicalCSharpExpression(ret.Expression?.ToString())); break;
                 default: effects.Add("unverifiable:" + statement.GetType().Name); break;
@@ -509,6 +686,54 @@ public static class MigrationVerifier
         if (name is "nar" or "narText" or "narRoom" or "narImg")
             return "narration:" + LiteralText(invocation.ArgumentList.Arguments.LastOrDefault()?.Expression.ToString());
         return "call:" + CanonicalCSharpExpression(invocation.ToString());
+    }
+
+    private static string CycleInvocationFingerprint(InvocationExpressionSyntax invocation)
+    {
+        var args = invocation.ArgumentList.Arguments;
+        var lambdas = args.Select(x => x.Expression).OfType<AnonymousFunctionExpressionSyntax>().ToArray();
+        var importance = args.Select(x => x.Expression.ToString()).FirstOrDefault(x => x.EndsWith("Importance.Important", StringComparison.Ordinal))?.Split('.').Last() ?? "-";
+        var repeat = args.Select(x => x.Expression.ToString()).FirstOrDefault(x => x.EndsWith("Repeat.OnlyOnce", StringComparison.Ordinal) || x.EndsWith("Repeat.Forever", StringComparison.Ordinal))?.Split('.').Last() ?? "-";
+        var predicate = lambdas.Length > 1 ? CanonicalLambdaBody(lambdas[0], "$cycleElement") : "-";
+        var body = lambdas.Length == 0 ? Array.Empty<string>() : ExtractCSharpHandlerEffects(lambdas[^1]);
+        return CanonicalCSharpExpression(OperandText(args, 0)) + "|importance=" + importance + "|repeat=" + repeat + "|predicate=" + predicate + "|body=[" + string.Join(";", body) + "]";
+    }
+
+    private static string CycleElementInvocationFingerprint(InvocationExpressionSyntax invocation)
+    {
+        var args = invocation.ArgumentList.Arguments;
+        var lambdas = args.Select(x => x.Expression).OfType<AnonymousFunctionExpressionSyntax>().ToArray();
+        var importance = args.Select(x => x.Expression.ToString()).FirstOrDefault(x => x.EndsWith("Importance.Important", StringComparison.Ordinal))?.Split('.').Last() ?? "-";
+        var repeat = args.Select(x => x.Expression.ToString()).FirstOrDefault(x => x.EndsWith("Repeat.OnlyOnce", StringComparison.Ordinal) || x.EndsWith("Repeat.Forever", StringComparison.Ordinal))?.Split('.').Last() ?? "-";
+        var predicate = lambdas.Length > 1 ? CanonicalLambdaBody(lambdas[0], "$cycleElement") : "-";
+        var body = lambdas.Length == 0 ? Array.Empty<string>() : ExtractCSharpHandlerEffects(lambdas[^1]);
+        return CanonicalCSharpExpression(OperandText(args, 0)) + "|importance=" + importance + "|repeat=" + repeat + "|predicate=" + predicate + "|body=[" + string.Join(";", body) + "]";
+    }
+
+    private static string CSharpNamedCutsceneEffect(InvocationExpressionSyntax invocation, StatementSyntax statement)
+    {
+        var args = invocation.ArgumentList.Arguments.Select(x => CanonicalCSharpExpression(x.Expression.ToString()) ?? "").ToArray();
+        var body = Array.Empty<string>();
+        if (statement is BlockSyntax block)
+        {
+            var collected = new List<string>();
+            CollectCSharpHandlerEffects(block.Statements, collected);
+            body = collected.ToArray();
+        }
+        return "named-cutscene:" + (args.FirstOrDefault() ?? "") + "|args=[" + string.Join(",", args.Skip(1)) + "]|body=[" + string.Join(";", body) + "]";
+    }
+
+    private static string? CanonicalLambdaBody(AnonymousFunctionExpressionSyntax lambda, string role)
+    {
+        var parameter = lambda switch
+        {
+            SimpleLambdaExpressionSyntax simple => simple.Parameter.Identifier.ValueText,
+            ParenthesizedLambdaExpressionSyntax parenthesized => parenthesized.ParameterList.Parameters.FirstOrDefault()?.Identifier.ValueText,
+            _ => null
+        };
+        var body = lambda.Body.ToString();
+        if (!string.IsNullOrEmpty(parameter)) body = System.Text.RegularExpressions.Regex.Replace(body, $"\\b{System.Text.RegularExpressions.Regex.Escape(parameter)}\\b", role);
+        return CanonicalCSharpExpression(body);
     }
 
     private static IReadOnlyList<string> ExtractDslHandlerEffects(IEnumerable<DslStatement> statements)
@@ -549,8 +774,7 @@ public static class MigrationVerifier
                 case DoNotAdvanceTimeStatement: effects.Add("do-not-advance-time"); break;
                 case PreventRoomChangeStatement: effects.Add("prevent-room-change"); break;
                 case NamedCutsceneStatement named:
-                    effects.Add("named-cutscene:" + named.Id);
-                    effects.AddRange(ExtractDslHandlerEffects(named.Body));
+                    effects.Add("named-cutscene:" + named.Id + "|args=[" + string.Join(",", named.Arguments.Select(CanonicalDslExpression)) + "]|body=[" + string.Join(";", ExtractDslHandlerEffects(named.Body)) + "]");
                     break;
                 default: effects.Add("unverifiable:" + statement.GetType().Name); break;
             }
