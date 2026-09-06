@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 using Microsoft.CodeAnalysis;
@@ -22,6 +23,9 @@ public sealed record MigrationOutput(string Text, IReadOnlyList<MigrationDiagnos
 /// <summary>Deterministic Roslyn-based first-pass C# to SEG emitter.</summary>
 public static class CSharpToSegTranspiler
 {
+    private static readonly Dictionary<string, IReadOnlyDictionary<string, string?>> NamedCutsceneIndexCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly object NamedCutsceneIndexLock = new();
+
     public static MigrationOutput Transpile(string path, string text, bool emitPartial = false, string? methodName = null)
     {
         var tree = CSharpSyntaxTree.ParseText(text, path: path);
@@ -549,10 +553,45 @@ public static class CSharpToSegTranspiler
 
     private static string? NamedCutsceneTitle(InvocationExpressionSyntax invocation, string id)
     {
-        var root = invocation.SyntaxTree.GetRoot();
-        var declaration = root.DescendantNodes().OfType<VariableDeclaratorSyntax>().FirstOrDefault(x => x.Identifier.ValueText == id && x.Initializer?.Value is ObjectCreationExpressionSyntax creation && creation.Type.ToString().EndsWith("NamedCutSceneId", StringComparison.Ordinal));
-        var title = declaration?.Initializer?.Value.DescendantNodes().OfType<LiteralExpressionSyntax>().FirstOrDefault(x => x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.StringLiteralExpression));
-        return title?.Token.Text;
+        var sourcePath = invocation.SyntaxTree.FilePath;
+        var directory = string.IsNullOrEmpty(sourcePath) ? "" : Path.GetDirectoryName(sourcePath) ?? "";
+        if (directory.Length == 0)
+        {
+            return FindNamedCutsceneTitle(invocation.SyntaxTree.GetRoot(), id);
+        }
+        IReadOnlyDictionary<string, string?> index;
+        lock (NamedCutsceneIndexLock)
+        {
+            if (!NamedCutsceneIndexCache.TryGetValue(directory, out index!))
+            {
+                var map = new Dictionary<string, string?>(StringComparer.Ordinal);
+                foreach (var candidatePath in Directory.EnumerateFiles(directory, "*.cs", SearchOption.TopDirectoryOnly))
+                {
+                    try
+                    {
+                        var root = CSharpSyntaxTree.ParseText(File.ReadAllText(candidatePath), path: candidatePath).GetRoot();
+                        foreach (var declaration in root.DescendantNodes().OfType<VariableDeclaratorSyntax>().Where(x => x.Initializer?.Value is ObjectCreationExpressionSyntax creation && creation.Type.ToString().EndsWith("NamedCutSceneId", StringComparison.Ordinal)))
+                        {
+                            var title = FindNamedCutsceneTitle(root, declaration.Identifier.ValueText);
+                            if (map.ContainsKey(declaration.Identifier.ValueText)) map[declaration.Identifier.ValueText] = null;
+                            else map[declaration.Identifier.ValueText] = title;
+                        }
+                    }
+                    catch (IOException) { }
+                }
+                NamedCutsceneIndexCache[directory] = index = map;
+            }
+        }
+        return index.TryGetValue(id, out var result) ? result : FindNamedCutsceneTitle(invocation.SyntaxTree.GetRoot(), id);
+    }
+
+    private static string? FindNamedCutsceneTitle(SyntaxNode root, string id)
+    {
+        var declaration = root.DescendantNodes().OfType<VariableDeclaratorSyntax>().FirstOrDefault(x =>
+            x.Identifier.ValueText == id && x.Initializer?.Value is ObjectCreationExpressionSyntax creation
+            && creation.Type.ToString().EndsWith("NamedCutSceneId", StringComparison.Ordinal));
+        return declaration?.Initializer?.Value.DescendantNodes().OfType<LiteralExpressionSyntax>()
+            .FirstOrDefault(x => x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.StringLiteralExpression))?.Token.Text;
     }
 
     private static string? EnumValue(SeparatedSyntaxList<ArgumentSyntax> args, string type, params string[] known)
@@ -613,14 +652,27 @@ public static class CSharpToSegTranspiler
             BinaryExpressionSyntax x => Expression(x.Left) + " " + BinaryOperator(x.Kind()) + " " + Expression(x.Right),
             MemberAccessExpressionSyntax x => Expression(x.Expression) + "." + x.Name.Identifier.ValueText,
             InvocationExpressionSyntax x => EmitCallExpression(x),
+            CollectionExpressionSyntax x => "[" + string.Join(", ", x.Elements.Select(EmitCollectionElement)) + "]",
             ArgumentSyntax x => (x.NameColon is null ? "" : x.NameColon.Name.Identifier.ValueText + ": ") + Expression(x.Expression),
             _ => throw new InvalidOperationException("Unsupported C# expression: " + node.Kind())
         };
     }
 
+    private static string EmitCollectionElement(CollectionElementSyntax element)
+        => element is ExpressionElementSyntax expression
+            ? Expression(expression.Expression)
+            : throw new InvalidOperationException("Unsupported C# collection element: " + element.Kind());
+
     private static string EmitCallExpression(InvocationExpressionSyntax invocation)
     {
         var name = invocation.Expression is MemberAccessExpressionSyntax member ? member.Name.Identifier.ValueText : invocation.Expression.ToString();
+        if (name == "Any" && invocation.ArgumentList.Arguments.Count == 1)
+        {
+            if (invocation.Expression is not MemberAccessExpressionSyntax anyMember
+                || invocation.ArgumentList.Arguments[0].Expression is not LambdaExpressionSyntax lambda)
+                throw new InvalidOperationException("Unsupported Any predicate shape");
+            return EmitAnyQuery(anyMember.Expression, lambda);
+        }
         if (invocation.ArgumentList.Arguments.Any(x => x.Expression is AnonymousFunctionExpressionSyntax or LambdaExpressionSyntax || x.RefKindKeyword.RawKind != 0))
             throw new InvalidOperationException("Unsupported C# call: " + name);
         // SEG calls are whitespace-delimited (foo a b / receiver.foo a),
@@ -633,6 +685,20 @@ public static class CSharpToSegTranspiler
         return invocation.ArgumentList.Arguments.Count == 0
             ? receiver
             : receiver + " " + string.Join(" ", invocation.ArgumentList.Arguments.Select(x => Expression(x)));
+    }
+
+    private static string EmitAnyQuery(ExpressionSyntax collection, LambdaExpressionSyntax lambda)
+    {
+        var parameter = lambda switch
+        {
+            SimpleLambdaExpressionSyntax simple => simple.Parameter.Identifier.ValueText,
+            ParenthesizedLambdaExpressionSyntax parenthesized when parenthesized.ParameterList.Parameters.Count == 1
+                => parenthesized.ParameterList.Parameters[0].Identifier.ValueText,
+            _ => throw new InvalidOperationException("Unsupported Any predicate lambda")
+        };
+        if (lambda.Body is BlockSyntax)
+            throw new InvalidOperationException("Unsupported Any predicate block lambda");
+        return "exists [from " + Expression(collection) + " " + parameter + " where " + Expression(lambda.Body) + "]";
     }
 
     private static string BinaryOperator(Microsoft.CodeAnalysis.CSharp.SyntaxKind kind) => kind switch

@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using Segusum.Scripting.Tooling;
 
@@ -12,6 +13,38 @@ public sealed class CSharpToSegTranspilerTests
         var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { void M() { addHandlerUseHere(a, handler: i => { if (ready && !blocked) { dial(camilla, \"[[translation]] ! &&\"); } }); } }");
         Assert.Contains("camilla: \"[[translation]] ! &&\"", result.Text, StringComparison.Ordinal);
         Assert.Contains("if ready and not blocked:", result.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnyPredicateUsesExistingExistsQuerySyntax()
+    {
+        var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { void M() { addHandlerUseHere(a, handler: i => { if (values.Any(x => x.notSeenRecently(30))) { foo(); } }); } }");
+        Assert.Contains("exists [from values x where x.notSeenRecently 30]", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(result.Diagnostics, x => x.Status == MigrationUnitStatus.Unsupported);
+    }
+
+    [Fact]
+    public void CollectionExpressionUsesExistingListLiteralSyntax()
+    {
+        var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { void M() { addHandlerUseHere(a, handler: i => { var xs = [one, two, 3]; foo(xs); }); } }");
+        Assert.Contains("var xs = [one, two, 3]", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(result.Diagnostics, x => x.Status == MigrationUnitStatus.Unsupported);
+    }
+
+    [Fact]
+    public void NamedCutsceneTitleIsResolvedAcrossSiblingSourceFiles()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "segusum-c2seg-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            File.WriteAllText(Path.Combine(directory, "worldObjects.cs"), "class W { NamedCutSceneId ncs = new NamedCutSceneId { titleUntranslated = translatable(\"A title\") }; }");
+            var sourcePath = Path.Combine(directory, "handlers.cs");
+            var result = CSharpToSegTranspiler.Transpile(sourcePath, "class W { void M() { addHandlerUseHere(a, handler: i => { using (namedCutScene(ncs, roomA)) { dial(camilla, \"A\"); } }); } }");
+            Assert.Contains("named-cutscene ncs \"A title\" roomA", result.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain(result.Diagnostics, x => x.Reason.Contains("title cannot be resolved", StringComparison.Ordinal));
+        }
+        finally { Directory.Delete(directory, true); }
     }
 
     [Fact]
