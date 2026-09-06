@@ -110,7 +110,15 @@ public sealed class DslSemanticWorkspace
 
     public SemanticDefinition? GetDefinition(string path, int line, int column)
     {
+        var totalTimer = Stopwatch.StartNew();
+        var referenceTimer = Stopwatch.StartNew();
         var sourceReference = FindReference(path, line, column);
+        referenceTimer.Stop();
+        SemanticDefinition? Finish(SemanticDefinition? result, string phase)
+        {
+            Console.Error.WriteLine($"definitionLookup path={path} phase={phase} findReference={referenceTimer.Elapsed.TotalMilliseconds:0.0}ms resolve={Math.Max(0, totalTimer.Elapsed.TotalMilliseconds - referenceTimer.Elapsed.TotalMilliseconds):0.0}ms total={totalTimer.Elapsed.TotalMilliseconds:0.0}ms found={result != null}");
+            return result;
+        }
         if (documents.TryGetValue(path, out var document))
         {
             var cursor = GetDocumentOffset(document.Text, line, column);
@@ -122,18 +130,20 @@ public sealed class DslSemanticWorkspace
         if (sourceReference?.CSharpSymbol != null)
         {
             var location = sourceReference.CSharpSymbol.Locations.FirstOrDefault() ?? Location.None;
-            return new SemanticDefinition(sourceReference.CSharpSymbol.Name, ToLocation(location), sourceReference.CSharpSymbol, null);
+            return Finish(new SemanticDefinition(sourceReference.CSharpSymbol.Name, ToLocation(location), sourceReference.CSharpSymbol, null), "csharp-reference");
         }
         if (sourceReference?.DslSymbol != null && model.DslDefinitions.TryGetValue(sourceReference.DslSymbol, out var dslSpan))
-            return new SemanticDefinition(sourceReference.DslSymbol.Name, new SemanticLocation(dslSpan.Path, dslSpan, "dsl-definition"), null, sourceReference.DslSymbol);
+            return Finish(new SemanticDefinition(sourceReference.DslSymbol.Name, new SemanticLocation(dslSpan.Path, dslSpan, "dsl-definition"), null, sourceReference.DslSymbol), "dsl-reference");
 
         var tree = compilation.SyntaxTrees.FirstOrDefault(x => string.Equals(x.FilePath, path, StringComparison.OrdinalIgnoreCase));
-        if (tree == null) return null;
+        if (tree == null) return Finish(null, "no-tree");
         var position = GetPosition(tree, line, column);
         var semanticModel = compilation.GetSemanticModel(tree);
         var node = tree.GetRoot().FindToken(position).Parent!;
         var symbol = semanticModel.GetSymbolInfo(node).Symbol ?? GetDeclaredSymbol(semanticModel, node);
-        return symbol == null ? null : new SemanticDefinition(symbol.Name, ToLocation(symbol.Locations.FirstOrDefault() ?? Location.None), symbol, null);
+        return symbol == null
+            ? Finish(null, "no-symbol")
+            : Finish(new SemanticDefinition(symbol.Name, ToLocation(symbol.Locations.FirstOrDefault() ?? Location.None), symbol, null), "csharp-tree");
     }
 
     public RenameResult RenameSymbol(string path, int line, int column, string newName)

@@ -132,6 +132,21 @@ public sealed class GeneratorTests
     }
 
     [Fact]
+    public void SemanticWorkspaceRepeatedDefinitionsRemainStable()
+    {
+        const string dslText = "world game\ndef check ret bool:\n    ret olivia.isHere\nend\n";
+        var workspace = CreateSemanticWorkspace(dslText, "public Character olivia = null!;");
+
+        var first = workspace.GetDefinition("Gameplay/Dirty.seg", 3, 9);
+        var second = workspace.GetDefinition("Gameplay/Dirty.seg", 3, 9);
+        var third = workspace.GetDefinition("Gameplay/Dirty.seg", 3, 9);
+
+        Assert.Equal("olivia", first?.DisplayName);
+        Assert.Equal(first?.Location, second?.Location);
+        Assert.Equal(first?.Location, third?.Location);
+    }
+
+    [Fact]
     public void SemanticWorkspaceResolvesDirtyDslDefinitionByCurrentTokenOffset()
     {
         const string diskText = "world game\ndef creaCicloMikeNonRipete ret bool:\n    ret true\nend\ndef caller ret bool:\n    ret creaCicloMikeNonRipete\nend\n";

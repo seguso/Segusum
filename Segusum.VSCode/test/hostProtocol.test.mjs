@@ -50,12 +50,21 @@ if (!project || !sourcePath || !fs.existsSync(project) || !fs.existsSync(sourceP
   try {
     const initialized = await request(1, 'initialize', { projectPath: project });
     assert.equal(initialized.error, null, JSON.stringify(initialized));
+    assert.deepEqual(new Set((initialized.result?.worlds ?? []).map(world => world.id)), new Set(['game', 'tutorial']));
     const result = await request(2, 'definition', { path: sourcePath, line, column, text: dirtyText });
     assert.equal(result.error, null, JSON.stringify(result));
     assert.equal(result.result?.displayName, symbol, `stdout=${JSON.stringify(result)}\nstderr=${stderr}`);
     const references = await request(3, 'references', { path: sourcePath, line, column, text: dirtyText });
     assert.equal(references.error, null, JSON.stringify(references));
     assert.ok((references.result ?? []).every(reference => reference.displayName === symbol));
+    const repeated = await request(4, 'definition', { path: sourcePath, line, column, text: dirtyText });
+    assert.equal(repeated.error, null, JSON.stringify(repeated));
+    assert.equal(repeated.result?.displayName, symbol);
+    const invalidated = await request(5, 'invalidate', {});
+    assert.equal(invalidated.error, null, JSON.stringify(invalidated));
+    const afterInvalidate = await request(6, 'definition', { path: sourcePath, line, column, text: dirtyText });
+    assert.equal(afterInvalidate.error, null, JSON.stringify(afterInvalidate));
+    assert.equal(afterInvalidate.result?.displayName, symbol);
     console.log('host protocol dirty-buffer test: definition-first and references resolve the current dirty token');
   } finally {
     child.kill();
