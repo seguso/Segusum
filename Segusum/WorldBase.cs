@@ -325,6 +325,15 @@ namespace Seg
             });
         }
 
+        internal List<NamedCutScene> namedCutScenesRemembering(LogicObj lo)
+            => namedCutScenesSeen
+                .Where(n => n.oggettiMenzionati.Any(m => m is LogicObj mentioned
+                    && mentioned.loId == lo.loId))
+                .ToList();
+
+        internal bool canBeRemembered(LogicObj lo)
+            => namedCutScenesRemembering(lo).Count != 0;
+
         //public virtual bool verbIsHighlightedNow(Verb v)
         //{
         //        return false;
@@ -2529,6 +2538,14 @@ namespace Seg
 
                     el.Add(new XAttribute("time", pa.dateTime.ToString(CultureInfo.InvariantCulture)));
                 }
+                else if (pa is PastActionRemember prm)
+                {
+                    var el = new XElement("past_action_remember");
+                    xelRoot.Add(el);
+
+                    el.Add(new XAttribute("lo", prm.lo.loId));
+                    el.Add(new XAttribute("time", pa.dateTime.ToString(CultureInfo.InvariantCulture)));
+                }
                 else if (pa is PastActionUseHere puh)
                 {
                     var el = new XElement("past_action_use_here");
@@ -3330,6 +3347,17 @@ namespace Seg
 
                 var pa = new PastActionLookRemember(lo, fulltext, time);
                 pastActions.Add(pa);
+            }
+
+            foreach (var xelPa in xelRoot.Elements("past_action_remember"))
+            {
+                var loId = xelPa.Attribute("lo").Value;
+                if (loOfId.ContainsKey(loId))
+                {
+                    var lo = loOfId[loId];
+                    var time = DateTime.Parse(xelPa.Attribute("time").Value, CultureInfo.InvariantCulture);
+                    pastActions.Add(new PastActionRemember(lo, time));
+                }
             }
 
 

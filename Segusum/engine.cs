@@ -3757,6 +3757,11 @@ namespace Seg
 
             var lo = w.loOfId[loId];
 
+            // Record the attempt even when no seen named cutscene contains the
+            // object. This is part of the action history and is intentionally
+            // done before producing the remembered content.
+            w.pastActions.Add(new PastActionRemember(lo, w.EngineNowForInfrastructure));
+
             var loNameTranslatedWithArticle = lo.dynamicNameTranslated(xdi, withThe: true, isForDialog: false);
 
             var cs = new CutScene(canBeSkipped: true);
@@ -3771,7 +3776,7 @@ namespace Seg
 
 
 
-            var ncs = w.namedCutScenesSeen.Where(n => n.oggettiMenzionati.Any(om => om is LogicObj && om.to_logic_obj().loId == loId)).ToList();
+            var ncs = w.namedCutScenesRemembering(lo);
 
             if (ncs.isEmpty())
             {

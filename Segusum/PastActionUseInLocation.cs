@@ -59,4 +59,15 @@ namespace Seg
                 public string fullText { get; set; }
         }
 
+        public class PastActionRemember : PastAction
+        {
+                public LogicObj lo;
+
+                public PastActionRemember(LogicObj lo, DateTime date)
+                {
+                        this.lo = lo ?? throw new ArgumentNullException(nameof(lo));
+                        this.dateTime = date;
+                }
+        }
+
 }

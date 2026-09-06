@@ -369,7 +369,7 @@ namespace Seg
             //this.ofcAssociatedQtokens = ( from q in lo.associatedQToks select q.serId).ToArray();
 
             ofcHotspotPriority = lo.HotspotPriority;
-            ofc_can_be_remembered = lo.wo.namedCutScenesSeen.Any(nc => nc.oggettiMenzionati.Contains(lo));
+            ofc_can_be_remembered = lo.wo.canBeRemembered(lo);
 
             if (lo.isInInvOfPartyMember(out Character cha))
             {
