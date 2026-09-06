@@ -25,6 +25,7 @@ public sealed class DslSourceStringExtractor
                 }
                 if (declaration is CycleElementDeclaration cycle) Walk(cycle.Body, result, relativePath);
                 if (declaration is BeforeRoomChangeDeclaration beforeRoomChange) Walk(beforeRoomChange.Body, result, relativePath);
+                if (declaration is AfterActionExecutedDeclaration afterActionExecuted) Walk(afterActionExecuted.Body, result, relativePath);
             }
         }
         return result.GroupBy(x => x.Value, StringComparer.Ordinal).Select(x => x.First()).ToArray();

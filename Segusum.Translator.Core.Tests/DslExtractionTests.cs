@@ -91,4 +91,42 @@ end
         }
         finally { Directory.Delete(root, recursive: true); }
     }
+
+    [Fact]
+    public void AfterActionExecutedExtractsDialoguesNarrativeNestedBranchesAndMetadata()
+    {
+        const string dsl = """
+world game
+after-action-executed:
+    nar: Una narrazione nell'after-action.
+    olivia: Prima battuta.
+    if true:
+        camilla: Battuta nel ramo if.
+    elif false:
+        nar: Narrazione nel ramo elif.
+    end
+    named-cutscene ncsAfterAction "Titolo del ricordo" curRoom:
+        nar: Corpo della cutscene.
+    end
+end
+""";
+        var extracted = Extract(dsl).ToArray();
+
+        Assert.Equal(new[]
+        {
+            "Una narrazione nell'after-action.",
+            "Prima battuta.",
+            "Battuta nel ramo if.",
+            "Narrazione nel ramo elif.",
+            "Titolo del ricordo",
+            "Corpo della cutscene."
+        }, extracted.Select(x => x.Value));
+        Assert.All(extracted, x => Assert.Equal("fixture.seg", x.RelativePath));
+        Assert.Equal(3, extracted[0].LineNumber);
+        Assert.Equal(4, extracted[1].LineNumber);
+        Assert.Equal(6, extracted[2].LineNumber);
+        Assert.Equal(8, extracted[3].LineNumber);
+        Assert.Equal(10, extracted[4].LineNumber);
+        Assert.Equal(11, extracted[5].LineNumber);
+    }
 }

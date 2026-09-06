@@ -14,6 +14,27 @@ public sealed class TranslationCatalogSynchronizerTests
     }
 
     [Fact]
+    public void ExtractedAfterActionStringReactivatesExistingTranslatedCatalogEntry()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "segusum-after-action-catalog-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            const string value = "Dialogo già tradotto spostato da C# a SEG.";
+            File.WriteAllText(Path.Combine(root, "AfterAction.seg"), $"world game\nafter-action-executed:\n    olivia: {value}\nend\n");
+            var source = new DslSourceStringExtractor().Extract(root).Select(x => x.Value).ToArray();
+            var result = new TranslationCatalogSynchronizer().Synchronize(source, Catalog((value, "Already translated", true, null)));
+            var entry = Assert.Single(result.Document.Root!.Elements("str"));
+            Assert.Equal(value, entry.Attribute("orig")!.Value);
+            Assert.Equal("Already translated", entry.Attribute("transl")!.Value);
+            Assert.Null(entry.Attribute("obsolete"));
+            Assert.Equal(1, result.Statistics.Reactivated);
+            Assert.Empty(result.Statistics.NewlyObsoleteStrings);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
     public void NewStringIsInsertedInCanonicalOrderAsPlus()
     {
         var result = new TranslationCatalogSynchronizer().Synchronize(new[] { "A", "B", "X", "C" }, Catalog(("A", "a"), ("B", "b"), ("C", "c")));
