@@ -431,6 +431,16 @@ public static class CSharpToSegTranspiler
                     else sb.Append(indent).Append(Expression(a.Left)).Append(' ').Append(a.OperatorToken.Text).Append(' ').AppendLine(Expression(a.Right)); break;
                 case ExpressionStatementSyntax x when x.Expression is InvocationExpressionSyntax i:
                     EmitInvocation(i, sb, diagnostics, level, partial); break;
+                case ExpressionStatementSyntax x when x.Expression is PostfixUnaryExpressionSyntax p && p.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.PostIncrementExpression):
+                    sb.Append(indent).Append(Expression(p.Operand)).AppendLine("++"); break;
+                case ExpressionStatementSyntax x when x.Expression is PrefixUnaryExpressionSyntax p && p.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.PreIncrementExpression):
+                    sb.Append(indent).Append(Expression(p.Operand)).AppendLine("++"); break;
+                case ExpressionStatementSyntax x:
+                    try { sb.Append(indent).AppendLine(Expression(x.Expression)); }
+                    catch (InvalidOperationException ex) { Unsupported(x.Expression, diagnostics, ex.Message, partial, sb, level); }
+                    break;
+                case BlockSyntax x:
+                    EmitStatements(x.Statements, sb, diagnostics, level, partial, includeComments); break;
                 case LocalDeclarationStatementSyntax x:
                     foreach (var v in x.Declaration.Variables)
                     {
@@ -605,7 +615,7 @@ public static class CSharpToSegTranspiler
     private static string EmitCallExpression(InvocationExpressionSyntax invocation)
     {
         var name = invocation.Expression is MemberAccessExpressionSyntax member ? member.Name.Identifier.ValueText : invocation.Expression.ToString();
-        if (name is "Where" or "Select" or "OrderBy" or "ThenBy" or "GroupBy" or "Count" or "Any" or "First" or "FirstOrDefault" || invocation.ArgumentList.Arguments.Any(x => x.Expression is AnonymousFunctionExpressionSyntax or LambdaExpressionSyntax))
+        if (invocation.ArgumentList.Arguments.Any(x => x.Expression is AnonymousFunctionExpressionSyntax or LambdaExpressionSyntax || x.RefKindKeyword.RawKind != 0))
             throw new InvalidOperationException("Unsupported C# call: " + name);
         // SEG calls are whitespace-delimited (foo a b / receiver.foo a),
         // not C# parenthesized calls. Emitting the C# spelling here can make
