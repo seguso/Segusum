@@ -135,11 +135,8 @@ public sealed class DslBinder
     private readonly Dictionary<string, IReadOnlyList<ISymbol>> worldMembersByName = new(StringComparer.Ordinal);
     private readonly object worldMembersGate = new();
     private readonly Dictionary<string, IReadOnlyList<ISymbol>> resolvedCSharpMembersByName = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, IReadOnlyList<ISymbol>> resolvedCSharpCandidatesByName = new(StringComparer.Ordinal);
-    private readonly object resolutionCacheGate = new();
     private readonly Dictionary<ITypeSymbol, Dictionary<string, IReadOnlyList<ISymbol>>> membersByReceiverType = new(SymbolEqualityComparer.Default);
     private readonly Dictionary<ISymbol, Dictionary<ITypeSymbol, bool>> accessibilityByReceiver = new(SymbolEqualityComparer.Default);
-    private readonly Dictionary<string, string> normalizedKeys = new(StringComparer.Ordinal);
     private readonly Dictionary<ISymbol, bool> accessibilityBySymbol = new(SymbolEqualityComparer.Default);
     private readonly object accessibilityGate = new();
     private readonly CSharpSemanticIndexCache? semanticIndexes;
@@ -581,18 +578,15 @@ public sealed class DslBinder
         => !symbol.IsImplicitlyDeclared && symbol is not IMethodSymbol { MethodKind: MethodKind.Constructor or MethodKind.PropertyGet or MethodKind.PropertySet or MethodKind.EventAdd or MethodKind.EventRemove };
     private IReadOnlyList<ISymbol> ResolveCSharpMembers(string name)
     {
-        lock (resolutionCacheGate)
+        if (resolvedCSharpMembersByName.TryGetValue(name, out var cached))
         {
-            if (resolvedCSharpMembersByName.TryGetValue(name, out var cached))
-            {
-                profile.Count("ResolveCSharpMembers cache hit");
-                return cached;
-            }
-            profile.Count("ResolveCSharpMembers cache miss");
-            var resolved = profile.Measure("ResolveCSharpMembers", () => AllMembers(name).ToArray());
-            resolvedCSharpMembersByName[name] = resolved;
-            return resolved;
+            profile.Count("ResolveCSharpMembers cache hit");
+            return cached;
         }
+        profile.Count("ResolveCSharpMembers cache miss");
+        var resolved = profile.Measure("ResolveCSharpMembers", () => AllMembers(name).ToArray());
+        resolvedCSharpMembersByName[name] = resolved;
+        return resolved;
     }
     private static ITypeSymbol? MemberType(ISymbol symbol) => symbol switch { IFieldSymbol f => f.Type, IPropertySymbol p => p.Type, IMethodSymbol m => m.ReturnType, _ => null };
     private IEnumerable<IMethodSymbol> ExtensionMethodsOf(ITypeSymbol receiverType, string name)
@@ -665,20 +659,17 @@ public sealed class DslBinder
     }
     private bool Accessible(ISymbol member, ITypeSymbol receiverType)
     {
-        lock (resolutionCacheGate)
+        if (accessibilityByReceiver.TryGetValue(member, out var byType) && byType.TryGetValue(receiverType, out var cached))
         {
-            if (accessibilityByReceiver.TryGetValue(member, out var byType) && byType.TryGetValue(receiverType, out var cached))
-            {
-                profile.Count("Accessible(receiver) cache hit");
-                return cached;
-            }
-            profile.Count("Accessible(receiver) cache miss");
-            var result = Accessible(member) &&
-                (member.DeclaredAccessibility is not (Accessibility.Protected or Accessibility.ProtectedAndInternal or Accessibility.ProtectedOrInternal) || IsSameOrDerived(receiverType, world));
-            if (!accessibilityByReceiver.TryGetValue(member, out byType)) accessibilityByReceiver[member] = byType = new Dictionary<ITypeSymbol, bool>(SymbolEqualityComparer.Default);
-            byType[receiverType] = result;
-            return result;
+            profile.Count("Accessible(receiver) cache hit");
+            return cached;
         }
+        profile.Count("Accessible(receiver) cache miss");
+        var result = Accessible(member) &&
+            (member.DeclaredAccessibility is not (Accessibility.Protected or Accessibility.ProtectedAndInternal or Accessibility.ProtectedOrInternal) || IsSameOrDerived(receiverType, world));
+        if (!accessibilityByReceiver.TryGetValue(member, out byType)) accessibilityByReceiver[member] = byType = new Dictionary<ITypeSymbol, bool>(SymbolEqualityComparer.Default);
+        byType[receiverType] = result;
+        return result;
     }
     private static bool IsSameOrDerived(ITypeSymbol candidate, INamedTypeSymbol baseType)
     {
@@ -690,19 +681,16 @@ public sealed class DslBinder
     private IEnumerable<ISymbol> MembersOf(ITypeSymbol type, string? name = null)
     {
         var key = name ?? "\0";
-        lock (resolutionCacheGate)
+        if (membersByReceiverType.TryGetValue(type, out var byName) && byName.TryGetValue(key, out var cached))
         {
-            if (membersByReceiverType.TryGetValue(type, out var byName) && byName.TryGetValue(key, out var cached))
-            {
-                profile.Count("MembersOf cache hit");
-                return profile.MeasureEnumerable("MembersOf", cached);
-            }
-            profile.Count("MembersOf cache miss");
-            var members = MembersOfCore(type, name).ToArray();
-            if (!membersByReceiverType.TryGetValue(type, out byName)) membersByReceiverType[type] = byName = new Dictionary<string, IReadOnlyList<ISymbol>>(StringComparer.Ordinal);
-            byName[key] = members;
-            return profile.MeasureEnumerable("MembersOf", members);
+            profile.Count("MembersOf cache hit");
+            return profile.MeasureEnumerable("MembersOf", cached);
         }
+        profile.Count("MembersOf cache miss");
+        var members = MembersOfCore(type, name).ToArray();
+        if (!membersByReceiverType.TryGetValue(type, out byName)) membersByReceiverType[type] = byName = new Dictionary<string, IReadOnlyList<ISymbol>>(StringComparer.Ordinal);
+        byName[key] = members;
+        return profile.MeasureEnumerable("MembersOf", members);
     }
     private IEnumerable<ISymbol> MembersOfCore(ITypeSymbol type, string? name = null)
     {
@@ -766,21 +754,7 @@ public sealed class DslBinder
     private SyntaxNode GetRoot(SyntaxTree tree)
         => profile.Measure("Roslyn.GetRoot", () => tree.GetRoot());
     private ITypeSymbol? TypeOf(string name) => name switch { "int" => compilation.GetSpecialType(SpecialType.System_Int32), "bool" => compilation.GetSpecialType(SpecialType.System_Boolean), "string" => compilation.GetSpecialType(SpecialType.System_String), _ => GetTypeByMetadataName(name.StartsWith("Seg.", StringComparison.Ordinal) ? name : "Seg." + name) ?? GetTypeByMetadataName(name) };
-    private string NormalizeKey(string name)
-    {
-        lock (resolutionCacheGate)
-        {
-            if (normalizedKeys.TryGetValue(name, out var cached))
-            {
-                profile.Count("NormalizeKey cache hit");
-                return cached;
-            }
-            profile.Count("NormalizeKey cache miss");
-            var normalized = profile.Measure("NormalizeKey", () => DslNames.Camel(name).ToUpperInvariant());
-            normalizedKeys[name] = normalized;
-            return normalized;
-        }
-    }
+    private string NormalizeKey(string name) => profile.Measure("NormalizeKey", () => DslNames.Camel(name).ToUpperInvariant());
     private void Require(ITypeSymbol? actual, ITypeSymbol? expected, SourceSpan span, string message) { if (actual == null || expected == null || !Compatible(actual, expected)) Report("SEGDSL313", message, span); }
     private void Report(string id, string message, SourceSpan span) { if (!suppressDiagnostics) report(new DslDiagnostic(id, message, span)); }
     private static string Name(string name) => name.Contains('-') ? DslNames.Camel(name) : name;
@@ -860,18 +834,7 @@ public sealed class DslBinder
     });
     private IReadOnlyList<ISymbol> ResolveCSharpCandidates(string name)
     {
-        lock (resolutionCacheGate)
-        {
-            if (resolvedCSharpCandidatesByName.TryGetValue(name, out var cached))
-            {
-                profile.Count("ResolveCSharpCandidates cache hit");
-                return cached;
-            }
-            profile.Count("ResolveCSharpCandidates cache miss");
-            var exact = ResolveCSharpMembers(name);
-            var resolved = exact.Count != 0 ? exact : DslNames.Candidates(name).Skip(1).SelectMany(AllMembers).ToArray();
-            resolvedCSharpCandidatesByName[name] = resolved;
-            return resolved;
-        }
+        var exact = ResolveCSharpMembers(name);
+        return exact.Count != 0 ? exact : DslNames.Candidates(name).Skip(1).SelectMany(AllMembers).ToArray();
     }
 }
