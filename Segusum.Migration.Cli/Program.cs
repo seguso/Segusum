@@ -25,6 +25,13 @@ var result = CSharpToSegTranspiler.Transpile(input, File.ReadAllText(input), par
 Console.WriteLine($"file: {input}");
 Console.WriteLine($"status: {(result.IsFullyTranslated ? "TRANSLATED" : partial ? "PARTIAL" : "UNSUPPORTED")}");
 foreach (var group in result.Units.GroupBy(x => x.Status).OrderBy(x => x.Key)) Console.WriteLine($"units {group.Key}: {group.Count()}");
+if (audit)
+    foreach (var unit in result.Units)
+    {
+        Console.WriteLine($"unit {unit.Id} {unit.Status} {unit.Path}:{unit.Line}-{unit.EndLine}");
+        foreach (var diagnostic in unit.Diagnostics)
+            Console.WriteLine($"  unit-diagnostic {diagnostic.Status}: {diagnostic.Path}:{diagnostic.Line}: {diagnostic.Reason}");
+    }
 foreach (var d in result.Diagnostics) Console.WriteLine($"{d.Status}: {d.Path}:{d.Line}: {d.Reason}");
 if (!audit && output != null && !dryRun)
 {
