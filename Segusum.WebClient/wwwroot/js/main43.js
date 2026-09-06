@@ -67,6 +67,10 @@ var gLayerHover = null;
 var gBtnPushedObj = null;
 var gBtnPushedObjective = null;
 var gSelectedVerb = null;
+// LogicObj associated with the currently open graphics context menu.
+// The remember action is delegated from the stable menu container so that
+// rebuilding the room/menu cannot drop its handler.
+var gContextMenuLo = null;
 var gVerbChosen = null;
 var gObjectiveChosen = null;
 var gBtnPushedVerb = null;
@@ -5361,19 +5365,8 @@ async function onLoClickedRoom(lo, mouseX, mouseY, fromHitTestOnly = false, skip
                 // Remember is available only when the server has found at
                 // least one already-seen named cutscene mentioning this
                 // object. Keep this in the normal context-menu/action flow.
-                $(".contextMenuItem.ciRemember").hide().off('mousedown');
-                if (lo.ofc_can_be_remembered) {
-                    $(".contextMenuItem.ciRemember").show().on('mousedown', async e => {
-                        e.stopPropagation();
-                        e.preventDefault();
-
-                        $(".contextMenu").hide();
-                        gSelectedVerb = null;
-                        updateToolbar();
-
-                        await callRemember(lo.loId, false, false, false);
-                    });
-                }
+                gContextMenuLo = lo;
+                $(".contextMenuItem.ciRemember").toggle(!!lo.ofc_can_be_remembered);
 
                 if (lo.ofc_is_character) {
 
@@ -11991,6 +11984,23 @@ $(function () {
     $(".contextMenu").on("mousedown", e => {
         if ($(e.currentTarget).hasClass("fromHitTestOnly")) {
             e.stopPropagation();
+        }
+    });
+
+    // Delegate this action from the stable container. The individual menu
+    // items are reused while the room is rebuilt, so a per-open binding can
+    // otherwise be lost by unrelated menu setup.
+    $(".contextMenu").on("mousedown.remember", ".ciRemember", async e => {
+        e.stopPropagation();
+        e.preventDefault();
+
+        const lo = gContextMenuLo;
+        $(".contextMenu").hide();
+        gSelectedVerb = null;
+        updateToolbar();
+
+        if (lo?.ofc_can_be_remembered) {
+            await callRemember(lo.loId, false, false, false);
         }
     });
 
