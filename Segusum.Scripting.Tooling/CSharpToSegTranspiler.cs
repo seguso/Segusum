@@ -375,7 +375,7 @@ public static class CSharpToSegTranspiler
         if (possible is AnonymousFunctionExpressionSyntax lambda)
         {
             if (lambda.Body is BlockSyntax) Unsupported(lambda, diagnostics, "block-bodied possible-when", partial, sb, 1);
-            else sb.Append("  possible-when ").AppendLine(Expression(lambda.Body));
+            else if (lambda.Body is ExpressionSyntax body) sb.AppendLine(FormatCondition(body, "  possible-when ", "    ", ""));
         }
         var handler = args.Select(x => x.Expression).OfType<AnonymousFunctionExpressionSyntax>().LastOrDefault();
         if (handler?.Body is BlockSyntax block)
@@ -428,11 +428,11 @@ public static class CSharpToSegTranspiler
             switch (statement)
             {
                 case IfStatementSyntax x:
-                    sb.Append(indent).Append("if ").Append(Expression(x.Condition)).AppendLine(":");
+                    sb.AppendLine(FormatCondition(x.Condition, indent + "if ", indent + "   ", ":"));
                     EmitStatements(x.Statement is BlockSyntax b ? b.Statements : new[] { x.Statement }, sb, diagnostics, level + 1, partial, includeComments);
                     var e = x.Else;
                     while (e?.Statement is IfStatementSyntax elif)
-                    { sb.Append(indent).Append("elif ").Append(Expression(elif.Condition)).AppendLine(":"); EmitStatements(elif.Statement is BlockSyntax eb ? eb.Statements : new[] { elif.Statement }, sb, diagnostics, level + 1, partial, includeComments); e = elif.Else; }
+                    { sb.AppendLine(FormatCondition(elif.Condition, indent + "elif ", indent + "     ", ":")); EmitStatements(elif.Statement is BlockSyntax eb ? eb.Statements : new[] { elif.Statement }, sb, diagnostics, level + 1, partial, includeComments); e = elif.Else; }
                     if (e != null) { sb.Append(indent).AppendLine("else:"); EmitStatements(e.Statement is BlockSyntax eb ? eb.Statements : new[] { e.Statement }, sb, diagnostics, level + 1, partial, includeComments); }
                     sb.Append(indent).AppendLine("end"); break;
                 case ExpressionStatementSyntax x when x.Expression is AssignmentExpressionSyntax a:
@@ -489,7 +489,7 @@ public static class CSharpToSegTranspiler
         if (CallName(invocation) == "startCycle") { Unsupported(invocation, diagnostics, "startCycle must be assigned to a cycle variable", partial, sb, level); return; }
         if (name is "dial" or "nar" or "narText" or "narRoom" or "narImg")
         {
-            if (name == "dial") sb.Append(indent).Append(Arg(invocation.ArgumentList.Arguments, 0)).Append(": ").AppendLine(LiteralOrExpression(invocation.ArgumentList.Arguments.ElementAtOrDefault(1)?.Expression));
+            if (name == "dial") sb.Append(indent).Append(Arg(invocation.ArgumentList.Arguments, 0)).Append(": ").AppendLine(DialogueText(invocation.ArgumentList.Arguments.ElementAtOrDefault(1)?.Expression));
             else sb.Append(indent).Append(name == "narText" ? "nar" : name).Append(' ').AppendLine(LiteralOrExpression(invocation.ArgumentList.Arguments.LastOrDefault()?.Expression));
             return;
         }
@@ -547,12 +547,13 @@ public static class CSharpToSegTranspiler
         var important = EnumValue(args, "Importance", "Important");
         var repeat = EnumValue(args, "Repeat", "OnlyOnce", "Forever");
         var lambdas = args.Select(x => x.Expression).OfType<AnonymousFunctionExpressionSyntax>().ToArray();
-        var predicate = lambdas.Length > 1 ? CycleExpression(lambdas[0]) : null;
+        var predicateSyntax = lambdas.Length > 1 ? CycleExpressionSyntax(lambdas[0]) : null;
+        var predicate = predicateSyntax is null ? null : Expression(predicateSyntax);
         var body = lambdas.Length == 0 ? null : lambdas[^1].Body as BlockSyntax;
         sb.Append(indent).Append("add ").Append(cycle).Append(' ').Append(id);
         if (important == "Important") sb.Append(" important");
         if (repeat == "OnlyOnce") sb.Append(" once"); else if (repeat == "Forever") sb.Append(" forever");
-        if (predicate != null) sb.AppendLine().Append(indent).Append(" when ").AppendLine(predicate);
+        if (predicate != null) sb.AppendLine().AppendLine(FormatConditionText(indent + " when ", indent + "   ", predicate, "", predicateSyntax));
         else sb.AppendLine();
         if (body != null) EmitStatements(body.Statements, sb, diagnostics, level + 1, partial);
         sb.Append(indent).AppendLine("end");
@@ -624,10 +625,13 @@ public static class CSharpToSegTranspiler
     }
 
     private static string CycleExpression(AnonymousFunctionExpressionSyntax lambda)
+        => Expression(CycleExpressionSyntax(lambda));
+
+    private static ExpressionSyntax CycleExpressionSyntax(AnonymousFunctionExpressionSyntax lambda)
     {
         var parameter = lambda switch { SimpleLambdaExpressionSyntax x => x.Parameter.Identifier.ValueText, ParenthesizedLambdaExpressionSyntax x => x.ParameterList.Parameters.FirstOrDefault()?.Identifier.ValueText, _ => null };
         var body = string.IsNullOrEmpty(parameter) ? lambda.Body : new CycleParameterRewriter(parameter!).Visit(lambda.Body);
-        return Expression(body);
+        return body as ExpressionSyntax ?? throw new InvalidOperationException("Unsupported cycle predicate");
     }
 
     private sealed class CycleParameterRewriter : CSharpSyntaxRewriter
@@ -770,6 +774,38 @@ public static class CSharpToSegTranspiler
         _ => throw new InvalidOperationException("Unsupported C# binary expression: " + kind)
     };
     private static string LiteralOrExpression(SyntaxNode? node) => node is LiteralExpressionSyntax l && l.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.StringLiteralExpression) ? l.Token.Text : Expression(node);
+    private static string DialogueText(SyntaxNode? node) => node is LiteralExpressionSyntax l && l.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.StringLiteralExpression) ? l.Token.ValueText : Expression(node);
     private static string Arg(SeparatedSyntaxList<ArgumentSyntax> args, int index) => index >= 0 && index < args.Count ? Expression(args[index].Expression) : "";
+
+    private static string FormatCondition(ExpressionSyntax expression, string prefix, string continuationPrefix, string suffix)
+        => FormatConditionText(prefix, continuationPrefix, Expression(expression), suffix, expression);
+
+    private static string FormatConditionText(string prefix, string continuationPrefix, string rendered, string suffix, ExpressionSyntax? syntax = null)
+    {
+        var clauses = new List<(string Operator, ExpressionSyntax Expression)>();
+        if (syntax is not null && syntax is BinaryExpressionSyntax binary)
+        {
+            var op = binary.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.LogicalAndExpression) ? "and" : binary.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.LogicalOrExpression) ? "or" : null;
+            if (op is not null) CollectConditionClauses(binary, op, clauses);
+        }
+        if (clauses.Count < 3 && rendered.Length <= 100) return prefix + rendered + suffix;
+        if (clauses.Count == 0) return prefix + rendered + suffix;
+        var result = new StringBuilder(prefix).Append(Expression(clauses[0].Expression));
+        foreach (var clause in clauses.Skip(1)) result.AppendLine().Append(continuationPrefix).Append(clause.Operator).Append(' ').Append(Expression(clause.Expression));
+        return result.Append(suffix).ToString();
+    }
+
+    private static void CollectConditionClauses(ExpressionSyntax expression, string op, List<(string Operator, ExpressionSyntax Expression)> clauses)
+    {
+        if (expression is BinaryExpressionSyntax binary
+            && ((op == "and" && binary.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.LogicalAndExpression))
+                || (op == "or" && binary.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.LogicalOrExpression))))
+        {
+            CollectConditionClauses(binary.Left, op, clauses);
+            clauses.Add((op, binary.Right));
+            return;
+        }
+        if (clauses.Count == 0) clauses.Add(("", expression));
+    }
     private static string? RegistrationKind(InvocationExpressionSyntax x) => x.Expression.ToString() switch { "addHandlerCombine" => "combine", "addHandlerUseFor" => "use-for", "addHandlerUseHere" => "use-here", "addHandlerPickUp" => "pickup", "addHandlerTalkHere" => "talk-here", "addHandlerCancelTextInput" => "cancel-text-input", "addHandlerSubmitTextInput" => "submit-text-input", "addRoomChangedHandler" => "room-changed", _ => null };
 }

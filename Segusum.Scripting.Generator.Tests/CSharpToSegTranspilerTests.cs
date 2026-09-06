@@ -11,7 +11,7 @@ public sealed class CSharpToSegTranspilerTests
     public void ExpressionEmitterPreservesLiteralTokenAndBooleanStructure()
     {
         var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { void M() { addHandlerUseHere(a, handler: i => { if (ready && !blocked) { dial(camilla, \"[[translation]] ! &&\"); } }); } }");
-        Assert.Contains("camilla: \"[[translation]] ! &&\"", result.Text, StringComparison.Ordinal);
+        Assert.Contains("camilla: [[translation]] ! &&", result.Text, StringComparison.Ordinal);
         Assert.Contains("if ready and not blocked:", result.Text, StringComparison.Ordinal);
     }
 
@@ -56,6 +56,30 @@ public sealed class CSharpToSegTranspilerTests
         var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { void M() { addRoomChangedHandler(roomA, e => { if (rand.Next() % 2 == 0) { foo(); } }); } }");
         Assert.Contains("if random 2 == 0:", result.Text, StringComparison.Ordinal);
         Assert.DoesNotContain(result.Diagnostics, x => x.Status == MigrationUnitStatus.Unsupported);
+    }
+
+    [Fact]
+    public void DialogueFormattingRemovesOnlyDialogueQuotes()
+    {
+        var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { void M() { addHandlerUseHere(a, handler: i => { dial(olivia, \"Oh, certo![[right, right.]]\"); }); } }");
+        Assert.Contains("olivia: Oh, certo![[right, right.]]", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("olivia: \"", result.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LongConditionsAreFormattedStructurallyWithParenthesesPreserved()
+    {
+        var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { void M() { addRoomChangedHandler(roomA, e => { if (a && (b || c) && d && e) { foo(); } }); } }");
+        var normalized = result.Text.Replace("\r\n", "\n", StringComparison.Ordinal);
+        Assert.Contains("if a\n       and (b or c)\n       and d\n       and e:", normalized, StringComparison.Ordinal);
+        Assert.DoesNotContain(result.Diagnostics, x => x.Reason.Contains("generated SEG is not parsable", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ShortConditionsRemainSingleLine()
+    {
+        var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { void M() { addRoomChangedHandler(roomA, e => { if (ready && !blocked) { foo(); } }); } }");
+        Assert.Contains("if ready and not blocked:", result.Text, StringComparison.Ordinal);
     }
 
     [Fact]
