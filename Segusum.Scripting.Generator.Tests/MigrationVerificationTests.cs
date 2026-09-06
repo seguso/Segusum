@@ -78,6 +78,50 @@ public sealed class MigrationVerificationTests
     }
 
     [Fact]
+    public void GameplayVerifierDetectsEffectMovedAcrossNestedBranch()
+    {
+        var csharp = "class W { void M() { if (A) { if (B) { foo(); } } } }";
+        var dsl = "world game\nafter-action-executed:\n    if A:\n        foo\n        if B:\n            bar\n        end\n    end\nend\n";
+        var report = GameplayMigrationVerifier.VerifyCSharpToDsl("baseline.cs", csharp, "M", new DslSource("current.seg", dsl));
+        Assert.Contains(report.Findings, x => x.Kind is MigrationFindingKind.MissingSideEffect or MigrationFindingKind.AddedSideEffect);
+    }
+
+    [Fact]
+    public void GameplayVerifierKeepsDuplicateConditionsInTheirScopes()
+    {
+        var csharp = "class W { void M() { if (A) { if (same) { outer(); } } if (same) { root(); } } }";
+        var dsl = "world game\nafter-action-executed:\n    if A:\n        if same:\n            root\n        end\n    end\n    if same:\n        outer\n    end\nend\n";
+        var report = GameplayMigrationVerifier.VerifyCSharpToDsl("baseline.cs", csharp, "M", new DslSource("current.seg", dsl));
+        Assert.Contains(report.Findings, x => x.Kind is MigrationFindingKind.MissingSideEffect or MigrationFindingKind.AddedSideEffect);
+    }
+
+    [Fact]
+    public void GameplayVerifierReportsMissingNestedBranch()
+    {
+        var report = GameplayMigrationVerifier.VerifyCSharpToDsl("baseline.cs", "class W { void M() { if (A) { if (B) { foo(); } } } }", "M",
+            new DslSource("current.seg", "world game\nafter-action-executed:\n    if A:\n        bar\n    end\nend\n"));
+        Assert.Contains(report.Findings, x => x.Kind == MigrationFindingKind.MissingBranch);
+    }
+
+    [Fact]
+    public void GameplayVerifierReportsNestedElseIfReordering()
+    {
+        var csharp = "class W { void M() { if (A) { if (B) { b(); } else if (C) { c(); } } } }";
+        var dsl = "world game\nafter-action-executed:\n    if A:\n        if C:\n            c\n        elif B:\n            b\n        end\n    end\nend\n";
+        var report = GameplayMigrationVerifier.VerifyCSharpToDsl("baseline.cs", csharp, "M", new DslSource("current.seg", dsl));
+        Assert.Contains(report.Findings, x => x.Kind == MigrationFindingKind.OrderMismatch);
+    }
+
+    [Fact]
+    public void GameplayVerifierReportsEffectMovedToAnotherSiblingBranch()
+    {
+        var csharp = "class W { void M() { if (A) { foo(); } else if (B) { bar(); } } }";
+        var dsl = "world game\nafter-action-executed:\n    if A:\n        bar\n    elif B:\n        foo\n    end\nend\n";
+        var report = GameplayMigrationVerifier.VerifyCSharpToDsl("baseline.cs", csharp, "M", new DslSource("current.seg", dsl));
+        Assert.Contains(report.Findings, x => x.Kind is MigrationFindingKind.MissingSideEffect or MigrationFindingKind.AddedSideEffect);
+    }
+
+    [Fact]
     public void GameplayVerifierSmokeTestsTheAfterActionBaselineAgainstCurrentLitgirSeg()
     {
         var segusumRoot = FindAncestorWithDirectory(AppContext.BaseDirectory, "Segusum");
@@ -87,7 +131,9 @@ public sealed class MigrationVerificationTests
         var baseline = GitShow(litgirRoot, "cc193814258f564b4a00c3ab8f3c7bb77379713a", "WebApiLitGir/worldAfterActionExecuted.cs");
         var segPath = Path.Combine(litgirRoot, "WebApiLitGir", "Gameplay", "AfterActionExecuted.seg");
         var report = GameplayMigrationVerifier.VerifyCSharpToDsl("WebApiLitGir/worldAfterActionExecuted.cs", baseline,
-            "afterActionExecutedCSharp", new DslSource("WebApiLitGir/Gameplay/AfterActionExecuted.seg", File.ReadAllText(segPath)));
+            "afterActionExecutedCSharp", new DslSource("WebApiLitGir/Gameplay/AfterActionExecuted.seg", File.ReadAllText(segPath)),
+            options: new MigrationVerificationOptions(x => x.SourceLine < 640));
+        Console.WriteLine("REAL AFTER-ACTION MIGRATION REPORT\n" + report.ToText());
 
         var butler = report.CSharpBranches.FirstOrDefault(x => x.Condition?.Contains("capisciQualcosaDiImportanteSulMaggiordomo", StringComparison.Ordinal) == true);
         Assert.NotNull(butler);

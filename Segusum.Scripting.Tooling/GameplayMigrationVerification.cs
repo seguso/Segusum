@@ -20,10 +20,13 @@ public sealed record MigrationEffect(string Kind, string Value, string SourcePat
 }
 
 public sealed record MigrationBranch(string Kind, string? Condition, int Nesting, string SourcePath, int SourceLine,
-    IReadOnlyList<MigrationEffect> Effects)
+    IReadOnlyList<MigrationEffect> DirectEffects, IReadOnlyList<MigrationBranch> Children)
 {
+    public IReadOnlyList<MigrationEffect> Effects => DirectEffects;
     public string Fingerprint => $"{Nesting}:{Kind}:{Condition ?? "<else>"}";
 }
+
+public sealed record MigrationVerificationOptions(Func<MigrationBranch, bool>? IsMigrated = null);
 
 public sealed record MigrationFinding(MigrationFindingKind Kind, MigrationMatchStatus Status, string Message,
     string? CSharpSourcePath = null, int? CSharpSourceLine = null, string? DslSourcePath = null, int? DslSourceLine = null);
@@ -37,6 +40,15 @@ public sealed record MigrationVerificationReport(
     IReadOnlyList<string> DslStrings,
     IReadOnlyList<MigrationFinding> Findings)
 {
+    public IReadOnlyList<MigrationBranch> MigratedCSharpBranches { get; init; } = Array.Empty<MigrationBranch>();
+    public IReadOnlyList<MigrationBranch> RemainingCSharpBranches { get; init; } = Array.Empty<MigrationBranch>();
+    public int MissingCount => Findings.Count(x => x.Kind is MigrationFindingKind.MissingBranch or MigrationFindingKind.MissingSideEffect or MigrationFindingKind.MissingString);
+    public int ChangedCount => Findings.Count(x => x.Kind == MigrationFindingKind.ChangedBranch);
+    public int OrderMismatchCount => Findings.Count(x => x.Kind == MigrationFindingKind.OrderMismatch);
+    public int DirectSideEffectMismatchCount => Findings.Count(x => x.Kind is MigrationFindingKind.MissingSideEffect or MigrationFindingKind.AddedSideEffect);
+    public int StringMismatchCount => Findings.Count(x => x.Kind is MigrationFindingKind.MissingString or MigrationFindingKind.AddedString);
+    public int UnverifiableCount => Findings.Count(x => x.Status == MigrationMatchStatus.Unverifiable);
+    public int CorrespondingDslBranchCount => MigratedCSharpBranches.Count - Findings.Count(x => x.Kind is MigrationFindingKind.MissingBranch or MigrationFindingKind.ChangedBranch);
     public bool IsClean => Findings.Count == 0;
     public string ToText() => MigrationVerificationReportFormatter.Format(this);
 }
@@ -50,7 +62,7 @@ public static class GameplayMigrationVerifier
 {
     public static MigrationVerificationReport VerifyCSharpToDsl(
         string csharpPath, string csharpText, string methodName, DslSource dslSource,
-        string? handlerKind = null)
+        string? handlerKind = null, MigrationVerificationOptions? options = null)
     {
         var tree = CSharpSyntaxTree.ParseText(csharpText, path: csharpPath);
         var method = tree.GetRoot().DescendantNodes().OfType<MethodDeclarationSyntax>()
@@ -61,7 +73,10 @@ public static class GameplayMigrationVerifier
         var csharpBranches = new List<MigrationBranch>();
         var csharpEffects = new List<MigrationEffect>();
         foreach (var statement in method.Body.Statements)
-            CollectCSharpStatement(statement, csharpPath, csharpBranches, csharpEffects, 0);
+        {
+            if (statement is IfStatementSyntax conditional) csharpBranches.AddRange(CollectCSharpChain(conditional, csharpPath, 0, csharpEffects));
+            else csharpEffects.AddRange(CSharpEffects(statement, csharpPath));
+        }
 
         var parsed = DslParser.Parse(dslSource);
         if (parsed.Diagnostics.Count != 0)
@@ -82,58 +97,76 @@ public static class GameplayMigrationVerifier
         var dslBranches = new List<MigrationBranch>();
         var dslEffects = new List<MigrationEffect>();
         foreach (var statement in dslBody)
-            CollectDslStatement(statement, dslSource.Path, dslBranches, dslEffects, 0);
+        {
+            if (statement is DslIfStatement conditional) dslBranches.AddRange(CollectDslChain(conditional, dslSource.Path, 0, dslEffects));
+            else dslEffects.AddRange(DslEffects(statement, dslSource.Path));
+        }
 
-        return Compare(csharpBranches, dslBranches, csharpEffects, dslEffects);
+        var effectiveOptions = options ?? new();
+        var report = Compare(csharpBranches, dslBranches, csharpEffects, dslEffects, effectiveOptions);
+        var allBranches = Flatten(csharpBranches);
+        return report with
+        {
+            MigratedCSharpBranches = effectiveOptions.IsMigrated is null ? allBranches : allBranches.Where(effectiveOptions.IsMigrated).ToArray(),
+            RemainingCSharpBranches = effectiveOptions.IsMigrated is null ? Array.Empty<MigrationBranch>() : allBranches.Where(x => !effectiveOptions.IsMigrated(x)).ToArray()
+        };
     }
 
     private static MigrationVerificationReport Compare(
         IReadOnlyList<MigrationBranch> csharpBranches, IReadOnlyList<MigrationBranch> dslBranches,
-        IReadOnlyList<MigrationEffect> csharpEffects, IReadOnlyList<MigrationEffect> dslEffects)
+        IReadOnlyList<MigrationEffect> csharpEffects, IReadOnlyList<MigrationEffect> dslEffects,
+        MigrationVerificationOptions options)
     {
         var findings = new List<MigrationFinding>();
-        for (var i = 0; i < csharpBranches.Count; i++)
-        {
-            var left = csharpBranches[i];
-            var exact = dslBranches.FirstOrDefault(x => x.Nesting == left.Nesting && x.Kind == left.Kind &&
-                string.Equals(x.Condition, left.Condition, StringComparison.Ordinal));
-            if (exact is null)
-            {
-                var samePosition = i < dslBranches.Count ? dslBranches[i] : null;
-                var status = samePosition is not null && samePosition.Nesting == left.Nesting
-                    ? MigrationMatchStatus.ChangedCandidate : MigrationMatchStatus.MissingCandidate;
-                var kind = status == MigrationMatchStatus.ChangedCandidate ? MigrationFindingKind.ChangedBranch : MigrationFindingKind.MissingBranch;
-                AddFinding(findings, new(kind, status, $"C# branch #{i + 1}: {left.Kind} {left.Condition ?? "<else>"}", left.SourcePath, left.SourceLine));
-                continue;
-            }
+        CompareSiblingLists(csharpBranches, dslBranches, findings, options.IsMigrated, "root");
 
-            var exactIndex = IndexOf(dslBranches, exact);
-            if (exactIndex != i)
-                AddFinding(findings, new(MigrationFindingKind.OrderMismatch, MigrationMatchStatus.LikelyMatch,
-                    $"Branch order changed: C# #{i + 1} -> SEG #{exactIndex + 1}", left.SourcePath, left.SourceLine, exact.SourcePath, exact.SourceLine));
-
-            CompareEffects(left, exact, findings);
-        }
-
-        foreach (var extra in dslBranches.Where(x => !csharpBranches.Any(c => c.Fingerprint == x.Fingerprint)))
-            AddFinding(findings, new(MigrationFindingKind.ChangedBranch, MigrationMatchStatus.LikelyMatch,
-                $"SEG-only branch: {extra.Kind} {extra.Condition ?? "<else>"}", null, null, extra.SourcePath, extra.SourceLine));
-
-        CompareEffectSequence(csharpEffects, dslEffects, findings);
-        return new(csharpBranches, dslBranches, csharpEffects, dslEffects,
+        if (options.IsMigrated is null)
+            CompareEffectSequence(csharpEffects, dslEffects, findings);
+        return new(Flatten(csharpBranches), Flatten(dslBranches), csharpEffects, dslEffects,
             csharpEffects.Where(IsString).Select(x => StringValue(x)).Distinct(StringComparer.Ordinal).ToArray(),
             dslEffects.Where(IsString).Select(x => StringValue(x)).Distinct(StringComparer.Ordinal).ToArray(), findings);
     }
+
+    private static void CompareSiblingLists(IReadOnlyList<MigrationBranch> left, IReadOnlyList<MigrationBranch> right,
+        List<MigrationFinding> findings, Func<MigrationBranch, bool>? isMigrated, string location)
+    {
+        for (var i = 0; i < left.Count; i++)
+        {
+            var source = left[i];
+            if (isMigrated is not null && !isMigrated(source)) continue;
+            var target = i < right.Count ? right[i] : null;
+            if (target is null)
+            {
+                AddFinding(findings, new(MigrationFindingKind.MissingBranch, MigrationMatchStatus.MissingCandidate,
+                    $"Missing branch at {location} #{i + 1}: {source.Kind} {source.Condition ?? "<else>"}", source.SourcePath, source.SourceLine));
+                continue;
+            }
+            if (source.Kind != target.Kind || !string.Equals(source.Condition, target.Condition, StringComparison.Ordinal))
+            {
+                var later = right.Skip(i + 1).FirstOrDefault(x => x.Kind == source.Kind && x.Condition == source.Condition);
+                AddFinding(findings, new(later is null ? MigrationFindingKind.ChangedBranch : MigrationFindingKind.OrderMismatch,
+                    later is null ? MigrationMatchStatus.ChangedCandidate : MigrationMatchStatus.LikelyMatch,
+                    later is null ? $"Changed branch at {location} #{i + 1}: C# {source.Kind} {source.Condition ?? "<else>"}; SEG {target.Kind} {target.Condition ?? "<else>"}" :
+                    $"Branch order changed at {location}: C# #{i + 1} -> SEG #{IndexOf(right, later) + 1}", source.SourcePath, source.SourceLine, target.SourcePath, target.SourceLine));
+                if (later is null) continue;
+            }
+            CompareEffects(source, target, findings);
+            CompareSiblingLists(source.Children, target.Children, findings, isMigrated, location + "/" + (i + 1));
+        }
+    }
+
+    private static IReadOnlyList<MigrationBranch> Flatten(IReadOnlyList<MigrationBranch> roots) =>
+        roots.SelectMany(x => new[] { x }.Concat(Flatten(x.Children))).ToArray();
 
     private static void CompareEffects(MigrationBranch left, MigrationBranch right, List<MigrationFinding> findings)
     {
         var rightValues = right.Effects.Select(x => x.Fingerprint).ToList();
         foreach (var effect in left.Effects)
             if (!rightValues.Remove(effect.Fingerprint))
-                AddFinding(findings, new(MigrationFindingKind.MissingSideEffect, MigrationMatchStatus.MissingCandidate,
+                AddFinding(findings, new(IsString(effect) ? MigrationFindingKind.MissingString : MigrationFindingKind.MissingSideEffect, MigrationMatchStatus.MissingCandidate,
                     $"Missing side effect in branch {left.Condition ?? "<else>"}: {effect.Fingerprint}", effect.SourcePath, effect.SourceLine, right.SourcePath, right.SourceLine));
         foreach (var effect in right.Effects.Where(x => !left.Effects.Any(y => y.Fingerprint == x.Fingerprint)))
-            AddFinding(findings, new(MigrationFindingKind.AddedSideEffect, MigrationMatchStatus.LikelyMatch,
+            AddFinding(findings, new(IsString(effect) ? MigrationFindingKind.AddedString : MigrationFindingKind.AddedSideEffect, MigrationMatchStatus.LikelyMatch,
                 $"Added side effect in branch {right.Condition ?? "<else>"}: {effect.Fingerprint}", left.SourcePath, left.SourceLine, effect.SourcePath, effect.SourceLine));
     }
 
@@ -162,55 +195,52 @@ public static class GameplayMigrationVerifier
             findings.Add(finding);
     }
 
-    private static void CollectCSharpStatement(StatementSyntax statement, string path, List<MigrationBranch> branches, List<MigrationEffect> allEffects, int nesting)
+    private static IReadOnlyList<MigrationBranch> CollectCSharpChain(IfStatementSyntax conditional, string path, int nesting, List<MigrationEffect> allEffects, string kind = "if")
     {
-        if (statement is IfStatementSyntax conditional)
-        {
-            CollectCSharpBranch(conditional, path, branches, allEffects, nesting, "if");
-            return;
-        }
-        var effects = CSharpEffects(statement, path);
-        allEffects.AddRange(effects);
-        foreach (var nested in statement.DescendantNodes().OfType<IfStatementSyntax>())
-            CollectCSharpStatement(nested, path, branches, allEffects, nesting + 1);
+        var branch = CollectCSharpBranch(conditional, path, nesting, kind, allEffects);
+        if (conditional.Else?.Statement is IfStatementSyntax elseIf)
+            return new[] { branch }.Concat(CollectCSharpChain(elseIf, path, nesting, allEffects, "else-if")).ToArray();
+        if (conditional.Else is not null)
+            return new[] { branch, CollectCSharpElse(conditional.Else, path, nesting, allEffects) };
+        return new[] { branch };
     }
 
-    private static void CollectCSharpBranch(IfStatementSyntax conditional, string path, List<MigrationBranch> branches, List<MigrationEffect> allEffects, int nesting, string kind)
+    private static MigrationBranch CollectCSharpElse(ElseClauseSyntax clause, string path, int nesting, List<MigrationEffect> allEffects)
     {
-        var statements = BlockStatements(conditional.Statement);
-        var effects = statements.SelectMany(x => CSharpEffectsDeep(x, path)).ToArray();
-        branches.Add(new(kind, CanonicalCSharp(conditional.Condition), nesting, path, Line(conditional), effects));
-        allEffects.AddRange(effects);
-        foreach (var nested in statements) if (nested is IfStatementSyntax nestedIf) CollectCSharpStatement(nestedIf, path, branches, allEffects, nesting + 1);
+        var statements = BlockStatements(clause.Statement);
+        var direct = new List<MigrationEffect>();
+        var children = new List<MigrationBranch>();
+        foreach (var statement in TransparentStatements(statements))
+            if (statement is IfStatementSyntax nested) children.AddRange(CollectCSharpChain(nested, path, nesting + 1, allEffects));
+            else direct.AddRange(CSharpEffects(statement, path));
+        allEffects.AddRange(direct);
+        return new("else", null, nesting, path, Line(clause), direct, children);
+    }
 
-        if (conditional.Else?.Statement is IfStatementSyntax elseIf)
-            CollectCSharpBranch(elseIf, path, branches, allEffects, nesting, "else-if");
-        else if (conditional.Else is not null)
-        {
-            var elseStatements = BlockStatements(conditional.Else.Statement);
-            var elseEffects = elseStatements.SelectMany(x => CSharpEffectsDeep(x, path)).ToArray();
-            branches.Add(new("else", null, nesting, path, Line(conditional.Else), elseEffects));
-            allEffects.AddRange(elseEffects);
-            foreach (var nested in elseStatements) if (nested is IfStatementSyntax nestedIf) CollectCSharpStatement(nestedIf, path, branches, allEffects, nesting + 1);
-        }
+    private static MigrationBranch CollectCSharpBranch(IfStatementSyntax conditional, string path, int nesting, string kind, List<MigrationEffect> allEffects)
+    {
+        var direct = new List<MigrationEffect>();
+        var children = new List<MigrationBranch>();
+        foreach (var statement in TransparentStatements(BlockStatements(conditional.Statement)))
+            if (statement is IfStatementSyntax nested) children.AddRange(CollectCSharpChain(nested, path, nesting + 1, allEffects));
+            else direct.AddRange(CSharpEffects(statement, path));
+        allEffects.AddRange(direct);
+        return new(kind, CanonicalCSharp(conditional.Condition), nesting, path, Line(conditional), direct, children);
     }
 
     private static IEnumerable<StatementSyntax> BlockStatements(StatementSyntax statement) => statement is BlockSyntax block ? block.Statements : new[] { statement };
-    private static IEnumerable<MigrationEffect> CSharpEffectsDeep(StatementSyntax statement, string path)
+    private static IEnumerable<StatementSyntax> TransparentStatements(IEnumerable<StatementSyntax> statements)
     {
-        if (statement is IfStatementSyntax conditional)
-        {
-            foreach (var nested in BlockStatements(conditional.Statement)) foreach (var effect in CSharpEffectsDeep(nested, path)) yield return effect;
-            if (conditional.Else is not null) foreach (var nested in BlockStatements(conditional.Else.Statement)) foreach (var effect in CSharpEffectsDeep(nested, path)) yield return effect;
-            yield break;
-        }
-        foreach (var effect in CSharpEffects(statement, path)) yield return effect;
+        foreach (var statement in statements)
+            if (statement is BlockSyntax block) foreach (var nested in TransparentStatements(block.Statements)) yield return nested;
+            else yield return statement;
     }
-
     private static IReadOnlyList<MigrationEffect> CSharpEffects(StatementSyntax statement, string path)
     {
         var effects = new List<MigrationEffect>();
         if (statement is ReturnStatementSyntax ret) effects.Add(new("return", CanonicalCSharp(ret.Expression), path, Line(ret)));
+        foreach (var variable in statement.DescendantNodes().OfType<VariableDeclaratorSyntax>().Where(x => x.Initializer is not null))
+            effects.Add(new("assign", variable.Identifier.ValueText + "=" + CanonicalCSharp(variable.Initializer!.Value), path, Line(variable)));
         foreach (var assignment in statement.DescendantNodes().OfType<AssignmentExpressionSyntax>())
             effects.Add(new("assign", CanonicalCSharp(assignment.Left) + assignment.OperatorToken.Text + CanonicalCSharp(assignment.Right), path, Line(assignment)));
         foreach (var increment in statement.DescendantNodes().OfType<PostfixUnaryExpressionSyntax>().Concat<SyntaxNode>(statement.DescendantNodes().OfType<PrefixUnaryExpressionSyntax>()))
@@ -219,6 +249,8 @@ public static class GameplayMigrationVerifier
         foreach (var invocation in statement.DescendantNodes().OfType<InvocationExpressionSyntax>())
         {
             var name = InvocationName(invocation);
+            if (name == "getCurTime" && (invocation.Ancestors().OfType<AssignmentExpressionSyntax>().Any() ||
+                invocation.Ancestors().OfType<VariableDeclaratorSyntax>().Any())) continue;
             var args = invocation.ArgumentList.Arguments.Select(x => CanonicalCSharp(x.Expression)).ToArray();
             var kind = name switch
             {
@@ -232,49 +264,45 @@ public static class GameplayMigrationVerifier
                 _ when name.Contains("Cycle", StringComparison.OrdinalIgnoreCase) => "cycle",
                 _ => "call"
             };
-            var value = kind is "dialogue" && args.Length > 1 ? CanonicalCSharp(invocation.ArgumentList.Arguments[0].Expression) + ":" + LiteralText(args[1]) :
-                kind is "narration" && args.Length > 0 ? LiteralText(args[0]) :
-                CanonicalCSharp(invocation.Expression) + "(" + string.Join(",", args) + ")";
+            var value = kind is "dialogue" && args.Length > 1 ? CanonicalCSharp(invocation.ArgumentList.Arguments[0].Expression) + ":" + LiteralText(invocation.ArgumentList.Arguments[1].Expression.ToString()) :
+                kind is "narration" && args.Length > 0 ? LiteralText(invocation.ArgumentList.Arguments[0].Expression.ToString()) :
+                CanonicalText(CanonicalCSharp(invocation.Expression) + "(" + string.Join(",", args) + ")");
             effects.Add(new(kind, value, path, Line(invocation)));
         }
         return effects;
     }
 
-    private static void CollectDslStatement(DslStatement statement, string path, List<MigrationBranch> branches, List<MigrationEffect> allEffects, int nesting)
+    private static IReadOnlyList<MigrationBranch> CollectDslChain(DslIfStatement conditional, string path, int nesting, List<MigrationEffect> allEffects)
     {
-        if (statement is DslIfStatement conditional)
-        {
-            for (var i = 0; i < conditional.Branches.Count; i++)
-            {
-                var branch = conditional.Branches[i];
-                var effects = branch.Body.SelectMany(x => DslEffectsDeep(x, path)).ToArray();
-                branches.Add(new(i == 0 ? "if" : "else-if", CanonicalDsl(branch.Condition), nesting, path, branch.Condition.Span.Line, effects));
-                allEffects.AddRange(effects);
-                foreach (var nested in branch.Body) if (nested is IfStatement nestedIf) CollectDslStatement(nestedIf, path, branches, allEffects, nesting + 1);
-            }
-            if (conditional.ElseBody is not null)
-            {
-                var effects = conditional.ElseBody.SelectMany(x => DslEffectsDeep(x, path)).ToArray();
-                branches.Add(new("else", null, nesting, path, conditional.Span.Line, effects));
-                allEffects.AddRange(effects);
-            }
-            return;
-        }
-        var direct = DslEffects(statement, path);
-        allEffects.AddRange(direct);
-        if (statement is NamedCutsceneStatement cutscene)
-            foreach (var nested in cutscene.Body) CollectDslStatement(nested, path, branches, allEffects, nesting + 1);
+        var result = new List<MigrationBranch>();
+        for (var i = 0; i < conditional.Branches.Count; i++)
+            result.Add(CollectDslBranch(conditional.Branches[i], path, nesting, i == 0 ? "if" : "else-if", allEffects));
+        if (conditional.ElseBody is not null)
+            result.Add(CollectDslElse(conditional, path, nesting, allEffects));
+        return result;
     }
 
-    private static IEnumerable<MigrationEffect> DslEffectsDeep(DslStatement statement, string path)
+    private static MigrationBranch CollectDslBranch((DslExpression Condition, IReadOnlyList<DslStatement> Body) branch,
+        string path, int nesting, string kind, List<MigrationEffect> allEffects)
     {
-        if (statement is DslIfStatement conditional)
-        {
-            foreach (var branch in conditional.Branches) foreach (var nested in branch.Body) foreach (var effect in DslEffectsDeep(nested, path)) yield return effect;
-            if (conditional.ElseBody is not null) foreach (var nested in conditional.ElseBody) foreach (var effect in DslEffectsDeep(nested, path)) yield return effect;
-            yield break;
-        }
-        foreach (var effect in DslEffects(statement, path)) yield return effect;
+        var direct = new List<MigrationEffect>();
+        var children = new List<MigrationBranch>();
+        foreach (var statement in branch.Body)
+            if (statement is DslIfStatement nested) children.AddRange(CollectDslChain(nested, path, nesting + 1, allEffects));
+            else direct.AddRange(DslEffects(statement, path));
+        allEffects.AddRange(direct);
+        return new(kind, CanonicalDsl(branch.Condition), nesting, path, branch.Condition.Span.Line, direct, children);
+    }
+
+    private static MigrationBranch CollectDslElse(DslIfStatement conditional, string path, int nesting, List<MigrationEffect> allEffects)
+    {
+        var direct = new List<MigrationEffect>();
+        var children = new List<MigrationBranch>();
+        foreach (var statement in conditional.ElseBody!)
+            if (statement is DslIfStatement nested) children.AddRange(CollectDslChain(nested, path, nesting + 1, allEffects));
+            else direct.AddRange(DslEffects(statement, path));
+        allEffects.AddRange(direct);
+        return new("else", null, nesting, path, conditional.Span.Line, direct, children);
     }
 
     private static IReadOnlyList<MigrationEffect> DslEffects(DslStatement statement, string path)
@@ -286,7 +314,8 @@ public static class GameplayMigrationVerifier
             NarStatement nar => new[] { new MigrationEffect("narration", LiteralDsl(nar.Text), path, line) },
             NarRoomStatement narRoom => new[] { new MigrationEffect("narration", LiteralDsl(narRoom.Text), path, line) },
             NarImgStatement narImg => new[] { new MigrationEffect("narration", LiteralDsl(narImg.Text), path, line) },
-            AssignmentStatement assignment => new[] { new MigrationEffect("assign", (assignment.Receiver is null ? assignment.Name : CanonicalDsl(assignment.Receiver) + "." + assignment.MemberName) + assignment.Operator + CanonicalDsl(assignment.Value), path, line) },
+            AssignmentStatement assignment => DslAssignmentEffects(assignment, path, line),
+            VariableDeclaration variable => new[] { new MigrationEffect("assign", variable.Name + "=" + CanonicalDsl(variable.Initializer), path, line) },
             IncrementStatement increment => new[] { new MigrationEffect("increment", increment.Name + "++", path, line) },
             CallStatement call => DslCallEffect(call.Expression, path, line),
             ReturnStatement ret => new[] { new MigrationEffect("return", CanonicalDsl(ret.Expression), path, line) },
@@ -306,6 +335,14 @@ public static class GameplayMigrationVerifier
         return new[] { new MigrationEffect(kind, value, path, line) };
     }
 
+    private static IReadOnlyList<MigrationEffect> DslAssignmentEffects(AssignmentStatement assignment, string path, int line)
+    {
+        var receiver = assignment.Receiver is null ? assignment.Name : CanonicalDsl(assignment.Receiver) + "." + assignment.MemberName;
+        var effects = new List<MigrationEffect> { new("assign", receiver + assignment.Operator + CanonicalDsl(assignment.Value), path, line) };
+        if (assignment.Value is CallExpression call) effects.AddRange(DslCallEffect(call, path, line));
+        return effects;
+    }
+
     private static string CallKind(DslExpression expression) => (expression as CallExpression)?.Name switch
     {
         "pickUp" => "pickUp", "putInRoom" => "putInRoom", "changeRoom" => "changeRoom", _ => "call"
@@ -315,7 +352,7 @@ public static class GameplayMigrationVerifier
         new(Array.Empty<MigrationBranch>(), Array.Empty<MigrationBranch>(), Array.Empty<MigrationEffect>(), Array.Empty<MigrationEffect>(),
             Array.Empty<string>(), Array.Empty<string>(), new[] { new MigrationFinding(MigrationFindingKind.ChangedBranch, MigrationMatchStatus.Unverifiable, message, csharpPath, null, dslPath, null) });
 
-    private static string CanonicalCSharp(SyntaxNode? node) => CanonicalText(node?.ToString() ?? "");
+    private static string CanonicalCSharp(SyntaxNode? node) => CanonicalText(node is null ? "" : string.Concat(node.DescendantTokens().Select(x => x.Text)));
     private static string CanonicalDsl(DslExpression expression) => CanonicalText(expression switch
     {
         IdentifierExpression id => id.Name,
@@ -332,6 +369,8 @@ public static class GameplayMigrationVerifier
         text = Regex.Replace(text, @"\s+", "");
         text = text.Replace("&&", "and", StringComparison.Ordinal).Replace("||", "or", StringComparison.Ordinal);
         text = text.Replace("!=", "<>PLACEHOLDER", StringComparison.Ordinal).Replace("!", "not", StringComparison.Ordinal).Replace("<>PLACEHOLDER", "!=", StringComparison.Ordinal);
+        text = Regex.Replace(text, @"(and|or)\(([^()]*(?:\([^()]*\)[^()]*)*)\)", "$1$2");
+        text = Regex.Replace(text, @"([A-Za-z_][A-Za-z0-9_.]*)\(\)", "$1");
         while (text.Length > 1 && text[0] == '(' && text[^1] == ')' && BalancedOuter(text)) text = text[1..^1];
         return text;
     }
@@ -364,6 +403,21 @@ public static class MigrationVerificationReportFormatter
         builder.AppendLine($"SEG branches: {report.DslBranches.Count}");
         builder.AppendLine($"C# effects: {report.CSharpEffects.Count}");
         builder.AppendLine($"SEG effects: {report.DslEffects.Count}");
+        builder.AppendLine($"Migrated C# branches: {report.MigratedCSharpBranches.Count}");
+        builder.AppendLine($"Remaining C# branches: {report.RemainingCSharpBranches.Count}");
+        builder.AppendLine($"Corresponding SEG branches: {report.CorrespondingDslBranchCount}");
+        builder.AppendLine($"Missing: {report.MissingCount}");
+        builder.AppendLine($"Changed: {report.ChangedCount}");
+        builder.AppendLine($"Order mismatch: {report.OrderMismatchCount}");
+        builder.AppendLine($"Direct side effect mismatch: {report.DirectSideEffectMismatchCount}");
+        builder.AppendLine($"Strings mismatch: {report.StringMismatchCount}");
+        builder.AppendLine($"Unverifiable: {report.UnverifiableCount}");
+        builder.AppendLine("C# branch inventory:");
+        foreach (var branch in report.CSharpBranches)
+            builder.AppendLine($"  depth={branch.Nesting} {branch.Kind} {branch.Condition ?? "<else>"} directEffects={branch.DirectEffects.Count} ({branch.SourcePath}:{branch.SourceLine})");
+        builder.AppendLine("SEG branch inventory:");
+        foreach (var branch in report.DslBranches)
+            builder.AppendLine($"  depth={branch.Nesting} {branch.Kind} {branch.Condition ?? "<else>"} directEffects={branch.DirectEffects.Count} ({branch.SourcePath}:{branch.SourceLine})");
         foreach (var finding in report.Findings)
             builder.AppendLine($"{finding.Status}: {finding.Kind}: {finding.Message}");
         if (report.Findings.Count == 0) builder.AppendLine("No differences found.");
