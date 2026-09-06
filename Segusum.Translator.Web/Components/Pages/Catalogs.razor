@@ -11,6 +11,41 @@
         <button @onclick="LoadRoot">Apri root</button>
     </div>
     @if (!string.IsNullOrWhiteSpace(error)) { <div class="alert alert-danger">@error</div> }
+    @if (lastStatistics is not null)
+    {
+        <div class="sync-result">
+            <div>@lastMessage</div>
+            <details>
+                <summary>Dettagli sincronizzazione</summary>
+                @if (lastStatistics.NewlyUntranslatedStrings.Count != 0)
+                {
+                    <h4>Nuove da tradurre (@lastStatistics.NewlyUntranslatedStrings.Count)</h4>
+                    <ul>@foreach (var value in lastStatistics.NewlyUntranslatedStrings) { <li>@value</li> }</ul>
+                }
+                @if (lastStatistics.NewlyObsoleteStrings.Count != 0)
+                {
+                    <h4>Nuove obsolete (@lastStatistics.NewlyObsoleteStrings.Count)</h4>
+                    <ul>@foreach (var value in lastStatistics.NewlyObsoleteStrings) { <li>@value</li> }</ul>
+                }
+                @if (lastStatistics.ReactivatedStrings.Count != 0)
+                {
+                    <h4>Riattivate (@lastStatistics.ReactivatedStrings.Count)</h4>
+                    <ul>@foreach (var value in lastStatistics.ReactivatedStrings) { <li>@value</li> }</ul>
+                }
+                @if (lastStatistics.CanonicalizedStrings.Count != 0)
+                {
+                    <h4>Canonicalizzate (@lastStatistics.CanonicalizedStrings.Count)</h4>
+                    <ul>@foreach (var value in lastStatistics.CanonicalizedStrings) { <li>@value</li> }</ul>
+                }
+                @if (lastStatistics.DuplicateActiveObsoleteStrings.Count != 0)
+                {
+                    <h4>Attenzione: @lastStatistics.DuplicateActiveObsoleteStrings.Count stringa/e presente/i sia attiva/e sia obsolete</h4>
+                    <ul>@foreach (var value in lastStatistics.DuplicateActiveObsoleteStrings) { <li>@value</li> }</ul>
+                }
+                @if (!string.IsNullOrWhiteSpace(lastStatistics.SyncId)) { <small>Sync: @lastStatistics.SyncId<br />Ora UTC: @lastStatistics.SyncAt</small> }
+            </details>
+        </div>
+    }
     @if (!string.IsNullOrWhiteSpace(Translator.RepositoryRoot))
     {
         <h2>Cataloghi esistenti</h2>
@@ -33,7 +68,8 @@
 </div>
 
 @code {
-    private string root = "", language = "", error = "";
+    private string root = "", language = "", error = "", lastMessage = "";
+    private SyncStatistics? lastStatistics;
     private void LoadRoot() { try { Translator.ConfigureRoot(root); error = ""; } catch (Exception ex) { error = ex.Message; } }
     private void Synchronize(string path)
     {
@@ -41,7 +77,9 @@
         {
             var result = Translator.Synchronize(path);
             var statistics = result.Result.Statistics;
-            error = $"Catalogo sincronizzato. Nuove da tradurre: {statistics.NewlyUntranslated}. Nuove obsolete: {statistics.NewlyObsolete}.";
+            error = "";
+            lastStatistics = statistics;
+            lastMessage = $"Catalogo sincronizzato. Nuove da tradurre: {statistics.NewlyUntranslated}. Nuove obsolete: {statistics.NewlyObsolete}.";
         }
         catch (Exception ex) { error = ex.Message; }
     }

@@ -193,6 +193,104 @@ public sealed class TranslationCatalogSynchronizerTests
         Assert.Equal(1, result.Statistics.NewlyObsolete);
     }
 
+    [Fact]
+    public void NewStringPersistsTransitionMetadataAndRootSyncMetadata()
+    {
+        var result = new TranslationCatalogSynchronizer().Synchronize(new[] { "New" }, new XDocument(new XElement("root")));
+        var entry = Assert.Single(result.Document.Root!.Elements("str"));
+        Assert.Equal("+", entry.Attribute("transl")!.Value);
+        Assert.Equal("new", entry.Attribute("sync-status")!.Value);
+        Assert.Equal(result.Statistics.SyncId, entry.Attribute("sync-id")!.Value);
+        Assert.Equal(result.Statistics.SyncAt, entry.Attribute("sync-at")!.Value);
+        Assert.Equal(new[] { "New" }, result.Statistics.NewlyUntranslatedStrings);
+        Assert.Equal(result.Statistics.SyncId, result.Document.Root.Attribute("last-sync-id")!.Value);
+        Assert.Equal(result.Statistics.SyncAt, result.Document.Root.Attribute("last-sync-at")!.Value);
+    }
+
+    [Fact]
+    public void RemovedTranslatedStringIsMarkedObsolete()
+    {
+        var result = new TranslationCatalogSynchronizer().Synchronize(Array.Empty<string>(), Catalog(("Removed", "translation")));
+        var entry = Assert.Single(result.Document.Root!.Elements("str"));
+        Assert.Equal("true", entry.Attribute("obsolete")!.Value);
+        Assert.Equal("obsolete", entry.Attribute("sync-status")!.Value);
+        Assert.Equal(new[] { "Removed" }, result.Statistics.NewlyObsoleteStrings);
+    }
+
+    [Fact]
+    public void AlreadyObsoleteStringDoesNotReceiveCurrentMarker()
+    {
+        var current = new XDocument(new XElement("root", new XElement("str",
+            new XAttribute("orig", "Old"), new XAttribute("transl", "translation"),
+            new XAttribute("obsolete", "true"), new XAttribute("sync-id", "previous"))));
+        var result = new TranslationCatalogSynchronizer().Synchronize(Array.Empty<string>(), current);
+        var entry = Assert.Single(result.Document.Root!.Elements("str"));
+        Assert.Equal("previous", entry.Attribute("sync-id")!.Value);
+        Assert.Empty(result.Statistics.NewlyObsoleteStrings);
+    }
+
+    [Fact]
+    public void TrimFallbackIsCanonicalizedWithoutNewOrObsoleteTransition()
+    {
+        var result = new TranslationCatalogSynchronizer().Synchronize(new[] { "testo" }, Catalog(("testo ", "translation")));
+        var entry = Assert.Single(result.Document.Root!.Elements("str"));
+        Assert.Equal("testo", entry.Attribute("orig")!.Value);
+        Assert.Equal("translation", entry.Attribute("transl")!.Value);
+        Assert.Equal("canonicalized", entry.Attribute("sync-status")!.Value);
+        Assert.Empty(result.Statistics.NewlyUntranslatedStrings);
+        Assert.Empty(result.Statistics.NewlyObsoleteStrings);
+        Assert.Equal(new[] { "testo" }, result.Statistics.CanonicalizedStrings);
+    }
+
+    [Fact]
+    public void ObsoleteStringCanBeReactivatedWithMetadata()
+    {
+        var current = new XDocument(new XElement("root", new XElement("str",
+            new XAttribute("orig", "Text"), new XAttribute("transl", "translation"), new XAttribute("obsolete", "true"))));
+        var result = new TranslationCatalogSynchronizer().Synchronize(new[] { "Text" }, current);
+        var entry = Assert.Single(result.Document.Root!.Elements("str"));
+        Assert.Null(entry.Attribute("obsolete"));
+        Assert.Equal("reactivated", entry.Attribute("sync-status")!.Value);
+        Assert.Equal(new[] { "Text" }, result.Statistics.ReactivatedStrings);
+    }
+
+    [Fact]
+    public void FuzzyReplacementMarksBothTransitions()
+    {
+        var result = new TranslationCatalogSynchronizer().Synchronize(
+            new[] { "Camilla corre nella stanza." }, Catalog(("Camilla va nella stanza.", "translated")));
+        var entries = result.Document.Root!.Elements("str").ToList();
+        var current = Assert.Single(entries.Where(x => x.Attribute("orig")!.Value == "Camilla corre nella stanza."));
+        var old = Assert.Single(entries.Where(x => x.Attribute("orig")!.Value == "Camilla va nella stanza."));
+        Assert.Equal("new", current.Attribute("sync-status")!.Value);
+        Assert.Equal("obsolete", old.Attribute("sync-status")!.Value);
+        Assert.Equal(1, result.Statistics.NewlyUntranslated);
+        Assert.Equal(1, result.Statistics.NewlyObsolete);
+    }
+
+    [Fact]
+    public void UnchangedSynchronizationDoesNotChangeRootOrMarkers()
+    {
+        var current = new XDocument(new XElement("root", new XAttribute("last-sync-id", "stable"),
+            new XAttribute("last-sync-at", "old"), new XElement("str", new XAttribute("orig", "A"),
+            new XAttribute("transl", "a"), new XAttribute("sync-status", "canonicalized"), new XAttribute("sync-id", "entry"))));
+        var result = new TranslationCatalogSynchronizer().Synchronize(new[] { "A" }, current);
+        Assert.False(result.Changed);
+        Assert.Equal("stable", result.Document.Root!.Attribute("last-sync-id")!.Value);
+        Assert.Equal("entry", result.Document.Root.Element("str")!.Attribute("sync-id")!.Value);
+    }
+
+    [Fact]
+    public void SyncMetadataDoesNotPreventExactMatchingAndDuplicatesAreReported()
+    {
+        var current = new XDocument(new XElement("root",
+            new XElement("str", new XAttribute("orig", "Text"), new XAttribute("transl", "active"), new XAttribute("sync-status", "new")),
+            new XElement("str", new XAttribute("orig", "Text"), new XAttribute("transl", "old"), new XAttribute("obsolete", "true"))));
+        var result = new TranslationCatalogSynchronizer().Synchronize(new[] { "Text" }, current);
+        Assert.Equal("active", result.Document.Root!.Elements("str").First().Attribute("transl")!.Value);
+        Assert.Contains("Text", result.Statistics.DuplicateActiveObsoleteStrings);
+    }
+
     private static XDocument Catalog(params (string Original, string Translation)[] values) => Catalog(values.Select(x => (x.Original, x.Translation, false, (string?)null)).ToArray());
     private static XDocument Catalog(params (string Original, string Translation, bool Obsolete, string? Metadata)[] values) => new(new XElement("root", values.Select(x => new XElement("str", new XAttribute("orig", x.Original), new XAttribute("transl", x.Translation), x.Obsolete ? new XAttribute("obsolete", "true") : null, x.Metadata is null ? null : new XAttribute("metadata", x.Metadata)))));
     private static string[] Originals(XDocument document) => document.Root!.Elements("str").Select(x => x.Attribute("orig")!.Value).ToArray();

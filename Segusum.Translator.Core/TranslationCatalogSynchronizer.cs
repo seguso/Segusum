@@ -42,6 +42,13 @@ public sealed class SyncStatistics
     public int PreservedTranslatedObsolete { get; internal set; }
     public int RemovedUntranslatedObsolete { get; internal set; }
     public int Reactivated { get; internal set; }
+    public List<string> NewlyUntranslatedStrings { get; } = new();
+    public List<string> NewlyObsoleteStrings { get; } = new();
+    public List<string> ReactivatedStrings { get; } = new();
+    public List<string> CanonicalizedStrings { get; } = new();
+    public List<string> DuplicateActiveObsoleteStrings { get; } = new();
+    public string? SyncId { get; internal set; }
+    public string? SyncAt { get; internal set; }
     public List<ChangedPair> ChangedPairs { get; } = new();
 }
 
@@ -64,6 +71,12 @@ public sealed class TranslationCatalogSynchronizer
 
     public SyncResult Synchronize(IReadOnlyList<string> sourceStrings, XDocument current)
     {
+        var syncAt = DateTimeOffset.UtcNow.ToString("O");
+        var syncId = syncAt;
+        var syncMetadata = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["sync-id"] = syncId, ["sync-at"] = syncAt
+        };
         var all = current.Root?.Elements("str").Select(TranslationEntry.FromXml).ToList()
                   ?? new List<TranslationEntry>();
         var active = all.Where(x => !x.IsObsolete).ToList();
@@ -115,10 +128,10 @@ public sealed class TranslationCatalogSynchronizer
             }
             if (obsoleteIndex.TryGetValue(value, out var obsoletePosition))
             {
-                var entry = all[obsoletePosition].With(obsolete: false);
+                var entry = MarkTransition(all[obsoletePosition].With(obsolete: false), "reactivated", syncMetadata);
                 output.Add(entry);
                 AppendPreviousTranslated(entry, all, output, retainedObsolete);
-                retainedObsolete.Add(value); stats.Reactivated++;
+                retainedObsolete.Add(value); stats.Reactivated++; stats.ReactivatedStrings.Add(value);
                 continue;
             }
             var trimmedMatches = all.Where(x => string.Equals(x.Original.Trim(), value.Trim(), StringComparison.Ordinal))
@@ -132,13 +145,19 @@ public sealed class TranslationCatalogSynchronizer
                 var canonical = matched with { Original = value };
                 if (matched.IsObsolete)
                 {
+                    canonical = MarkTransition(canonical.With(obsolete: false), "reactivated", syncMetadata);
                     retainedObsolete.Add(matched.Original);
-                    stats.Reactivated++;
+                    stats.Reactivated++; stats.ReactivatedStrings.Add(value);
                 }
                 else
                 {
                     usedActive.Add(active.FindIndex(activeEntry => ReferenceEquals(activeEntry, matched)));
-                    stats.Unchanged++;
+                    if (!string.Equals(matched.Original, value, StringComparison.Ordinal))
+                    {
+                        canonical = MarkTransition(canonical.With(obsolete: false), "canonicalized", syncMetadata);
+                        stats.CanonicalizedStrings.Add(value);
+                    }
+                    else stats.Unchanged++;
                 }
                 output.Add(canonical.With(obsolete: false));
                 AppendPreviousTranslated(canonical, all, output, retainedObsolete);
@@ -148,34 +167,50 @@ public sealed class TranslationCatalogSynchronizer
             {
                 var previous = PreviousTranslated(match.Entry, all);
                 var lineage = EnsureLineage(match.Entry, previous);
-                var newEntry = new TranslationEntry(value, "+", lineage);
+                var newEntry = MarkTransition(new TranslationEntry(value, "+", lineage), "new", syncMetadata);
                 output.Add(newEntry);
                 if (previous is not null)
                 {
                     var previousEntry = WithLineage(previous, lineage);
-                    output.Add(previousEntry.With(obsolete: true));
+                    output.Add(MarkObsolete(previousEntry, syncMetadata, stats));
                     retainedObsolete.Add(previousEntry.Original); stats.PreservedTranslatedObsolete++;
                 }
                 else if (!match.Entry.IsTranslated) stats.RemovedUntranslatedObsolete++;
                 if (match.Entry.IsTranslated && previous?.Original != match.Entry.Original)
                     stats.PreservedTranslatedObsolete++;
                 processedOld.Add(match.Entry.Original);
-                stats.ModifiedOrReplaced++;
+                stats.ModifiedOrReplaced++; stats.NewlyUntranslated++; stats.NewlyUntranslatedStrings.Add(value);
                 stats.ChangedPairs.Add(new ChangedPair(match.Entry.Original, value, match.Distance, match.Similarity));
                 continue;
             }
-            output.Add(new TranslationEntry(value, "+", new Dictionary<string, string>(StringComparer.Ordinal)));
-            stats.New++; stats.NewlyUntranslated++;
+            output.Add(MarkTransition(new TranslationEntry(value, "+", new Dictionary<string, string>(StringComparer.Ordinal)), "new", syncMetadata));
+            stats.New++; stats.NewlyUntranslated++; stats.NewlyUntranslatedStrings.Add(value);
         }
 
         foreach (var (entry, index) in active.Select((entry, index) => (entry, index)))
             if (!usedActive.Contains(index) && !processedOld.Contains(entry.Original) && !retainedObsolete.Contains(entry.Original))
-                PreserveOrDropObsolete(entry, output, retainedObsolete, stats);
+                PreserveOrDropObsolete(entry, output, retainedObsolete, stats, syncMetadata);
         foreach (var entry in all.Where(x => x.IsObsolete && x.IsTranslated && !retainedObsolete.Contains(x.Original)))
             output.Add(entry);
 
-        var doc = new XDocument(new XDeclaration("1.0", "utf-8", null), new XElement("root", output.Select(x => x.ToXml())));
-        return new SyncResult(doc, stats, !DocumentsEquivalent(current, doc));
+        var root = new XElement(current.Root?.Name ?? "root", current.Root?.Attributes() ?? Enumerable.Empty<XAttribute>(), output.Select(x => x.ToXml()));
+        var doc = new XDocument(new XDeclaration("1.0", "utf-8", null), root);
+        var changed = !DocumentsEquivalent(current, doc);
+        if (changed)
+        {
+            root.SetAttributeValue("last-sync-id", syncId);
+            root.SetAttributeValue("last-sync-at", syncAt);
+            stats.SyncId = syncId; stats.SyncAt = syncAt;
+        }
+        else
+        {
+            stats.SyncId = current.Root?.Attribute("last-sync-id")?.Value;
+            stats.SyncAt = current.Root?.Attribute("last-sync-at")?.Value;
+        }
+        stats.DuplicateActiveObsoleteStrings.AddRange(output.GroupBy(x => x.Original, StringComparer.Ordinal)
+            .Where(x => x.Any(e => !e.IsObsolete) && x.Any(e => e.IsObsolete))
+            .Select(x => x.Key));
+        return new SyncResult(doc, stats, changed);
     }
 
     private static void AppendPreviousTranslated(TranslationEntry current, IReadOnlyList<TranslationEntry> all,
@@ -220,14 +255,37 @@ public sealed class TranslationCatalogSynchronizer
     }
 
     private static void PreserveOrDropObsolete(TranslationEntry entry, List<TranslationEntry> output,
-        HashSet<string> retained, SyncStatistics stats)
+        HashSet<string> retained, SyncStatistics stats, IReadOnlyDictionary<string, string> metadata)
     {
         if (entry.IsTranslated)
         {
-            output.Add(entry.With(obsolete: true)); retained.Add(entry.Original);
-            stats.PreservedTranslatedObsolete++; stats.NewlyObsolete++;
+            output.Add(MarkObsolete(entry, metadata, stats)); retained.Add(entry.Original);
+            stats.PreservedTranslatedObsolete++;
         }
         else stats.RemovedUntranslatedObsolete++;
+    }
+
+    private static TranslationEntry MarkTransition(TranslationEntry entry, string status, IReadOnlyDictionary<string, string> metadata)
+    {
+        var attrs = new Dictionary<string, string>(entry.Attributes, StringComparer.Ordinal)
+        {
+            ["sync-status"] = status,
+            ["sync-id"] = metadata["sync-id"],
+            ["sync-at"] = metadata["sync-at"]
+        };
+        return entry with { Attributes = attrs };
+    }
+
+    private static TranslationEntry MarkObsolete(TranslationEntry entry, IReadOnlyDictionary<string, string> metadata, SyncStatistics stats)
+    {
+        var wasObsolete = entry.IsObsolete;
+        if (!wasObsolete && metadata.Count != 0)
+        {
+            entry = MarkTransition(entry.With(obsolete: true), "obsolete", metadata);
+            stats.NewlyObsolete++;
+            stats.NewlyObsoleteStrings.Add(entry.Original);
+        }
+        return entry;
     }
 
     private static bool IsUnusedActive(TranslationEntry entry, IReadOnlyList<TranslationEntry> active, HashSet<int> usedActive)
@@ -314,10 +372,17 @@ public sealed class TranslationCatalogSynchronizer
 
     private sealed record BlockMatch(int OldIndex, int NewIndex, int Distance, double Similarity, double Score);
 
-    private static bool DocumentsEquivalent(XDocument left, XDocument right) =>
-        (left.Root?.Elements("str").Select(x => x.ToString(SaveOptions.DisableFormatting)) ?? Enumerable.Empty<string>())
-            .SequenceEqual(right.Root?.Elements("str").Select(x => x.ToString(SaveOptions.DisableFormatting)) ?? Enumerable.Empty<string>(),
-                StringComparer.Ordinal);
+    private static bool DocumentsEquivalent(XDocument left, XDocument right)
+    {
+        if (left.Root?.Name != right.Root?.Name) return false;
+        static string Attributes(XElement element) => string.Join("\u001f", element.Attributes()
+            .OrderBy(x => x.Name.LocalName, StringComparer.Ordinal).Select(x => $"{x.Name}={x.Value}"));
+        if (left.Root is null || right.Root is null) return left.Root is null && right.Root is null;
+        if (!string.Equals(Attributes(left.Root), Attributes(right.Root), StringComparison.Ordinal)) return false;
+        var leftEntries = left.Root.Elements("str").Select(Attributes).ToArray();
+        var rightEntries = right.Root.Elements("str").Select(Attributes).ToArray();
+        return leftEntries.SequenceEqual(rightEntries, StringComparer.Ordinal);
+    }
 
     private static int Levenshtein(string a, string b)
     {
