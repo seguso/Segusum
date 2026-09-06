@@ -71,8 +71,43 @@ public sealed class CSharpToSegTranspilerTests
     {
         var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { void M() { addRoomChangedHandler(roomA, e => { if (a && (b || c) && d && e) { foo(); } }); } }");
         var normalized = result.Text.Replace("\r\n", "\n", StringComparison.Ordinal);
-        Assert.Contains("if a\n       and (b or c)\n       and d\n       and e:", normalized, StringComparison.Ordinal);
+        Assert.Contains("if a\n        and (b or c)\n        and d\n        and e:", normalized, StringComparison.Ordinal);
         Assert.DoesNotContain(result.Diagnostics, x => x.Reason.Contains("generated SEG is not parsable", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ThisExpressionIsEmittedAsCurrentInstance()
+    {
+        const string source = "class W { void M() { addRoomChangedHandler(roomA, e => { if (!CycleMemory.wouldSaySomethingNewAndImportant(cyc2, this, cidPresentatoStrilloneMag)) { foo(); } }); } }";
+        var result = CSharpToSegTranspiler.Transpile("x.cs", source);
+        Assert.Contains("CycleMemory.wouldSaySomethingNewAndImportant cyc2 this cidPresentatoStrilloneMag", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(result.Diagnostics, x => x.Reason.Contains("ThisExpression", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void LayoutUsesFourSpaceIndentationAndOneBlankLineBeforeEveryDialogue()
+    {
+        const string source = "class W { void M() { addRoomChangedHandler(roomA, e => { if (a && b && c) { foo(); dial(olivia, \"Uno\"); dial(camilla, \"Due\"); dial(olivia, \"Tre\"); } }); } }";
+        var result = CSharpToSegTranspiler.Transpile("x.cs", source);
+        var lines = result.Text.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+        foreach (var line in lines.Where(x => x.Trim().Length != 0))
+            Assert.Equal(0, line.TakeWhile(char.IsWhiteSpace).Count() % 4);
+        var dialogueIndexes = lines.Select((line, index) => (line, index)).Where(x => x.line.Contains(": Uno", StringComparison.Ordinal) || x.line.Contains(": Due", StringComparison.Ordinal) || x.line.Contains(": Tre", StringComparison.Ordinal)).Select(x => x.index).ToArray();
+        Assert.Equal(3, dialogueIndexes.Length);
+        foreach (var index in dialogueIndexes)
+        {
+            Assert.True(index > 0 && lines[index - 1].Length == 0, result.Text);
+            Assert.True(index < 2 || lines[index - 2].Length != 0, result.Text);
+        }
+    }
+
+    [Fact]
+    public void StructuralContinuationIndentationIsAlwaysFourSpaces()
+    {
+        const string source = "class W { void M() { addHandlerUseHere(a, isPossibleNow: () => first && second && third, handler: e => { var cyc = startCycle(bb5, Importance.Important, Repeat.OnlyOnce, x => first && second && third, x => { using (namedCutScene(ncs, roomA)) { if (first && second && third) { dial(olivia, \"Ciao\"); } } }); }); } }";
+        var result = CSharpToSegTranspiler.Transpile("x.cs", source, true);
+        foreach (var line in result.Text.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n').Where(x => x.Trim().Length != 0))
+            Assert.Equal(0, line.TakeWhile(char.IsWhiteSpace).Count() % 4);
     }
 
     [Fact]

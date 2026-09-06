@@ -396,6 +396,9 @@ public sealed class DslBinder
                 var resolved = BindName(i.Name, i.Span, scope);
                 if (resolved != null) model.Values[i] = new BoundValue(resolved, lastCSharpName, lastSymbol, lastKind);
                 return resolved;
+            case ThisExpression current:
+                model.Values[current] = new BoundValue(world, "this", world, BoundSymbolKind.Local);
+                return world;
             case ParenthesizedExpression p: return BindExpression(p.Expression, scope, contextualIt);
             case ConditionalExpression conditional:
                 var conditionType = BindExpression(conditional.Condition, scope, contextualIt);

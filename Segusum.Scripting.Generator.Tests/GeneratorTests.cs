@@ -968,6 +968,15 @@ public NamedCutSceneId ncsMikeStalloneIlBenefattore = null!;
     }
 
     [Fact]
+    public void ThisExpressionBindsAndGeneratesAsCurrentInstance()
+    {
+        var result = Run("def current:\n    var currentWorld = this\nend");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL"));
+        Assert.Contains("var currentWorld = this;", Generated(result), StringComparison.Ordinal);
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
     public void NamedCutsceneAndDomainStatementsAreEmitted()
     {
         var result = Run("use thing here:\n    named-cutscene ncsTest \"Titolo test\" curRoom thing:\n        nar-img \"img/test.png\" size medium show-in-text: Una narrazione.\n        text-input ti\n    end\nend", "public LogicObj thing = null!; public TextInput ti = null!;");

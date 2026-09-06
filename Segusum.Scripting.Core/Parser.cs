@@ -436,7 +436,10 @@ public static class DslParser
             if (Is("null")) { Take(); return new LiteralExpression("null", "null", span); }
             if (Is("new-cycle")) { Take(); return new LiteralExpression("new-cycle", "cycle", span); }
             if (Is("ref")) { Take(); return new FunctionReferenceExpression(Word(), span); }
-            var identifierToken = WordToken(); var identifier = new IdentifierExpression(identifierToken.Text, identifierToken.Span); DslExpression expression = identifier;
+            IdentifierExpression? identifier = null;
+            DslExpression expression;
+            if (Is("this")) { Take(); expression = new ThisExpression(span); }
+            else { var identifierToken = WordToken(); identifier = new IdentifierExpression(identifierToken.Text, identifierToken.Span); expression = identifier; }
             while (Is("."))
             {
                 Take(); var memberToken = WordToken();
@@ -450,6 +453,7 @@ public static class DslParser
             }
             if (expression is not IdentifierExpression)
                 return expression;
+            if (identifier is null) return expression;
             if (Is("not-seen-recently")) { Take(); return new CallExpression("not-seen-recently", new[] { new DslArgument(null, identifier, span), new DslArgument(null, Prefix(), Current.Span) }, span); }
             if (Is("was-seen-at-least-once")) { Take(); return new CallExpression("was-seen-at-least-once", new[] { new DslArgument(null, identifier, span) }, span); }
             if (CanStartArgument() && !IsNamedArgumentStart())

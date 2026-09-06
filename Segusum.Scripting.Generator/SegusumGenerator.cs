@@ -186,7 +186,9 @@ public sealed class SegusumGenerator : IIncrementalGenerator
     private static string EmitIdentifier(string name, BoundModel model) => model.References.TryGetValue(name, out var resolved) ? resolved : Name(name);
     private static string Emit(DslExpression expression, BoundModel model) => expression switch
     {
-        IdentifierExpression i => model.Values.TryGetValue(i, out var value) ? (value.Kind is BoundSymbolKind.CSharpMethod or BoundSymbolKind.Function ? value.CSharpName + "()" : value.CSharpName) : Name(i.Name), LiteralExpression l => l.Kind == "cycle" ? "new Cycle()" : l.Kind == "raw-string" ? "\"" + EscapeString(l.Value) + "\"" : l.Value,
+        IdentifierExpression i => model.Values.TryGetValue(i, out var value) ? (value.Kind is BoundSymbolKind.CSharpMethod or BoundSymbolKind.Function ? value.CSharpName + "()" : value.CSharpName) : Name(i.Name),
+        ThisExpression => "this",
+        LiteralExpression l => l.Kind == "cycle" ? "new Cycle()" : l.Kind == "raw-string" ? "\"" + EscapeString(l.Value) + "\"" : l.Value,
         ListExpression l => "new[] { " + string.Join(", ", l.Elements.Select(x => Emit(x, model))) + " }",
         ParenthesizedExpression p => "(" + Emit(p.Expression, model) + ")", UnaryExpression u => EmitUnary(u, model),
         ConditionalExpression c => "(" + Emit(c.Condition, model) + " ? " + Emit(c.WhenTrue, model) + " : " + Emit(c.WhenFalse, model) + ")",
