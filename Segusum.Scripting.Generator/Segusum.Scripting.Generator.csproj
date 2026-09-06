@@ -7,6 +7,7 @@
     <OutputItemType>Analyzer</OutputItemType>
     <IncludeBuildOutput>false</IncludeBuildOutput>
   </PropertyGroup>
+  <Import Project="../Segusum.Package.props" />
   <ItemGroup>
     <ProjectReference Include="..\Segusum.Scripting.Core\Segusum.Scripting.Core.csproj" />
     <ProjectReference Include="..\Segusum.Scripting.Semantics\Segusum.Scripting.Semantics.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
