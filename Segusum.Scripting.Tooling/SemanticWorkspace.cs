@@ -49,28 +49,75 @@ public sealed class DslSemanticWorkspace
 
     public DslSemanticWorkspace(ICSharpWorkspaceContext workspaceContext, INamedTypeSymbol world, IEnumerable<DslSource> sources)
     {
+        var totalTimer = Stopwatch.StartNew();
+        var memoryBefore = GC.GetTotalMemory(false);
         this.workspaceContext = workspaceContext;
         this.world = world;
+        var sourcesTimer = Stopwatch.StartNew();
         this.sources = sources.ToArray();
+        sourcesTimer.Stop();
+        Console.Error.WriteLine($"semanticWorkspace phase=sourcesToArray elapsed={sourcesTimer.Elapsed.TotalMilliseconds:0.0}ms count={this.sources.Count}");
+        var documentsTimer = Stopwatch.StartNew();
         documents = this.sources.ToDictionary(x => x.Path, x => x, StringComparer.OrdinalIgnoreCase);
+        documentsTimer.Stop();
+        Console.Error.WriteLine($"semanticWorkspace phase=documentsDictionary elapsed={documentsTimer.Elapsed.TotalMilliseconds:0.0}ms count={documents.Count}");
+        var diagnosticsParseTimer = Stopwatch.StartNew();
         foreach (var source in this.sources)
         {
+            var fileTimer = Stopwatch.StartNew();
             var parsed = DslParser.Parse(source);
+            fileTimer.Stop();
             diagnostics.AddRange(parsed.Diagnostics);
+            Console.Error.WriteLine($"semanticParse pass=diagnostics path={source.Path} chars={source.Text.Length} lines={CountLines(source.Text)} declarations={parsed.Document.Declarations.Count} elapsed={fileTimer.Elapsed.TotalMilliseconds:0.0}ms");
         }
-        var declarations = documents.Values.Select(x => DslParser.Parse(x).Document).SelectMany(x => x.Declarations).ToArray();
+        diagnosticsParseTimer.Stop();
+        Console.Error.WriteLine($"semanticParseTotal pass=diagnostics elapsed={diagnosticsParseTimer.Elapsed.TotalMilliseconds:0.0}ms files={this.sources.Count}");
+        var declarationsTimer = Stopwatch.StartNew();
+        var declarationList = new List<DslDeclaration>();
+        foreach (var source in documents.Values)
+        {
+            var fileTimer = Stopwatch.StartNew();
+            var parsed = DslParser.Parse(source);
+            fileTimer.Stop();
+            declarationList.AddRange(parsed.Document.Declarations);
+            Console.Error.WriteLine($"semanticParse pass=declarations path={source.Path} chars={source.Text.Length} lines={CountLines(source.Text)} declarations={parsed.Document.Declarations.Count} elapsed={fileTimer.Elapsed.TotalMilliseconds:0.0}ms");
+        }
+        var declarations = declarationList.ToArray();
+        declarationsTimer.Stop();
+        Console.Error.WriteLine($"semanticParseTotal pass=declarations elapsed={declarationsTimer.Elapsed.TotalMilliseconds:0.0}ms files={documents.Count} declarations={declarations.Length}");
+        var binderConstructionTimer = Stopwatch.StartNew();
         binder = new DslBinder(compilation, world, diagnostics.Add);
+        binderConstructionTimer.Stop();
+        Console.Error.WriteLine($"semanticWorkspace phase=binderConstruction elapsed={binderConstructionTimer.Elapsed.TotalMilliseconds:0.0}ms");
+        var bindTimer = Stopwatch.StartNew();
         binder.Bind(declarations);
+        bindTimer.Stop();
+        Console.Error.WriteLine($"semanticWorkspace phase=binderBind elapsed={bindTimer.Elapsed.TotalMilliseconds:0.0}ms profile={binder.Profile.Format()}");
         model = binder.Model;
-        completionNames = model.DslSymbolsByName.Keys
-            .Concat(binder.GetAccessibleWorldMembers().Select(x => x.Name))
+        var dslCompletionTimer = Stopwatch.StartNew();
+        var dslCompletionNames = model.DslSymbolsByName.Keys.ToArray();
+        dslCompletionTimer.Stop();
+        var accessibleCompletionTimer = Stopwatch.StartNew();
+        var accessibleCompletionNames = binder.GetAccessibleWorldMembers().Select(x => x.Name).ToArray();
+        accessibleCompletionTimer.Stop();
+        completionNames = dslCompletionNames
+            .Concat(accessibleCompletionNames)
             .Distinct(StringComparer.Ordinal)
             .OrderBy(x => x, StringComparer.Ordinal)
             .ToArray();
+        Console.Error.WriteLine($"semanticWorkspace phase=completionNames dslSymbols={dslCompletionTimer.Elapsed.TotalMilliseconds:0.0}ms accessibleWorldMembers={accessibleCompletionTimer.Elapsed.TotalMilliseconds:0.0}ms total={dslCompletionTimer.Elapsed.TotalMilliseconds + accessibleCompletionTimer.Elapsed.TotalMilliseconds:0.0}ms dslCount={dslCompletionNames.Length} accessibleCount={accessibleCompletionNames.Length} finalCount={completionNames.Length}");
+        var referencesTimer = Stopwatch.StartNew();
         referencesByPath = model.SemanticReferenceList
             .GroupBy(x => x.Path, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(x => x.Key, x => x.OrderBy(r => r.Span.Start).ToArray(), StringComparer.OrdinalIgnoreCase);
+        referencesTimer.Stop();
+        totalTimer.Stop();
+        var memoryAfter = GC.GetTotalMemory(false);
+        Console.Error.WriteLine($"semanticWorkspace phase=referencesByPath elapsed={referencesTimer.Elapsed.TotalMilliseconds:0.0}ms paths={referencesByPath.Count} references={model.SemanticReferenceList.Count}");
+        Console.Error.WriteLine($"semanticWorkspace total={totalTimer.Elapsed.TotalMilliseconds:0.0}ms memoryDeltaMB={(memoryAfter - memoryBefore) / 1024.0 / 1024.0:0.0} diagnostics={diagnostics.Count} declarations={declarations.Length}");
     }
+
+    private static int CountLines(string text) => text.Length == 0 ? 0 : text.Count(x => x == '\n') + 1;
 
     public IReadOnlyList<DslDiagnostic> Diagnostics => diagnostics;
     public IReadOnlyList<SemanticReference> FindReferences(string path, int line, int column)

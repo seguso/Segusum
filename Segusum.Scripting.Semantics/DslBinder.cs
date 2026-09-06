@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using Microsoft.CodeAnalysis;
@@ -18,6 +19,54 @@ public enum BoundDomainOperationKind { NotSeenRecently, WasSeenAtLeastOnce }
 public sealed record BoundDomainOperation(BoundDomainOperationKind Kind, DslExpression Receiver, DslExpression? Argument, IMethodSymbol? Method);
 public sealed record DslSymbolIdentity(string Name, string Kind, SourceSpan DeclarationSpan);
 public sealed record DslSemanticReference(string Path, SourceSpan Span, BoundSymbolKind Kind, ISymbol? CSharpSymbol, DslSymbolIdentity? DslSymbol, string ReferenceKind);
+public sealed class DslBinderProfile
+{
+    private readonly Dictionary<string, (long Calls, long Ticks)> counters = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, (long Calls, long Ticks)> phases = new(StringComparer.Ordinal);
+    public void Add(string name, long ticks) => Add(counters, name, ticks);
+    public void AddPhase(string name, long ticks) => Add(phases, name, ticks);
+    public void Count(string name) => Add(name, 0);
+    public T Measure<T>(string name, Func<T> action)
+    {
+        var started = Stopwatch.GetTimestamp();
+        try { return action(); }
+        finally { Add(name, Stopwatch.GetTimestamp() - started); }
+    }
+    public void MeasureAction(string name, Action action)
+    {
+        var started = Stopwatch.GetTimestamp();
+        try { action(); }
+        finally { Add(name, Stopwatch.GetTimestamp() - started); }
+    }
+    public IEnumerable<T> MeasureEnumerable<T>(string name, IEnumerable<T> source)
+    {
+        var started = Stopwatch.GetTimestamp();
+        counters.TryGetValue(name, out var value);
+        value.Calls++;
+        counters[name] = value;
+        try { foreach (var item in source) yield return item; }
+        finally { AddTicks(name, Stopwatch.GetTimestamp() - started); }
+    }
+    public string Format()
+    {
+        static string FormatTable(Dictionary<string, (long Calls, long Ticks)> values)
+            => string.Join("; ", values.OrderByDescending(x => x.Value.Ticks).Select(x => $"{x.Key}:calls={x.Value.Calls},ms={x.Value.Ticks * 1000.0 / Stopwatch.Frequency:0.0}"));
+        return $"phases=[{FormatTable(phases)}] hotspots=[{FormatTable(counters)}]";
+    }
+    private void Add(Dictionary<string, (long Calls, long Ticks)> target, string name, long ticks)
+    {
+        target.TryGetValue(name, out var value);
+        value.Calls++;
+        value.Ticks += ticks;
+        target[name] = value;
+    }
+    private void AddTicks(string name, long ticks)
+    {
+        counters.TryGetValue(name, out var value);
+        value.Ticks += ticks;
+        counters[name] = value;
+    }
+}
 public sealed class BoundModel
 {
     public Dictionary<DslExpression, BoundValue> Values { get; } = new(ReferenceComparer<DslExpression>.Instance);
@@ -72,17 +121,20 @@ public sealed class DslBinder
     private readonly Dictionary<string, INamedTypeSymbol?> typesBySimpleName = new(StringComparer.Ordinal);
     private bool typeIndexBuilt;
     private bool suppressDiagnostics;
+    private readonly DslBinderProfile profile = new();
 
     public BoundModel Model => model;
+    public DslBinderProfile Profile => profile;
     public DslBinder(Compilation compilation, INamedTypeSymbol world, Action<DslDiagnostic> report)
     {
         this.compilation = compilation; this.world = world; this.report = report;
-        cycle = compilation.GetTypeByMetadataName("Seg.Cycle"); cycleElementId = compilation.GetTypeByMetadataName("Seg.CycleElemId"); namedCutsceneId = compilation.GetTypeByMetadataName("Seg.NamedCutSceneId");
-        logicObj = compilation.GetTypeByMetadataName("Seg.LogicObj"); objective = compilation.GetTypeByMetadataName("Seg.Objective"); room = compilation.GetTypeByMetadataName("Seg.Room"); explanation = compilation.GetTypeByMetadataName("Seg.Explanation"); beforeRoomChangeInput = compilation.GetTypeByMetadataName("Seg.BeforeRoomChangeInput"); walkPath = compilation.GetTypeByMetadataName("Seg.WalkPath");
-        dateTime = compilation.GetSpecialType(SpecialType.System_DateTime); dateTimeNullable = compilation.GetSpecialType(SpecialType.System_Nullable_T).Construct(dateTime); textHandlerInput = compilation.GetTypeByMetadataName("Seg.TextHandlerInput");
+        cycle = GetTypeByMetadataName("Seg.Cycle"); cycleElementId = GetTypeByMetadataName("Seg.CycleElemId"); namedCutsceneId = GetTypeByMetadataName("Seg.NamedCutSceneId");
+        logicObj = GetTypeByMetadataName("Seg.LogicObj"); objective = GetTypeByMetadataName("Seg.Objective"); room = GetTypeByMetadataName("Seg.Room"); explanation = GetTypeByMetadataName("Seg.Explanation"); beforeRoomChangeInput = GetTypeByMetadataName("Seg.BeforeRoomChangeInput"); walkPath = GetTypeByMetadataName("Seg.WalkPath");
+        dateTime = compilation.GetSpecialType(SpecialType.System_DateTime); dateTimeNullable = compilation.GetSpecialType(SpecialType.System_Nullable_T).Construct(dateTime); textHandlerInput = GetTypeByMetadataName("Seg.TextHandlerInput");
     }
     public void Bind(IReadOnlyList<DslDeclaration> declarations)
     {
+        var phase = Stopwatch.GetTimestamp();
         foreach (var declaration in declarations)
         {
             switch (declaration)
@@ -92,30 +144,39 @@ public sealed class DslBinder
                 case CycleElementDeclaration element: AddDslIdentity(element.Id, "cycle-element", element.Span); break;
             }
         }
-        foreach (var id in declarations.SelectMany(FindNamedCutscenes)) AddDslIdentity(id.Id, "named-cutscene", id.Span);
+        profile.AddPhase("first declaration identity pass", Stopwatch.GetTimestamp() - phase);
+        phase = Stopwatch.GetTimestamp();
+        foreach (var id in profile.MeasureEnumerable("FindNamedCutscenes", declarations.SelectMany(FindNamedCutscenes))) AddDslIdentity(id.Id, "named-cutscene", id.Span);
+        profile.AddPhase("FindNamedCutscenes", Stopwatch.GetTimestamp() - phase);
+        phase = Stopwatch.GetTimestamp();
         foreach (var state in declarations.OfType<StateDeclaration>()) AddGlobal(state.Name, TypeOf(state.Type), state.Span, BoundSymbolKind.State);
         foreach (var cycleDeclaration in declarations.OfType<CycleDeclaration>()) AddGlobal(cycleDeclaration.Variable, cycle, cycleDeclaration.Span, BoundSymbolKind.Cycle);
         foreach (var element in declarations.OfType<CycleElementDeclaration>()) AddGlobal(element.Id, cycleElementId, element.Span, BoundSymbolKind.CycleElementId);
         foreach (var element in declarations.SelectMany(FindNestedElements)) AddGlobal(element.Id, cycleElementId, element.Span, BoundSymbolKind.CycleElementId);
-        foreach (var id in declarations.SelectMany(FindNamedCutscenes)) AddNamedCutsceneGlobal(id);
+        foreach (var id in profile.MeasureEnumerable("FindNamedCutscenes", declarations.SelectMany(FindNamedCutscenes))) AddNamedCutsceneGlobal(id);
+        profile.AddPhase("AddGlobal states/cycles/elements", Stopwatch.GetTimestamp() - phase);
+        phase = Stopwatch.GetTimestamp();
         foreach (var function in declarations.OfType<FunctionDeclaration>()) { var key = NormalizeKey(function.Name); if (functions.ContainsKey(key)) Report("SEGDSL303", "Duplicate DSL function.", function.Span); else functions[key] = function; }
+        profile.AddPhase("functions registration", Stopwatch.GetTimestamp() - phase);
+        phase = Stopwatch.GetTimestamp();
         foreach (var declaration in declarations)
         {
             switch (declaration)
             {
                 case StateDeclaration s: BindExpression(s.Initializer, new()); break;
-                case FunctionDeclaration f: BindFunction(f); break;
-                case HandlerDeclaration h: BindHandler(h); break;
+                case FunctionDeclaration f: profile.MeasureAction("BindFunction", () => BindFunction(f)); break;
+                case HandlerDeclaration h: profile.MeasureAction("BindHandler", () => BindHandler(h)); break;
                 case CycleElementDeclaration c: BindCycle(c.Cycle, c.Repeat, c.Condition, c.Body, c.Span, new()); break;
                 case NextCycleDeclaration n: Require(BindExpression(n.Cycle, new()), cycle, n.Cycle.Span, "next requires a Cycle."); break;
-                case BeforeRoomChangeDeclaration b: BindBeforeRoomChange(b); break;
+                case BeforeRoomChangeDeclaration b: profile.MeasureAction("BindBeforeRoomChange", () => BindBeforeRoomChange(b)); break;
             }
         }
-        CheckDuplicateCombines(declarations);
-        CheckDuplicateRoomChanged(declarations);
-        CheckDuplicateUnaryHandlers(declarations);
-        CheckCSharpRoomChangedDuplicates(declarations);
-        CheckDuplicateBeforeRoomChange(declarations);
+        profile.AddPhase("Bind declarations total", Stopwatch.GetTimestamp() - phase);
+        profile.MeasureAction("CheckDuplicateCombines", () => CheckDuplicateCombines(declarations));
+        profile.MeasureAction("CheckDuplicateRoomChanged", () => CheckDuplicateRoomChanged(declarations));
+        profile.MeasureAction("CheckDuplicateUnaryHandlers", () => CheckDuplicateUnaryHandlers(declarations));
+        profile.MeasureAction("CheckCSharpRoomChangedDuplicates", () => CheckCSharpRoomChangedDuplicates(declarations));
+        profile.MeasureAction("CheckDuplicateBeforeRoomChange", () => CheckDuplicateBeforeRoomChange(declarations));
     }
     private void BindBeforeRoomChange(BeforeRoomChangeDeclaration declaration)
     {
@@ -152,7 +213,7 @@ public sealed class DslBinder
         if (h.Kind == "use-here") Require(first, logicObj, h.Span, "use-here object must be LogicObj.");
         if (h.Kind == "pickup") Require(first, logicObj, h.Span, "pickup target must be LogicObj.");
         if (h.Kind == "talk-here") Require(first, room, h.Span, "talk-here target must be Room.");
-        if (h.Kind is "cancel-text-input" or "submit-text-input") Require(first, compilation.GetTypeByMetadataName("Seg.TextInput"), h.Span, $"{h.Kind} target must be TextInput.");
+        if (h.Kind is "cancel-text-input" or "submit-text-input") Require(first, GetTypeByMetadataName("Seg.TextInput"), h.Span, $"{h.Kind} target must be TextInput.");
         if (h.Kind == "room-changed")
         {
             Require(first, room, h.Span, "room-changed target must be Room.");
@@ -161,7 +222,7 @@ public sealed class DslBinder
         if (h.Explanation != null) Require(BindExpression(h.Explanation, new()), explanation, h.Explanation.Span, "exp must be Explanation.");
         if (h.Condition != null) Require(BindExpression(h.Condition, new()), compilation.GetSpecialType(SpecialType.System_Boolean), h.Condition.Span, "possible-when must be bool.");
         var previousInputType = inputType;
-        inputType = h.Kind == "submit-text-input" ? textHandlerInput : compilation.GetTypeByMetadataName("Seg.HandlerInput");
+        inputType = h.Kind == "submit-text-input" ? textHandlerInput : GetTypeByMetadataName("Seg.HandlerInput");
         inputContextAllowed = h.Kind == "submit-text-input";
         BindStatements(h.Body, new(), null);
         inputType = previousInputType;
@@ -198,7 +259,7 @@ public sealed class DslBinder
                     foreach (var branch in i.Branches) { Require(BindExpression(branch.Condition, scope), compilation.GetSpecialType(SpecialType.System_Boolean), branch.Condition.Span, "if condition must be bool."); BindStatements(branch.Body, new(scope), returnType); }
                     if (i.ElseBody != null) BindStatements(i.ElseBody, new(scope), returnType); break;
                 case DialogueStatement d:
-                    Require(BindName(d.Character, d.CharacterSpan, scope), compilation.GetTypeByMetadataName("Seg.Character"), d.Span, "dialogue speaker must be Character.");
+                    Require(BindName(d.Character, d.CharacterSpan, scope), GetTypeByMetadataName("Seg.Character"), d.Span, "dialogue speaker must be Character.");
                     Require(BindExpression(d.Text, scope), compilation.GetSpecialType(SpecialType.System_String), d.Text.Span, "dialogue text must be string.");
                     if (d.Insta != null)
                     {
@@ -266,6 +327,8 @@ public sealed class DslBinder
         model.References[statement.Id] = Name(statement.Id);
     }
     private ITypeSymbol? BindExpression(DslExpression expression, Dictionary<string, ITypeSymbol> scope, ITypeSymbol? contextualIt = null)
+        => profile.Measure("BindExpression", () => BindExpressionCore(expression, scope, contextualIt));
+    private ITypeSymbol? BindExpressionCore(DslExpression expression, Dictionary<string, ITypeSymbol> scope, ITypeSymbol? contextualIt = null)
     {
         switch (expression)
         {
@@ -299,7 +362,7 @@ public sealed class DslBinder
             case MemberAccessExpression m:
                 if (m.Receiver is IdentifierExpression typeName && TryGetTypeBySimpleName(typeName.Name, out var staticType))
                 {
-                    var staticMember = staticType.GetMembers(m.MemberName)
+                    var staticMember = profile.MeasureEnumerable("Roslyn.GetMembers", staticType.GetMembers(m.MemberName))
                         .FirstOrDefault(x => x switch
                         {
                             IFieldSymbol field => field.IsStatic,
@@ -319,7 +382,7 @@ public sealed class DslBinder
                 {
                     if (!inputContextAllowed) { Report("SEGDSL330", "'input.wordsLower' is only valid inside submit-text-input.", m.Span); return null; }
                     var stringType = compilation.GetSpecialType(SpecialType.System_String);
-                    var list = compilation.GetTypeByMetadataName("System.Collections.Generic.List`1")?.Construct(stringType);
+                    var list = GetTypeByMetadataName("System.Collections.Generic.List`1")?.Construct(stringType);
                     model.Values[m] = new BoundValue(list, "splittaInputEFaiLower(e)", null, BoundSymbolKind.CSharpProperty); return list;
                 }
                 var member = receiverType == null ? null : MembersOf(receiverType, m.MemberName).FirstOrDefault(x => Accessible(x, receiverType));
@@ -353,6 +416,8 @@ public sealed class DslBinder
         }
     }
     private ITypeSymbol? BindCall(CallExpression call, Dictionary<string, ITypeSymbol> scope, ITypeSymbol? contextualIt)
+        => profile.Measure("BindCall", () => BindCallCore(call, scope, contextualIt));
+    private ITypeSymbol? BindCallCore(CallExpression call, Dictionary<string, ITypeSymbol> scope, ITypeSymbol? contextualIt)
     {
         if (call.Name == "not-seen-recently") { if (call.Arguments.Count == 2) { var receiver = call.Arguments[0].Expression; Require(BindExpression(receiver, scope, contextualIt), dateTimeNullable, call.Arguments[0].Span, "not-seen-recently receiver must be DateTime?."); Require(BindExpression(call.Arguments[1].Expression, scope), compilation.GetSpecialType(SpecialType.System_Int32), call.Arguments[1].Span, "cooldown must be numeric."); model.DomainOperations[call] = new BoundDomainOperation(BoundDomainOperationKind.NotSeenRecently, receiver, call.Arguments[1].Expression, null); } return compilation.GetSpecialType(SpecialType.System_Boolean); }
         if (call.Name == "was-seen-at-least-once") { if (call.Arguments.Count == 1) { var receiver = call.Arguments[0].Expression; var t = BindExpression(receiver, scope); Require(t, cycleElementId, call.Arguments[0].Span, "was-seen-at-least-once requires CycleElemId."); model.DomainOperations[call] = new BoundDomainOperation(BoundDomainOperationKind.WasSeenAtLeastOnce, receiver, null, null); } return compilation.GetSpecialType(SpecialType.System_Boolean); }
@@ -374,6 +439,8 @@ public sealed class DslBinder
     }
     private sealed record ParameterInfo(string Name, ITypeSymbol Type, bool Optional, IParameterSymbol? Symbol = null);
     private CandidateResult TryBind(CallExpression call, IMethodSymbol method, Dictionary<string, ITypeSymbol> scope, ITypeSymbol? contextualIt)
+        => profile.Measure("TryBind", () => TryBindCore(call, method, scope, contextualIt));
+    private CandidateResult TryBindCore(CallExpression call, IMethodSymbol method, Dictionary<string, ITypeSymbol> scope, ITypeSymbol? contextualIt)
     {
         var parameters = method.Parameters.Select(p => new ParameterInfo(p.Name, p.Type, p.IsOptional, p)).ToArray();
         var bindCall = method.IsExtensionMethod
@@ -411,6 +478,8 @@ public sealed class DslBinder
     private bool IsCompatible(DslExpression expression, ITypeSymbol? actual, ITypeSymbol? expected) => expected != null && ((nullLiterals.Contains(expression) && (expected.IsReferenceType || expected.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T)) || Compatible(actual, expected));
     private void RequireExpression(DslExpression expression, ITypeSymbol? actual, ITypeSymbol? expected, string message) { if (!IsCompatible(expression, actual, expected)) Report("SEGDSL313", message, expression.Span); }
     private ITypeSymbol? BindName(string name, SourceSpan span, Dictionary<string, ITypeSymbol>? scope = null)
+        => profile.Measure("BindName", () => BindNameCore(name, span, scope));
+    private ITypeSymbol? BindNameCore(string name, SourceSpan span, Dictionary<string, ITypeSymbol>? scope = null)
     {
         lastSymbol = null; lastKind = BoundSymbolKind.Local; lastCSharpName = Name(name);
         if (name == "it") { lastKind = BoundSymbolKind.ContextualIt; lastCSharpName = "it"; RecordName(name, span); return dateTimeNullable; }
@@ -482,17 +551,20 @@ public sealed class DslBinder
         => AllMembers(string.Empty).Where(IsCompletionMember).ToArray();
     private static bool IsCompletionMember(ISymbol symbol)
         => !symbol.IsImplicitlyDeclared && symbol is not IMethodSymbol { MethodKind: MethodKind.Constructor or MethodKind.PropertyGet or MethodKind.PropertySet or MethodKind.EventAdd or MethodKind.EventRemove };
-    private IReadOnlyList<ISymbol> ResolveCSharpMembers(string name) => AllMembers(name).ToArray();
+    private IReadOnlyList<ISymbol> ResolveCSharpMembers(string name)
+        => profile.Measure("ResolveCSharpMembers", () => AllMembers(name).ToArray());
     private static ITypeSymbol? MemberType(ISymbol symbol) => symbol switch { IFieldSymbol f => f.Type, IPropertySymbol p => p.Type, IMethodSymbol m => m.ReturnType, _ => null };
     private IEnumerable<IMethodSymbol> ExtensionMethodsOf(ITypeSymbol receiverType, string name)
+        => profile.MeasureEnumerable("ExtensionMethodsOf", ExtensionMethodsOfCore(receiverType, name));
+    private IEnumerable<IMethodSymbol> ExtensionMethodsOfCore(ITypeSymbol receiverType, string name)
     {
         foreach (var metadataName in new[] { "Seg.Utils", "System.Linq.Enumerable" })
         {
-            var type = compilation.GetTypeByMetadataName(metadataName);
+            var type = GetTypeByMetadataName(metadataName);
             if (type == null)
                 continue;
 
-            foreach (var method in type.GetMembers(name)
+            foreach (var method in profile.MeasureEnumerable("Roslyn.GetMembers", type.GetMembers(name))
                          .OfType<IMethodSymbol>()
                          .Where(x => x.IsExtensionMethod && x.IsStatic))
             {
@@ -520,13 +592,16 @@ public sealed class DslBinder
         element = null!; return false;
     }
     private IEnumerable<ISymbol> AllMembers(string name)
+        => profile.MeasureEnumerable("AllMembers", AllMembersCore(name));
+    private IEnumerable<ISymbol> AllMembersCore(string name)
     {
         for (INamedTypeSymbol? t = world; t != null; t = t.BaseType)
-            foreach (var member in string.IsNullOrEmpty(name) ? t.GetMembers() : t.GetMembers(name))
+            foreach (var member in profile.MeasureEnumerable("Roslyn.GetMembers", string.IsNullOrEmpty(name) ? t.GetMembers() : t.GetMembers(name)))
                 if (Accessible(member))
                     yield return member;
     }
-    private bool Accessible(ISymbol member) => !SegusumGeneratedSource.IsGenerated(member) && compilation.IsSymbolAccessibleWithin(member, world, world);
+    private bool Accessible(ISymbol member)
+        => profile.Measure("Accessible", () => !SegusumGeneratedSource.IsGenerated(member) && profile.Measure("Roslyn.IsSymbolAccessibleWithin", () => compilation.IsSymbolAccessibleWithin(member, world, world)));
     private bool Accessible(ISymbol member, ITypeSymbol receiverType)
     {
         if (!Accessible(member)) return false;
@@ -540,24 +615,40 @@ public sealed class DslBinder
         return false;
     }
     private static bool IsDerivedFrom(INamedTypeSymbol type, INamedTypeSymbol baseType) { for (var t = type.BaseType; t != null; t = t.BaseType) if (SymbolEqualityComparer.Default.Equals(t, baseType)) return true; return false; }
-    private static IEnumerable<ISymbol> MembersOf(ITypeSymbol type, string? name = null) { for (var t = type as INamedTypeSymbol; t != null; t = t.BaseType) foreach (var member in name == null ? t.GetMembers() : t.GetMembers(name)) yield return member; }
+    private IEnumerable<ISymbol> MembersOf(ITypeSymbol type, string? name = null)
+        => profile.MeasureEnumerable("MembersOf", MembersOfCore(type, name));
+    private IEnumerable<ISymbol> MembersOfCore(ITypeSymbol type, string? name = null)
+    {
+        for (var t = type as INamedTypeSymbol; t != null; t = t.BaseType)
+            foreach (var member in profile.MeasureEnumerable("Roslyn.GetMembers", name == null ? t.GetMembers() : t.GetMembers(name))) yield return member;
+    }
     private bool TryGetTypeBySimpleName(string name, out INamedTypeSymbol type)
     {
-        EnsureTypeIndex();
-        if (typesBySimpleName.TryGetValue(name, out var candidate) && candidate != null)
-        { type = candidate; return true; }
-        type = null!;
-        return false;
+        var started = Stopwatch.GetTimestamp();
+        profile.Count("TryGetTypeBySimpleName");
+        try
+        {
+            EnsureTypeIndex();
+            if (typesBySimpleName.TryGetValue(name, out var candidate) && candidate != null)
+            { type = candidate; return true; }
+            type = null!;
+            return false;
+        }
+        finally { profile.Add("TryGetTypeBySimpleName", Stopwatch.GetTimestamp() - started); }
     }
     private void EnsureTypeIndex()
     {
+        profile.Count("EnsureTypeIndex");
         if (typeIndexBuilt) return;
+        var started = Stopwatch.GetTimestamp();
         typeIndexBuilt = true;
         VisitNamespace(compilation.GlobalNamespace);
+        profile.Add("EnsureTypeIndex build", Stopwatch.GetTimestamp() - started);
     }
     private void VisitNamespace(INamespaceSymbol current)
     {
-        foreach (var member in current.GetMembers())
+        profile.Count("VisitNamespace");
+        foreach (var member in profile.MeasureEnumerable("Roslyn.GetMembers", current.GetMembers()))
         {
             if (member is INamespaceSymbol childNamespace) VisitNamespace(childNamespace);
             else if (member is INamedTypeSymbol type) VisitType(type);
@@ -565,6 +656,7 @@ public sealed class DslBinder
     }
     private void VisitType(INamedTypeSymbol type)
     {
+        profile.Count("VisitType");
         if (Accessible(type))
         {
             if (!typesBySimpleName.TryGetValue(type.Name, out var existing)) typesBySimpleName[type.Name] = type;
@@ -572,8 +664,14 @@ public sealed class DslBinder
         }
         foreach (var nested in type.GetTypeMembers()) VisitType(nested);
     }
-    private ITypeSymbol? TypeOf(string name) => name switch { "int" => compilation.GetSpecialType(SpecialType.System_Int32), "bool" => compilation.GetSpecialType(SpecialType.System_Boolean), "string" => compilation.GetSpecialType(SpecialType.System_String), _ => compilation.GetTypeByMetadataName(name.StartsWith("Seg.", StringComparison.Ordinal) ? name : "Seg." + name) ?? compilation.GetTypeByMetadataName(name) };
-    private static string NormalizeKey(string name) => DslNames.Camel(name).ToUpperInvariant();
+    private INamedTypeSymbol? GetTypeByMetadataName(string metadataName)
+        => profile.Measure("Roslyn.GetTypeByMetadataName", () => compilation.GetTypeByMetadataName(metadataName));
+    private SemanticModel GetSemanticModel(SyntaxTree tree)
+        => profile.Measure("Roslyn.GetSemanticModel", () => compilation.GetSemanticModel(tree));
+    private SyntaxNode GetRoot(SyntaxTree tree)
+        => profile.Measure("Roslyn.GetRoot", () => tree.GetRoot());
+    private ITypeSymbol? TypeOf(string name) => name switch { "int" => compilation.GetSpecialType(SpecialType.System_Int32), "bool" => compilation.GetSpecialType(SpecialType.System_Boolean), "string" => compilation.GetSpecialType(SpecialType.System_String), _ => GetTypeByMetadataName(name.StartsWith("Seg.", StringComparison.Ordinal) ? name : "Seg." + name) ?? GetTypeByMetadataName(name) };
+    private string NormalizeKey(string name) => profile.Measure("NormalizeKey", () => DslNames.Camel(name).ToUpperInvariant());
     private void Require(ITypeSymbol? actual, ITypeSymbol? expected, SourceSpan span, string message) { if (actual == null || expected == null || !Compatible(actual, expected)) Report("SEGDSL313", message, span); }
     private void Report(string id, string message, SourceSpan span) { if (!suppressDiagnostics) report(new DslDiagnostic(id, message, span)); }
     private static string Name(string name) => name.Contains('-') ? DslNames.Camel(name) : name;
@@ -604,12 +702,16 @@ public sealed class DslBinder
     {
         var handlers = declarations.OfType<HandlerDeclaration>().Where(x => x.Kind == "room-changed").ToArray();
         if (handlers.Length == 0) return;
+        var treeCount = 0;
+        var invocationCount = 0;
         foreach (var tree in compilation.SyntaxTrees)
         {
-            var model = compilation.GetSemanticModel(tree);
+            treeCount++;
+            var model = GetSemanticModel(tree);
             if (SegusumGeneratedSource.IsGenerated(tree)) continue;
-            foreach (var invocation in tree.GetRoot().DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.InvocationExpressionSyntax>())
+            foreach (var invocation in profile.MeasureEnumerable("Roslyn.DescendantNodes", GetRoot(tree).DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.InvocationExpressionSyntax>()))
             {
+                invocationCount++;
                 if (invocation.Expression is not Microsoft.CodeAnalysis.CSharp.Syntax.IdentifierNameSyntax { Identifier.ValueText: "addRoomChangedHandler" } || invocation.ArgumentList.Arguments.Count == 0) continue;
                 var argument = invocation.ArgumentList.Arguments[0].Expression;
                 var symbol = model.GetSymbolInfo(argument).Symbol;
@@ -617,6 +719,7 @@ public sealed class DslBinder
                 foreach (var handler in handlers) Report("SEGDSL319", "Duplicate room-changed handler: the Room is already registered by C#.", handler.Span);
             }
         }
+        Console.Error.WriteLine($"binderCheckCSharpRoomChangedDuplicates trees={treeCount} invocations={invocationCount}");
     }
     private static IEnumerable<CycleElementDeclaration> FindNestedElements(DslDeclaration declaration) => declaration switch
     { HandlerDeclaration h => FindNested(h.Body), FunctionDeclaration f => FindNested(f.Body), _ => Enumerable.Empty<CycleElementDeclaration>() };
