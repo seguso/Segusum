@@ -19,7 +19,8 @@ public sealed record HandlerRegistrationFingerprint(
     string? Explanation,
     string? PossibleWhen,
     string SourcePath,
-    int SourceLine);
+    int SourceLine,
+    IReadOnlyList<string>? BodyEffects = null);
 
 public sealed record VerificationCheck(string Name, EquivalenceStatus Status, string? Detail = null);
 
@@ -142,10 +143,11 @@ public static class MigrationVerifier
                 declaration.First,
                 declaration.Second ?? declaration.Target,
                 StringValue(declaration.Phrase),
-                StringValue(declaration.Explanation),
-                ExpressionText(declaration.Condition),
+                CanonicalDslExpression(declaration.Explanation),
+                CanonicalDslExpression(declaration.Condition),
                 source.Path,
-                declaration.Span.Line));
+                declaration.Span.Line,
+                ExtractDslHandlerEffects(declaration.Body)));
         }
         return result;
     }
@@ -163,10 +165,35 @@ public static class MigrationVerifier
             Equal("first operand", csharp.First, dsl.First),
             Equal("second/target", csharp.SecondOrTarget, dsl.SecondOrTarget),
             Equal("phrase", csharp.Phrase, dsl.Phrase),
-            Equal("explanation", csharp.Explanation, dsl.Explanation),
-            Equal("possible-when", csharp.PossibleWhen, dsl.PossibleWhen)
+            Metadata("explanation", csharp.Explanation, dsl.Explanation, "MissingExplanation", "AddedExplanation", "ChangedExplanation"),
+            Metadata("possible-when", csharp.PossibleWhen, dsl.PossibleWhen, "MissingHandlerMetadata", "AddedHandlerMetadata", "ChangedHandlerMetadata")
         };
+        if (csharp.BodyEffects is not null && dsl.BodyEffects is not null)
+            checks.Add(SequenceCheck("body", csharp.BodyEffects, dsl.BodyEffects));
         return new(csharp, dsl, checks);
+    }
+
+    public static IReadOnlyList<HandlerEquivalenceResult> VerifyHandlerRegistrations(string csharpPath, string csharpText, DslSource dslSource)
+    {
+        var tree = CSharpSyntaxTree.ParseText(csharpText, path: csharpPath);
+        var unknown = tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>()
+            .Where(x => InvocationName(x).StartsWith("addHandler", StringComparison.Ordinal) && RegistrationKind(x) is null).ToArray();
+        if (unknown.Length != 0)
+            return unknown.Select(x => new HandlerEquivalenceResult(null, null, new[] { new VerificationCheck("registration", EquivalenceStatus.Inconclusive,
+                $"Unverifiable handler registration '{InvocationName(x)}' at line {x.GetLocation().GetLineSpan().StartLinePosition.Line + 1}.") })).ToArray();
+        var parsed = DslParser.Parse(dslSource);
+        if (parsed.Diagnostics.Count != 0)
+            return new[] { new HandlerEquivalenceResult(null, null, new[] { new VerificationCheck("registration", EquivalenceStatus.Inconclusive,
+                "Unverifiable SEG declaration/statement: " + string.Join("; ", parsed.Diagnostics.Select(x => x.Message))) }) };
+        var csharp = ExtractCSharpRegistrations(csharpPath, csharpText);
+        var dsl = ExtractDslRegistrations(dslSource);
+        var count = Math.Max(csharp.Count, dsl.Count);
+        var results = new List<HandlerEquivalenceResult>();
+        for (var i = 0; i < count; i++)
+            results.Add(i >= csharp.Count ? new(null, dsl[i], new[] { new VerificationCheck("registration", EquivalenceStatus.Fail, "AddedHandlerRegistration") }) :
+                i >= dsl.Count ? new(csharp[i], null, new[] { new VerificationCheck("registration", EquivalenceStatus.Fail, "MissingHandlerRegistration") }) :
+                CompareRegistration(csharp[i], dsl[i]));
+        return results;
     }
 
     public static VerificationCheck CompareStrings(IReadOnlyList<string> csharp, IReadOnlyList<string> dsl)
@@ -410,11 +437,156 @@ public static class MigrationVerifier
         var args = invocation.ArgumentList.Arguments;
         var phrase = ArgumentText(args, kind == "combine" ? 2 : -1, "fullSentenceUntransl", "dynamicSentenceUntransl");
         var explanation = ArgumentText(args, kind == "use-for" ? 2 : -1, "explanation");
-        var possible = ArgumentText(args, -1, "isPossibleNow");
+        var possibleExpression = args.FirstOrDefault(x => x.NameColon?.Name.Identifier.ValueText == "isPossibleNow")?.Expression;
+        var possible = CanonicalCSharpExpression(possibleExpression is AnonymousFunctionExpressionSyntax possibleLambda
+            ? possibleLambda.Body.ToString() : possibleExpression?.ToString());
+        var body = HandlerLambda(invocation) is { } lambda ? ExtractCSharpHandlerEffects(lambda) : null;
         return new(kind, OperandText(args, 0), kind == "combine" ? OperandText(args, 1) : kind == "use-for" ? OperandText(args, 1) : null,
-            LiteralText(phrase), LiteralText(explanation), possible, path,
-            invocation.GetLocation().GetLineSpan().StartLinePosition.Line + 1);
+            LiteralText(phrase), CanonicalCSharpExpression(explanation), possible, path,
+            invocation.GetLocation().GetLineSpan().StartLinePosition.Line + 1, body);
     }
+
+    private static AnonymousFunctionExpressionSyntax? HandlerLambda(InvocationExpressionSyntax invocation)
+        => invocation.ArgumentList.Arguments.Select(x => x.Expression).OfType<AnonymousFunctionExpressionSyntax>().LastOrDefault();
+
+    private static IReadOnlyList<string> ExtractCSharpHandlerEffects(AnonymousFunctionExpressionSyntax lambda)
+    {
+        if (lambda.Body is not BlockSyntax block)
+            return new[] { "unverifiable:expression-bodied-lambda" };
+        var effects = new List<string>();
+        CollectCSharpHandlerEffects(block.Statements, effects);
+        return effects;
+    }
+
+    private static void CollectCSharpHandlerEffects(IEnumerable<StatementSyntax> statements, List<string> effects)
+    {
+        foreach (var statement in statements)
+        {
+            switch (statement)
+            {
+                case IfStatementSyntax conditional:
+                    effects.Add("if:" + CanonicalCSharpExpression(conditional.Condition.ToString()));
+                    CollectCSharpHandlerEffects(conditional.Statement is BlockSyntax block ? block.Statements : new[] { conditional.Statement }, effects);
+                    if (conditional.Else?.Statement is { } elseStatement)
+                    {
+                        effects.Add(elseStatement is IfStatementSyntax ? "elif" : "else");
+                        CollectCSharpHandlerEffects(elseStatement is BlockSyntax elseBlock ? elseBlock.Statements : new[] { elseStatement }, effects);
+                    }
+                    break;
+                case ExpressionStatementSyntax expression when expression.Expression is AssignmentExpressionSyntax assignment:
+                    var target = assignment.Left.ToString();
+                    if (target.EndsWith("makesNoSenseAtThisTime", StringComparison.Ordinal) && assignment.Right.ToString() == "true") effects.Add("makes-no-sense");
+                    else if (target.EndsWith("textInputToShow", StringComparison.Ordinal)) effects.Add("text-input:" + CanonicalCSharpExpression(assignment.Right.ToString()));
+                    else effects.Add("assign:" + CanonicalCSharpExpression(assignment.Left + assignment.OperatorToken.Text + assignment.Right));
+                    break;
+                case ExpressionStatementSyntax expression when expression.Expression is InvocationExpressionSyntax invocation:
+                    effects.Add(CSharpInvocationEffect(invocation));
+                    break;
+                case LocalDeclarationStatementSyntax local:
+                    foreach (var variable in local.Declaration.Variables)
+                        if (variable.Initializer is not null) effects.Add("assign:" + variable.Identifier.ValueText + "=" + CanonicalCSharpExpression(variable.Initializer.Value.ToString()));
+                    break;
+                case UsingStatementSyntax usingStatement when usingStatement.Expression is InvocationExpressionSyntax namedCutscene && InvocationName(namedCutscene) == "namedCutScene":
+                    effects.Add("named-cutscene:" + CanonicalCSharpExpression(namedCutscene.ArgumentList.Arguments.FirstOrDefault()?.Expression.ToString()));
+                    if (usingStatement.Statement is BlockSyntax usingBlock) CollectCSharpHandlerEffects(usingBlock.Statements, effects);
+                    break;
+                case ReturnStatementSyntax ret: effects.Add("return:" + CanonicalCSharpExpression(ret.Expression?.ToString())); break;
+                default: effects.Add("unverifiable:" + statement.GetType().Name); break;
+            }
+        }
+    }
+
+    private static string CSharpInvocationEffect(InvocationExpressionSyntax invocation)
+    {
+        var name = InvocationName(invocation);
+        if (name == "dial" && invocation.ArgumentList.Arguments.Count >= 2)
+            return "dialogue:" + CanonicalCSharpExpression(invocation.ArgumentList.Arguments[0].Expression.ToString()) + ":" + LiteralText(invocation.ArgumentList.Arguments[1].Expression.ToString());
+        if (name is "nar" or "narText" or "narRoom" or "narImg")
+            return "narration:" + LiteralText(invocation.ArgumentList.Arguments.LastOrDefault()?.Expression.ToString());
+        return "call:" + CanonicalCSharpExpression(invocation.ToString());
+    }
+
+    private static IReadOnlyList<string> ExtractDslHandlerEffects(IEnumerable<DslStatement> statements)
+    {
+        var effects = new List<string>();
+        foreach (var statement in statements)
+        {
+            switch (statement)
+            {
+                case IfStatement conditional:
+                    for (var i = 0; i < conditional.Branches.Count; i++)
+                    {
+                        effects.Add((i == 0 ? "if:" : "elif:") + CanonicalDslExpression(conditional.Branches[i].Condition));
+                        effects.AddRange(ExtractDslHandlerEffects(conditional.Branches[i].Body));
+                    }
+                    if (conditional.ElseBody is not null) { effects.Add("else"); effects.AddRange(ExtractDslHandlerEffects(conditional.ElseBody)); }
+                    break;
+                case MakesNoSenseStatement: effects.Add("makes-no-sense"); break;
+                case TextInputStatement input: effects.Add("text-input:" + CanonicalDslExpression(input.TextInput)); break;
+                case VariableDeclaration variable: effects.Add("assign:" + variable.Name + "=" + CanonicalDslExpression(variable.Initializer)); break;
+                case IncrementStatement increment: effects.Add("increment:" + increment.Name); break;
+                case AssignmentStatement assignment:
+                    effects.Add("assign:" + (assignment.Receiver is null ? assignment.Name : CanonicalDslExpression(assignment.Receiver) + "." + assignment.MemberName) + assignment.Operator + CanonicalDslExpression(assignment.Value)); break;
+                case DialogueStatement dialogue: effects.Add("dialogue:" + dialogue.Character + ":" + LiteralDslText(dialogue.Text)); break;
+                case NarStatement nar: effects.Add("narration:" + LiteralDslText(nar.Text)); break;
+                case NarRoomStatement narRoom: effects.Add("narration:" + LiteralDslText(narRoom.Text)); break;
+                case NarImgStatement narImg: effects.Add("narration:" + LiteralDslText(narImg.Text)); break;
+                case CallStatement call: effects.Add("call:" + CanonicalDslExpression(call.Expression)); break;
+                case ReturnStatement ret: effects.Add("return:" + CanonicalDslExpression(ret.Expression)); break;
+                case NextCycleStatement next: effects.Add("cycle:next:" + CanonicalDslExpression(next.Cycle)); break;
+                case AddCycleElementStatement cycle:
+                    effects.Add("cycle:add:" + cycle.Cycle + ":" + cycle.Id);
+                    effects.AddRange(ExtractDslHandlerEffects(cycle.Body));
+                    break;
+                case MarkHappenedOnceStatement mark: effects.Add("mark-happened-once:" + CanonicalDslExpression(mark.Target)); break;
+                case MarkHappenedStatement mark: effects.Add("mark-happened:" + CanonicalDslExpression(mark.Target)); break;
+                case FinishGameStatement: effects.Add("finish-game"); break;
+                case DoNotAdvanceTimeStatement: effects.Add("do-not-advance-time"); break;
+                case PreventRoomChangeStatement: effects.Add("prevent-room-change"); break;
+                case NamedCutsceneStatement named:
+                    effects.Add("named-cutscene:" + named.Id);
+                    effects.AddRange(ExtractDslHandlerEffects(named.Body));
+                    break;
+                default: effects.Add("unverifiable:" + statement.GetType().Name); break;
+            }
+        }
+        return effects;
+    }
+
+    private static VerificationCheck Metadata(string name, string? left, string? right, string missing, string added, string changed)
+        => left == null && right == null ? new(name, EquivalenceStatus.Pass) :
+            left == null ? new(name, EquivalenceStatus.Fail, added) : right == null ? new(name, EquivalenceStatus.Fail, missing) :
+            left == right ? new(name, EquivalenceStatus.Pass) : new(name, EquivalenceStatus.Fail, changed + $": C#='{left}' DSL='{right}'");
+
+    private static VerificationCheck SequenceCheck(string name, IReadOnlyList<string> left, IReadOnlyList<string> right)
+    {
+        if (left.Any(x => x.StartsWith("unverifiable:", StringComparison.Ordinal)) || right.Any(x => x.StartsWith("unverifiable:", StringComparison.Ordinal)))
+            return new(name, EquivalenceStatus.Inconclusive, string.Join("; ", left.Concat(right).Where(x => x.StartsWith("unverifiable:", StringComparison.Ordinal))));
+        if (left.SequenceEqual(right, StringComparer.Ordinal)) return new(name, EquivalenceStatus.Pass);
+        var common = Math.Min(left.Count, right.Count);
+        var detail = Enumerable.Range(0, common).Where(i => left[i] != right[i]).Select(i => $"effect #{i + 1}: C#='{left[i]}' DSL='{right[i]}'").ToList();
+        if (left.Count > right.Count) detail.Add($"missing effects={left.Count - right.Count}");
+        if (right.Count > left.Count) detail.Add($"added effects={right.Count - left.Count}");
+        return new(name, EquivalenceStatus.Fail, string.Join("; ", detail));
+    }
+
+    private static string? CanonicalCSharpExpression(string? expression)
+    {
+        if (expression is null) return null;
+        var builder = new System.Text.StringBuilder(); var quoted = false;
+        foreach (var ch in expression)
+        {
+            if (ch == '"') quoted = !quoted;
+            if (!char.IsWhiteSpace(ch) || quoted) builder.Append(ch);
+        }
+        var result = builder.ToString().Replace("&&", "and", StringComparison.Ordinal).Replace("||", "or", StringComparison.Ordinal)
+            .Replace("!=", "<>", StringComparison.Ordinal).Replace("!", "not", StringComparison.Ordinal).Replace("<>", "!=", StringComparison.Ordinal)
+            .Replace("()", "", StringComparison.Ordinal);
+        return System.Text.RegularExpressions.Regex.Replace(result, @"([A-Za-z_]\w*):", "$1=");
+    }
+
+    private static string? CanonicalDslExpression(DslExpression? expression) => CanonicalCSharpExpression(ExpressionText(expression)) ?? null;
+    private static string LiteralDslText(DslExpression expression) => StringValue(expression) ?? CanonicalDslExpression(expression) ?? "";
 
     private static string? NamedCutsceneTitle(ObjectCreationExpressionSyntax? creation)
     {

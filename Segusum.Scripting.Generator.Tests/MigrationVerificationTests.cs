@@ -192,6 +192,59 @@ public sealed class MigrationVerificationTests
     }
 
     [Fact]
+    public void HandlerRegistrationPreservesPossibleWhenAndMakesNoSense()
+    {
+        const string csharp = "class W { void C() { addHandlerCombine(a, b, \"say\", isPossibleNow: () => objectiveIsCurrent(goal), handler: i => { i.makesNoSenseAtThisTime = true; }); } }";
+        const string dsl = "world game\ncombine a with b:\n    phrase \"say\"\n    possible-when objectiveIsCurrent goal\n    makes-no-sense\nend\n";
+        var result = SingleRegistration(csharp, dsl);
+        Assert.Equal(EquivalenceStatus.Pass, result.Overall);
+    }
+
+    [Fact]
+    public void HandlerRegistrationReportsMetadataAndExplanationChanges()
+    {
+        const string csharp = "class W { void C() { addHandlerCombine(a, b, \"say\", isPossibleNow: () => A && B, handler: i => { }); addHandlerUseFor(item, objective, explanation, handler: e => { }); } }";
+        var missing = MigrationVerifier.ExtractDslRegistrations(new DslSource("x.seg", "world game\ncombine a with b:\n    phrase \"say\"\nend\nuse item for objective:\nend\n"));
+        var left = MigrationVerifier.ExtractCSharpRegistrations("x.cs", csharp);
+        var first = MigrationVerifier.CompareRegistration(left[0], missing[0]);
+        var second = MigrationVerifier.CompareRegistration(left[1], missing[1]);
+        Assert.Contains(first.Checks, x => x.Detail == "MissingHandlerMetadata");
+        Assert.Contains(second.Checks, x => x.Detail == "MissingExplanation");
+
+        var changed = MigrationVerifier.ExtractDslRegistrations(new DslSource("x.seg", "world game\ncombine a with b:\n    phrase \"say\"\n    possible-when A and C\nend\nuse item for objective:\n    exp different\nend\n"));
+        Assert.Contains(MigrationVerifier.CompareRegistration(left[0], changed[0]).Checks, x => x.Detail?.StartsWith("ChangedHandlerMetadata", StringComparison.Ordinal) == true);
+        Assert.Contains(MigrationVerifier.CompareRegistration(left[1], changed[1]).Checks, x => x.Detail?.StartsWith("ChangedExplanation", StringComparison.Ordinal) == true);
+    }
+
+    [Fact]
+    public void HandlerRegistrationMapsTextInputMutationAndDetectsValueChange()
+    {
+        const string csharp = "class W { void C() { addHandlerUseHere(item, handler: e => { e.textInputToShow = tiCustode; }); } }";
+        var clean = MigrationVerifier.CompareRegistration(
+            MigrationVerifier.ExtractCSharpRegistrations("x.cs", csharp)[0],
+            MigrationVerifier.ExtractDslRegistrations(new DslSource("x.seg", "world game\nuse item here:\n    text-input tiCustode\nend\n"))[0]);
+        Assert.Equal(EquivalenceStatus.Pass, clean.Overall);
+        var changed = MigrationVerifier.CompareRegistration(
+            MigrationVerifier.ExtractCSharpRegistrations("x.cs", csharp)[0],
+            MigrationVerifier.ExtractDslRegistrations(new DslSource("x.seg", "world game\nuse item here:\n    text-input tiOther\nend\n"))[0]);
+        Assert.Contains(changed.Checks, x => x.Name == "body" && x.Status == EquivalenceStatus.Fail);
+    }
+
+    [Fact]
+    public void UnsupportedDslHandlerStatementCannotProduceCleanResult()
+    {
+        var result = MigrationVerifier.CompareRegistration(
+            new HandlerRegistrationFingerprint("use-here", "item", null, null, null, null, "x.cs", 1, new[] { "unverifiable:FutureStatement" }),
+            new HandlerRegistrationFingerprint("use-here", "item", null, null, null, null, "x.seg", 1, new[] { "unverifiable:FutureStatement" }));
+        Assert.Equal(EquivalenceStatus.Inconclusive, result.Overall);
+    }
+
+    private static HandlerEquivalenceResult SingleRegistration(string csharp, string dsl)
+        => MigrationVerifier.CompareRegistration(
+            Assert.Single(MigrationVerifier.ExtractCSharpRegistrations("x.cs", csharp)),
+            Assert.Single(MigrationVerifier.ExtractDslRegistrations(new DslSource("x.seg", dsl))));
+
+    [Fact]
     public void GameplayVerifierSmokeTestsTheAfterActionBaselineAgainstCurrentLitgirSeg()
     {
         var segusumRoot = FindAncestorWithDirectory(AppContext.BaseDirectory, "Segusum");

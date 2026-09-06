@@ -392,7 +392,10 @@ public static class GameplayMigrationVerifier
     {
         var supported = new[] { typeof(VariableDeclaration), typeof(AssignmentStatement), typeof(IncrementStatement),
             typeof(CallStatement), typeof(ReturnStatement), typeof(IfStatement), typeof(NarStatement),
-            typeof(NarRoomStatement), typeof(NarImgStatement), typeof(DialogueStatement), typeof(NamedCutsceneStatement) };
+            typeof(NarRoomStatement), typeof(NarImgStatement), typeof(DialogueStatement), typeof(NamedCutsceneStatement),
+            typeof(NextCycleStatement), typeof(AddCycleElementStatement), typeof(MakesNoSenseStatement),
+            typeof(MarkHappenedOnceStatement), typeof(MarkHappenedStatement), typeof(FinishGameStatement),
+            typeof(DoNotAdvanceTimeStatement), typeof(PreventRoomChangeStatement), typeof(TextInputStatement) };
         return FlattenDslStatements(statements).Where(x => !supported.Contains(x.GetType())).Select(x =>
             new MigrationFinding(MigrationFindingKind.Unverifiable, MigrationMatchStatus.Unverifiable,
                 $"Unsupported SEG construct: {x.GetType().Name}", "", x.Span.Line)).ToArray();
