@@ -12,7 +12,7 @@ namespace Segusum.Scripting.Tooling;
 public enum MigrationUnitStatus { Translated, Partial, Unsupported, DependsOnCSharpHelper }
 
 public sealed record MigrationDiagnostic(MigrationUnitStatus Status, string Path, int Line, string Reason, string? Original = null);
-public sealed record MigrationUnit(string Id, string Path, int Line, string GeneratedSeg, MigrationUnitStatus Status, IReadOnlyList<MigrationDiagnostic> Diagnostics);
+public sealed record MigrationUnit(string Id, string Path, int Line, int EndLine, string GeneratedSeg, MigrationUnitStatus Status, IReadOnlyList<MigrationDiagnostic> Diagnostics);
 public sealed record MigrationOutput(string Text, IReadOnlyList<MigrationDiagnostic> Diagnostics)
 {
     public IReadOnlyList<MigrationUnit> Units { get; init; } = Array.Empty<MigrationUnit>();
@@ -41,24 +41,41 @@ public static class CSharpToSegTranspiler
         {
             if (method.Identifier.ValueText is "afterActionExecutedCSharp")
             {
+                EmitTriviaComments(method.GetLeadingTrivia(), sb, 0);
                 sb.AppendLine("after-action-executed:");
+                EmitTriviaComments(method.Body?.OpenBraceToken.TrailingTrivia ?? default, sb, 1);
                 EmitStatements(method.Body?.Statements ?? default, sb, diagnostics, 1, emitPartial);
+                EmitTriviaComments(method.Body?.CloseBraceToken.LeadingTrivia ?? default, sb, 1);
+                EmitTriviaComments(method.Body?.CloseBraceToken.TrailingTrivia ?? default, sb, 1);
                 sb.AppendLine("end");
+                diagnostics.Add(new(MigrationUnitStatus.Partial, path, method.GetLocation().GetLineSpan().StartLinePosition.Line + 1,
+                    "special handler round-trip is not yet certifiable"));
             }
             else if (method.Identifier.ValueText is "beforeRoomChangeManual" or "beforeRoomChangeSegusum")
             {
+                EmitTriviaComments(method.GetLeadingTrivia(), sb, 0);
                 sb.AppendLine("before-room-change:");
+                EmitTriviaComments(method.Body?.OpenBraceToken.TrailingTrivia ?? default, sb, 1);
                 EmitStatements(method.Body?.Statements ?? default, sb, diagnostics, 1, emitPartial);
+                EmitTriviaComments(method.Body?.CloseBraceToken.LeadingTrivia ?? default, sb, 1);
+                EmitTriviaComments(method.Body?.CloseBraceToken.TrailingTrivia ?? default, sb, 1);
                 sb.AppendLine("end");
+                diagnostics.Add(new(MigrationUnitStatus.Partial, path, method.GetLocation().GetLineSpan().StartLinePosition.Line + 1,
+                    "special handler round-trip is not yet certifiable"));
             }
             else if (method.Identifier.ValueText is not "Configure" && method.Body != null && IsHelperCandidate(method))
             {
+                EmitTriviaComments(method.GetLeadingTrivia(), sb, 0);
                 sb.Append("def ").Append(method.Identifier.ValueText);
                 if (method.ParameterList.Parameters.Count != 0) sb.Append(' ').Append(string.Join(" ", method.ParameterList.Parameters.Select(x => x.Identifier.ValueText)));
                 sb.AppendLine(":");
-                EmitTriviaComments(method.Body.DescendantTrivia(), sb, 1);
-                EmitStatements(method.Body.Statements, sb, diagnostics, 1, emitPartial, false);
+                EmitTriviaComments(method.Body.OpenBraceToken.TrailingTrivia, sb, 1);
+                EmitStatements(method.Body.Statements, sb, diagnostics, 1, emitPartial, true);
+                EmitTriviaComments(method.Body.CloseBraceToken.LeadingTrivia, sb, 1);
+                EmitTriviaComments(method.Body.CloseBraceToken.TrailingTrivia, sb, 1);
                 sb.AppendLine("end");
+                diagnostics.Add(new(MigrationUnitStatus.DependsOnCSharpHelper, path, method.GetLocation().GetLineSpan().StartLinePosition.Line + 1,
+                    "helper unit round-trip is not yet certifiable"));
             }
         }
         var generated = sb.ToString();
@@ -67,7 +84,7 @@ public static class CSharpToSegTranspiler
                 diagnostics.Add(new(MigrationUnitStatus.Unsupported, path, 1, "comment was not preserved: " + comment));
         var parsed = DslParser.Parse(new Segusum.Scripting.Core.DslSource(path + ".generated.seg", generated));
         foreach (var diagnostic in parsed.Diagnostics)
-            diagnostics.Add(new(MigrationUnitStatus.Unsupported, path, diagnostic.Span.Line, "generated SEG is not parsable: " + diagnostic.Message));
+            diagnostics.Add(new(MigrationUnitStatus.Unsupported, path + ".generated.seg", diagnostic.Span.Line, "generated SEG is not parsable: " + diagnostic.Message));
         if (parsed.Diagnostics.Count == 0)
         {
             var sourceRegistrations = MigrationVerifier.ExtractCSharpRegistrations(path, text);
@@ -79,6 +96,23 @@ public static class CSharpToSegTranspiler
                     diagnostics.Add(new(MigrationUnitStatus.Unsupported, path, sourceRegistration.SourceLine, "semantic round-trip mismatch: generated handler registration is missing"));
                 else if (MigrationVerifier.CompareRegistration(sourceRegistration, generatedRegistration).Overall != EquivalenceStatus.Pass)
                     diagnostics.Add(new(MigrationUnitStatus.Unsupported, path, sourceRegistration.SourceLine, "semantic round-trip mismatch: handler fingerprint differs"));
+            }
+
+            var sourceCycles = MigrationVerifier.ExtractCSharpCycles(path, text);
+            var generatedCycles = MigrationVerifier.ExtractDslCycles(new DslSource(path + ".generated.seg", generated));
+            foreach (var sourceCycle in sourceCycles)
+            {
+                var generatedCycle = generatedCycles.FirstOrDefault(x => x.Id == sourceCycle.Id);
+                if (generatedCycle is null)
+                {
+                    diagnostics.Add(new(MigrationUnitStatus.Unsupported, path, sourceCycle.SourceLine,
+                        "semantic round-trip mismatch: generated cycle is missing"));
+                }
+                else if (MigrationVerifier.CompareCycles(new[] { sourceCycle }, new[] { generatedCycle }).Status != EquivalenceStatus.Pass)
+                {
+                    diagnostics.Add(new(MigrationUnitStatus.Unsupported, path, sourceCycle.SourceLine,
+                        "semantic round-trip mismatch: cycle fingerprint differs"));
+                }
             }
         }
         var units = BuildUnits(path, root, generated, diagnostics);
@@ -101,17 +135,26 @@ public static class CSharpToSegTranspiler
         {
             var line = invocation.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
             var id = RegistrationKind(invocation) + ":" + Arg(invocation.ArgumentList.Arguments, 0);
-            var own = diagnostics.Where(x => x.Line == line || x.Path == path && x.Line >= line).Take(1).ToArray();
-            units.Add(new MigrationUnit(id, path, line, generated, own.Length == 0 ? MigrationUnitStatus.Translated : own[0].Status, own));
+            var endLine = invocation.GetLocation().GetLineSpan().EndLinePosition.Line + 1;
+            var own = diagnostics.Where(x => (x.Path == path && x.Line >= line && x.Line <= endLine) || IsGeneratedDiagnosticForUnit(x, path) || IsGlobalDiagnostic(x, path)).ToArray();
+            units.Add(new MigrationUnit(id, path, line, endLine, generated, own.Length == 0 ? MigrationUnitStatus.Translated : own[0].Status, own));
         }
         foreach (var method in root.DescendantNodes().OfType<MethodDeclarationSyntax>().Where(x => x.Body != null && (x.Identifier.ValueText is "afterActionExecutedCSharp" or "beforeRoomChangeManual" or "beforeRoomChangeSegusum" || IsHelperCandidate(x))))
         {
             var line = method.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
-            var own = diagnostics.Where(x => x.Line >= line && x.Line <= line + method.GetLocation().GetLineSpan().EndLinePosition.Line - method.GetLocation().GetLineSpan().StartLinePosition.Line + 1).ToArray();
-            units.Add(new MigrationUnit(method.Identifier.ValueText, path, line, generated, own.Any(x => x.Status == MigrationUnitStatus.Unsupported) ? MigrationUnitStatus.Unsupported : own.Any() ? own[0].Status : MigrationUnitStatus.Translated, own));
+            var endLine = method.GetLocation().GetLineSpan().EndLinePosition.Line + 1;
+            var own = diagnostics.Where(x => (x.Path == path && x.Line >= line && x.Line <= endLine) || IsGeneratedDiagnosticForUnit(x, path) || IsGlobalDiagnostic(x, path)).ToArray();
+            units.Add(new MigrationUnit(method.Identifier.ValueText, path, line, endLine, generated, own.Any(x => x.Status == MigrationUnitStatus.Unsupported) ? MigrationUnitStatus.Unsupported : own.Any() ? own[0].Status : MigrationUnitStatus.Translated, own));
         }
         return units;
     }
+
+    private static bool IsGeneratedDiagnosticForUnit(MigrationDiagnostic diagnostic, string sourcePath)
+        => diagnostic.Path == sourcePath + ".generated.seg";
+
+    private static bool IsGlobalDiagnostic(MigrationDiagnostic diagnostic, string sourcePath)
+        => diagnostic.Path == sourcePath && (diagnostic.Reason.StartsWith("comment was not preserved:", StringComparison.Ordinal)
+            || diagnostic.Reason.StartsWith("semantic round-trip mismatch:", StringComparison.Ordinal));
 
     private static bool IsHelperCandidate(MethodDeclarationSyntax method)
         => method.Modifiers.Any(x => x.ValueText is "private" or "protected") && method.ParameterList.Parameters.All(x => x.Type != null);
@@ -232,6 +275,7 @@ public static class CSharpToSegTranspiler
     private static void EmitCycle(InvocationExpressionSyntax initializer, string variable, StringBuilder sb, List<MigrationDiagnostic> diagnostics, int level, bool partial)
     {
         var start = FindStartCycle(initializer)!;
+        sb.Append(new string(' ', level * 4)).Append("var ").Append(variable).AppendLine(" = new-cycle");
         EmitCycleElementCore(variable, start.ArgumentList.Arguments, start, sb, diagnostics, level, partial, true);
         foreach (var add in new[] { initializer }.Concat(initializer.DescendantNodes().OfType<InvocationExpressionSyntax>()).Where(x => CallName(x) == "addToCycle").OrderBy(x => x.Span.End))
             EmitCycleElementCore(variable, add.ArgumentList.Arguments, add, sb, diagnostics, level, partial, false);
@@ -263,11 +307,22 @@ public static class CSharpToSegTranspiler
     private static void EmitNamedCutscene(InvocationExpressionSyntax invocation, StatementSyntax statement, StringBuilder sb, List<MigrationDiagnostic> diagnostics, int level, bool partial)
     {
         var indent = new string(' ', level * 4);
-        sb.Append(indent).Append("named-cutscene ").Append(Arg(invocation.ArgumentList.Arguments, 0)).Append(" \"\"");
+        var id = Arg(invocation.ArgumentList.Arguments, 0);
+        var title = NamedCutsceneTitle(invocation, id);
+        if (title is null) Unsupported(invocation, diagnostics, "NamedCutSceneId title cannot be resolved structurally", partial, sb, level);
+        sb.Append(indent).Append("named-cutscene ").Append(id).Append(' ').Append(title ?? "\"\"");
         foreach (var arg in invocation.ArgumentList.Arguments.Skip(1)) sb.Append(' ').Append(Expression(arg.Expression));
         sb.AppendLine(":");
         if (statement is BlockSyntax block) EmitStatements(block.Statements, sb, diagnostics, level + 1, partial);
         sb.Append(indent).AppendLine("end");
+    }
+
+    private static string? NamedCutsceneTitle(InvocationExpressionSyntax invocation, string id)
+    {
+        var root = invocation.SyntaxTree.GetRoot();
+        var declaration = root.DescendantNodes().OfType<VariableDeclaratorSyntax>().FirstOrDefault(x => x.Identifier.ValueText == id && x.Initializer?.Value is ObjectCreationExpressionSyntax creation && creation.Type.ToString().EndsWith("NamedCutSceneId", StringComparison.Ordinal));
+        var title = declaration?.Initializer?.Value.DescendantNodes().OfType<LiteralExpressionSyntax>().FirstOrDefault(x => x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.StringLiteralExpression));
+        return title?.Token.Text;
     }
 
     private static string? EnumValue(SeparatedSyntaxList<ArgumentSyntax> args, string type, params string[] known)
@@ -280,8 +335,20 @@ public static class CSharpToSegTranspiler
     private static string CycleExpression(AnonymousFunctionExpressionSyntax lambda)
     {
         var parameter = lambda switch { SimpleLambdaExpressionSyntax x => x.Parameter.Identifier.ValueText, ParenthesizedLambdaExpressionSyntax x => x.ParameterList.Parameters.FirstOrDefault()?.Identifier.ValueText, _ => null };
-        var expression = Expression(lambda.Body);
-        return string.IsNullOrEmpty(parameter) ? expression : System.Text.RegularExpressions.Regex.Replace(expression, "\\b" + System.Text.RegularExpressions.Regex.Escape(parameter) + "\\b", "it");
+        var body = string.IsNullOrEmpty(parameter) ? lambda.Body : new CycleParameterRewriter(parameter!).Visit(lambda.Body);
+        return Expression(body);
+    }
+
+    private sealed class CycleParameterRewriter : CSharpSyntaxRewriter
+    {
+        private readonly string parameter;
+        public CycleParameterRewriter(string parameter) => this.parameter = parameter;
+        public override SyntaxNode? VisitIdentifierName(IdentifierNameSyntax node)
+        {
+            if (node.Identifier.ValueText == parameter && !(node.Parent is MemberAccessExpressionSyntax member && member.Name == node))
+                return SyntaxFactory.IdentifierName("it").WithTriviaFrom(node);
+            return base.VisitIdentifierName(node);
+        }
     }
 
     private static string CallName(InvocationExpressionSyntax invocation) => invocation.Expression switch
