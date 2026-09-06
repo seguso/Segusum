@@ -592,20 +592,23 @@ public static class MigrationVerifier
             var a = csharp[i]; var b = dsl[i];
             if (new[] { a.Importance, a.Repeat, b.Importance, b.Repeat }.Any(x => x?.StartsWith("unverifiable:", StringComparison.Ordinal) == true))
                 return new("cycle metadata", EquivalenceStatus.Inconclusive, "Unverifiable cycle Importance/Repeat value.");
-            if (a.Id != b.Id || a.Importance != b.Importance || a.Repeat != b.Repeat || a.Predicate != b.Predicate)
+            if (a.Id != b.Id || a.Importance != b.Importance || a.Repeat != b.Repeat || NormalizeCyclePredicate(a.Predicate) != NormalizeCyclePredicate(b.Predicate))
                 return new("cycle", EquivalenceStatus.Fail, $"C#={a.Id}|{a.Importance}|{a.Repeat}|{a.Predicate}; DSL={b.Id}|{b.Importance}|{b.Repeat}|{b.Predicate}");
             var body = SequenceCheck("cycle body", a.BodyEffects, b.BodyEffects); if (body.Status != EquivalenceStatus.Pass) return body;
             if (a.Elements.Count != b.Elements.Count) return new("cycle elements", EquivalenceStatus.Fail, "cycle element count mismatch");
             for (var j = 0; j < a.Elements.Count; j++)
             {
                 var x = a.Elements[j]; var y = b.Elements[j];
-                if (x.Id != y.Id || x.Importance != y.Importance || x.Repeat != y.Repeat || x.Predicate != y.Predicate)
+                if (x.Id != y.Id || x.Importance != y.Importance || x.Repeat != y.Repeat || NormalizeCyclePredicate(x.Predicate) != NormalizeCyclePredicate(y.Predicate))
                     return new("cycle element", EquivalenceStatus.Fail, $"element #{j + 1} mismatch C#={x.Id}|{x.Importance}|{x.Repeat}|{x.Predicate}; DSL={y.Id}|{y.Importance}|{y.Repeat}|{y.Predicate}");
                 var effects = SequenceCheck($"cycle element #{j + 1} body", x.BodyEffects, y.BodyEffects); if (effects.Status != EquivalenceStatus.Pass) return effects;
             }
         }
         return new("cycles", EquivalenceStatus.Pass);
     }
+
+    private static string? NormalizeCyclePredicate(string? value)
+        => value?.Replace("$cycleElement", "it", StringComparison.Ordinal);
 
     private static IReadOnlyList<CycleFingerprint> ExtractDslCyclesFromStatements(IEnumerable<DslStatement> input, string path)
     {
@@ -695,16 +698,21 @@ public static class MigrationVerifier
                     else effects.Add("assign:" + CanonicalCSharpExpression(assignment.Left + assignment.OperatorToken.Text + assignment.Right));
                     break;
                 case ExpressionStatementSyntax expression when expression.Expression is InvocationExpressionSyntax invocation:
-                    effects.Add(CSharpInvocationEffect(invocation));
+                    if (InvocationName(invocation) == "addToCycle")
+                        AddCSharpCycleElementEffects(invocation, effects);
+                    else effects.Add(CSharpInvocationEffect(invocation));
                     break;
                 case LocalDeclarationStatementSyntax local:
                     foreach (var variable in local.Declaration.Variables)
-                        if (variable.Initializer?.Value is InvocationExpressionSyntax start && InvocationName(start) == "startCycle")
-                            effects.Add("cycle-start:" + CycleInvocationFingerprint(start));
+                        if (variable.Initializer?.Value is InvocationExpressionSyntax initializer && FindStartCycle(initializer) is { } start)
+                        {
+                            effects.Add("assign:" + variable.Identifier.ValueText + "=new-cycle");
+                            AddCSharpCycleElementEffects(start, effects, variable.Identifier.ValueText);
+                            foreach (var add in initializer.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>()
+                                         .Where(x => InvocationName(x) == "addToCycle").OrderBy(x => x.Span.End))
+                                AddCSharpCycleElementEffects(add, effects, variable.Identifier.ValueText);
+                        }
                         else if (variable.Initializer is not null) effects.Add("assign:" + variable.Identifier.ValueText + "=" + CanonicalCSharpExpression(variable.Initializer.Value.ToString()));
-                    break;
-                case ExpressionStatementSyntax expression when expression.Expression is InvocationExpressionSyntax cycleAdd && InvocationName(cycleAdd) == "addToCycle":
-                    effects.Add("cycle-element:" + CycleElementInvocationFingerprint(cycleAdd));
                     break;
                 case UsingStatementSyntax usingStatement when usingStatement.Expression is InvocationExpressionSyntax namedCutscene && InvocationName(namedCutscene) == "namedCutScene":
                     effects.Add(CSharpNamedCutsceneEffect(namedCutscene, usingStatement.Statement));
@@ -723,11 +731,33 @@ public static class MigrationVerifier
         if (name is "finishGame" or "finish") return "finish-game";
         if (name is "doNotAdvanceTime") return "do-not-advance-time";
         if (name is "preventRoomChange") return "prevent-room-change";
+        if (name == "execNextInCycle" && invocation.ArgumentList.Arguments.Count == 1)
+            return "cycle:next:" + CanonicalCSharpExpression(invocation.ArgumentList.Arguments[0].Expression.ToString());
         if (name == "dial" && invocation.ArgumentList.Arguments.Count >= 2)
             return "dialogue:" + CanonicalCSharpExpression(invocation.ArgumentList.Arguments[0].Expression.ToString()) + ":" + LiteralText(invocation.ArgumentList.Arguments[1].Expression.ToString());
         if (name is "nar" or "narText" or "narRoom" or "narImg")
             return "narration:" + LiteralText(invocation.ArgumentList.Arguments.LastOrDefault()?.Expression.ToString());
         return "call:" + CanonicalCSharpExpression(invocation.ToString());
+    }
+
+    private static void AddCSharpCycleElementEffects(InvocationExpressionSyntax invocation, List<string> effects, string? cycleName = null)
+    {
+        var cycle = cycleName ?? (invocation.Expression as MemberAccessExpressionSyntax)?.Expression.ToString() ?? "cyc";
+        var id = OperandText(invocation.ArgumentList.Arguments, 0);
+        effects.Add("cycle:add:" + cycle + ":" + id);
+        var lambdas = invocation.ArgumentList.Arguments.Select(x => x.Expression).OfType<AnonymousFunctionExpressionSyntax>().ToArray();
+        if (lambdas.Length != 0) CollectCSharpHandlerEffects((lambdas[^1].Body as BlockSyntax)?.Statements ?? Enumerable.Empty<StatementSyntax>(), effects);
+    }
+
+    private static InvocationExpressionSyntax? FindStartCycle(InvocationExpressionSyntax invocation)
+    {
+        var current = invocation;
+        while (true)
+        {
+            if (InvocationName(current) == "startCycle") return current;
+            if (current.Expression is not MemberAccessExpressionSyntax member || member.Expression is not InvocationExpressionSyntax next) return null;
+            current = next;
+        }
     }
 
     private static string CycleInvocationFingerprint(InvocationExpressionSyntax invocation)

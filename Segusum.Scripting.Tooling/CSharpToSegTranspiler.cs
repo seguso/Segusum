@@ -230,8 +230,14 @@ public static class CSharpToSegTranspiler
         {
             var cs = MigrationVerifier.ExtractCSharpRegistrations(path, "class W { void M() { " + invocation.ToFullString() + " } }").FirstOrDefault();
             var dsl = MigrationVerifier.ExtractDslRegistrations(new DslSource(path + ".generated.seg", generated)).FirstOrDefault();
-            if (cs is null || dsl is null || MigrationVerifier.CompareRegistration(cs, dsl).Overall != EquivalenceStatus.Pass)
-                diagnostics.Add(new(MigrationUnitStatus.Unsupported, path, StartLine(source), "semantic round-trip mismatch: handler fingerprint differs"));
+            var comparison = cs is null || dsl is null ? null : MigrationVerifier.CompareRegistration(cs, dsl);
+            if (comparison is null || comparison.Overall != EquivalenceStatus.Pass)
+            {
+                var detail = comparison is null
+                    ? "handler fingerprint could not be extracted"
+                    : comparison.Checks.FirstOrDefault(x => x.Status != EquivalenceStatus.Pass)?.Detail ?? "handler fingerprint differs";
+                diagnostics.Add(new(MigrationUnitStatus.Unsupported, path, StartLine(source), "semantic round-trip mismatch: " + detail));
+            }
         }
         if (source is MethodDeclarationSyntax method)
         {
@@ -501,7 +507,7 @@ public static class CSharpToSegTranspiler
         var start = FindStartCycle(initializer)!;
         sb.Append(new string(' ', level * 4)).Append("var ").Append(variable).AppendLine(" = new-cycle");
         EmitCycleElementCore(variable, start.ArgumentList.Arguments, start, sb, diagnostics, level, partial, true);
-        foreach (var add in new[] { initializer }.Concat(initializer.DescendantNodes().OfType<InvocationExpressionSyntax>()).Where(x => CallName(x) == "addToCycle").OrderBy(x => x.Span.End))
+        foreach (var add in initializer.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>().Where(x => CallName(x) == "addToCycle").OrderBy(x => x.Span.End))
             EmitCycleElementCore(variable, add.ArgumentList.Arguments, add, sb, diagnostics, level, partial, false);
     }
 
@@ -626,7 +632,7 @@ public static class CSharpToSegTranspiler
             : name;
         return invocation.ArgumentList.Arguments.Count == 0
             ? receiver
-            : receiver + " " + string.Join(" ", invocation.ArgumentList.Arguments.Select(Expression));
+            : receiver + " " + string.Join(" ", invocation.ArgumentList.Arguments.Select(x => Expression(x)));
     }
 
     private static string BinaryOperator(Microsoft.CodeAnalysis.CSharp.SyntaxKind kind) => kind switch
