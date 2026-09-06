@@ -706,6 +706,44 @@ public NamedCutSceneId ncsMikeStalloneIlBenefattore = null!;
     }
 
     [Fact]
+    public void PrivateWorldMethodCanBeCalledDirectlyFromDsl()
+    {
+        var result = Run("def main:\n salvanoJack\nend", "private void salvanoJack() { }");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL"));
+        Assert.Contains("salvanoJack();", Generated(result));
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
+    public void ListLiteralSupportsRoomsAndContains()
+    {
+        var result = Run("def main:\n var rooms = [\n  roomA,\n  roomB\n ]\n if rooms.Contains roomA:\n  var found = true\n end\nend", "public Room roomA = null!; public Room roomB = null!;");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL"));
+        Assert.Contains("new[] { roomA, roomB }", Generated(result));
+        Assert.Contains("System.Linq.Enumerable.Contains(rooms,roomA)", Generated(result));
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
+    public void ListLiteralIsNotSpecificToRooms()
+    {
+        var result = Run("def main:\n var numbers = [1, 2, 3]\n var words = [\"a\", \"b\"]\nend");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL"));
+        Assert.Contains("new[] { 1, 2, 3 }", Generated(result));
+        Assert.Contains("new[] { \"a\", \"b\" }", Generated(result));
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
+    public void StaticMembersCanBeUsedThroughATypeName()
+    {
+        var result = Run("def main ret bool:\n ret state == TestEnums.running\nend", "public int state; public static class TestEnums { public const int running = 1; }");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL"));
+        Assert.Contains("state == TestEnums.running", Generated(result));
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
     public void UnknownIdentifierHasDslDiagnosticAndNoGeneratedSource()
     {
         var result = Run("def main:\n missing\nend");

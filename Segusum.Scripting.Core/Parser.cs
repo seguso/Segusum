@@ -251,7 +251,7 @@ public static class DslParser
             return text;
         }
         private DslExpression ParseCallAfterKeyword(SourceSpan span) { Error("The 'call' keyword is no longer part of the DSL syntax."); var name = Word(); return new CallExpression(name, Array.Empty<DslArgument>(), span); }
-        private bool CanStartArgument() => (Current.Kind is DslTokenKind.Identifier or DslTokenKind.Number or DslTokenKind.String or DslTokenKind.LParen) && Current.Text is not ("and" or "or" or "else" or "elif" or "end" or "when" or "with" or "for" or "here");
+        private bool CanStartArgument() => (Current.Kind is DslTokenKind.Identifier or DslTokenKind.Number or DslTokenKind.String or DslTokenKind.LParen or DslTokenKind.LBracket) && Current.Text is not ("and" or "or" or "else" or "elif" or "end" or "when" or "with" or "for" or "here");
         private DslArgument ParseArgument()
         { var span = Current.Span; if (Current.Kind == DslTokenKind.Identifier && position + 2 < tokens.Count && tokens[position + 1].Kind == DslTokenKind.Colon && tokens[position + 2].Kind != DslTokenKind.NewLine && tokens[position + 2].Kind != DslTokenKind.EndOfFile) { var name = Take().Text; Take(); return new DslArgument(name, Expression(), span); } return new DslArgument(null, Prefix(), span); }
         private DslExpression Expression(int minimumPrecedence = 0)
@@ -280,6 +280,20 @@ public static class DslParser
             if (Is("not")) { Take(); return new UnaryExpression("not", Expression(Precedence("not")), span); }
             if (Is("exists")) return ParseExists(span);
             if (Current.Kind == DslTokenKind.LParen) { Take(); var parenthesized = Expression(); Need(")"); return new ParenthesizedExpression(parenthesized, span); }
+            if (Current.Kind == DslTokenKind.LBracket)
+            {
+                Take(); SkipTerminators();
+                var elements = new List<DslExpression>();
+                while (!Is("]") && Current.Kind != DslTokenKind.EndOfFile)
+                {
+                    elements.Add(Expression());
+                    SkipTerminators();
+                    if (!Is(",")) break;
+                    Take(); SkipTerminators();
+                }
+                Need("]");
+                return new ListExpression(elements, span);
+            }
             if (Current.Kind == DslTokenKind.String) return new LiteralExpression(Take().Text, "string", span);
             if (Current.Kind == DslTokenKind.Number) return new LiteralExpression(Take().Text, "number", span);
             if (Is("true") || Is("false")) return new LiteralExpression(Take().Text, "bool", span);

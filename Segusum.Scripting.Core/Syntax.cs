@@ -70,6 +70,7 @@ public sealed record NarImgStatement(DslExpression ImagePath,string? Size,bool S
 public abstract record DslExpression(SourceSpan Span) : DslNode(Span);
 public sealed record IdentifierExpression(string Name,SourceSpan Span) : DslExpression(Span);
 public sealed record LiteralExpression(string Value,string Kind,SourceSpan Span) : DslExpression(Span);
+public sealed record ListExpression(IReadOnlyList<DslExpression> Elements,SourceSpan Span) : DslExpression(Span);
 public sealed record UnaryExpression(string Operator,DslExpression Operand,SourceSpan Span) : DslExpression(Span);
 public sealed record BinaryExpression(string Operator,DslExpression Left,DslExpression Right,SourceSpan Span) : DslExpression(Span);
 public sealed record CallExpression(string Name,IReadOnlyList<DslArgument> Arguments,SourceSpan Span) : DslExpression(Span)

@@ -178,12 +178,15 @@ public sealed class SegusumGenerator : IIncrementalGenerator
     private static string Emit(DslExpression expression, BoundModel model) => expression switch
     {
         IdentifierExpression i => model.Values.TryGetValue(i, out var value) ? (value.Kind is BoundSymbolKind.CSharpMethod or BoundSymbolKind.Function ? value.CSharpName + "()" : value.CSharpName) : Name(i.Name), LiteralExpression l => l.Kind == "cycle" ? "new Cycle()" : l.Kind == "raw-string" ? "\"" + EscapeString(l.Value) + "\"" : l.Value,
+        ListExpression l => "new[] { " + string.Join(", ", l.Elements.Select(x => Emit(x, model))) + " }",
         ParenthesizedExpression p => "(" + Emit(p.Expression, model) + ")", UnaryExpression u => EmitUnary(u, model),
         BinaryExpression b => Emit(b.Left, model) + " " + (b.Operator == "and" ? "&&" : b.Operator == "or" ? "||" : b.Operator) + " " + Emit(b.Right, model),
         CallExpression c when model.DomainOperations.TryGetValue(c, out var domain) && domain.Kind == BoundDomainOperationKind.NotSeenRecently => Emit(domain.Receiver, model) + ".notSeenRecently(" + Emit(domain.Argument!, model) + ")",
         CallExpression c when model.DomainOperations.TryGetValue(c, out var seen) && seen.Kind == BoundDomainOperationKind.WasSeenAtLeastOnce => "wasSeenAtLeastOnce(" + Emit(seen.Receiver, model) + ")",
         ExistsExpression e => "System.Linq.Enumerable.Any(" + Emit(e.Collection, model) + ", " + Name(e.ItemName) + " => " + Emit(e.Predicate, model) + ")",
         MemberAccessExpression m when model.Values.TryGetValue(m, out var words) && words.CSharpName == "splittaInputEFaiLower(e)" => words.CSharpName,
+        MemberAccessExpression m when model.Values.TryGetValue(m, out var staticField) && staticField.Symbol is IFieldSymbol { IsStatic: true } => staticField.CSharpName,
+        MemberAccessExpression m when model.Values.TryGetValue(m, out var staticProperty) && staticProperty.Symbol is IPropertySymbol { IsStatic: true } => staticProperty.CSharpName,
         MemberAccessExpression m when model.Values.TryGetValue(m, out var member) && member.Kind == BoundSymbolKind.CSharpMethod => Emit(m.Receiver, model) + "." + member.CSharpName + "()",
         MemberAccessExpression m when model.Values.TryGetValue(m, out var property) => Emit(m.Receiver, model) + "." + property.CSharpName,
         CallExpression c when model.Calls.TryGetValue(c, out var bound) => (bound.Receiver == null ? bound.TargetName : Emit(bound.Receiver, model) + "." + bound.TargetName) + "(" + string.Join(",", bound.Arguments.Select(a => (a.Source.Name == null ? "" : Name(a.ParameterName) + ": ") + Emit(a.Source.Expression, model))) + ")",

@@ -69,6 +69,8 @@ public sealed class DslBinder
     private readonly Dictionary<string, DslSymbolIdentity> activeDslSymbols = new(StringComparer.Ordinal);
     private readonly HashSet<ISymbol> dslRoomChangedTargets = new(SymbolEqualityComparer.Default);
     private readonly HashSet<DslExpression> nullLiterals = new(ReferenceComparer<DslExpression>.Instance);
+    private readonly Dictionary<string, INamedTypeSymbol?> typesBySimpleName = new(StringComparer.Ordinal);
+    private bool typeIndexBuilt;
     private bool suppressDiagnostics;
 
     public BoundModel Model => model;
@@ -266,6 +268,15 @@ public sealed class DslBinder
         switch (expression)
         {
             case LiteralExpression l: if (l.Kind == "null") { nullLiterals.Add(l); return null; } return l.Kind is "string" or "raw-string" ? compilation.GetSpecialType(SpecialType.System_String) : l.Kind == "bool" ? compilation.GetSpecialType(SpecialType.System_Boolean) : l.Kind == "cycle" ? cycle : compilation.GetSpecialType(SpecialType.System_Int32);
+            case ListExpression list:
+            {
+                if (list.Elements.Count == 0) { Report("SEGDSL313", "List literals must contain at least one element.", list.Span); return null; }
+                var listElementType = BindExpression(list.Elements[0], scope, contextualIt);
+                if (listElementType == null) return null;
+                foreach (var element in list.Elements.Skip(1))
+                    RequireExpression(element, BindExpression(element, scope, contextualIt), listElementType, "List elements must have a compatible type.");
+                return compilation.CreateArrayTypeSymbol(listElementType);
+            }
             case IdentifierExpression i:
                 if (i.Name == "it" && contextualIt != null) { model.Values[i] = new BoundValue(contextualIt, "x", null, BoundSymbolKind.ContextualIt); return contextualIt; }
                 if (i.Name == "input")
@@ -284,6 +295,23 @@ public sealed class DslBinder
                 if (b.Operator is "and" or "or") { Require(lt, compilation.GetSpecialType(SpecialType.System_Boolean), b.Left.Span, "logical operand must be bool."); Require(rt, compilation.GetSpecialType(SpecialType.System_Boolean), b.Right.Span, "logical operand must be bool."); return compilation.GetSpecialType(SpecialType.System_Boolean); }
                 return b.Operator is "==" or "!=" or ">" or ">=" or "<" or "<=" ? compilation.GetSpecialType(SpecialType.System_Boolean) : lt;
             case MemberAccessExpression m:
+                if (m.Receiver is IdentifierExpression typeName && TryGetTypeBySimpleName(typeName.Name, out var staticType))
+                {
+                    var staticMember = staticType.GetMembers(m.MemberName)
+                        .FirstOrDefault(x => x switch
+                        {
+                            IFieldSymbol field => field.IsStatic,
+                            IPropertySymbol property => property.IsStatic,
+                            IMethodSymbol method => method.IsStatic,
+                            _ => false
+                        } && Accessible(x));
+                    if (staticMember != null)
+                    {
+                        RecordReference(m.MemberName, m.MemberSpan, staticMember is IMethodSymbol ? BoundSymbolKind.CSharpMethod : BoundSymbolKind.CSharpProperty, staticMember, null, "member-name");
+                        model.Values[m] = new BoundValue(MemberType(staticMember), typeName.Name + "." + staticMember.Name, staticMember, staticMember is IMethodSymbol ? BoundSymbolKind.CSharpMethod : BoundSymbolKind.CSharpProperty);
+                        return MemberType(staticMember);
+                    }
+                }
                 var receiverType = BindExpression(m.Receiver, scope, contextualIt);
                 if (m.Receiver is IdentifierExpression { Name: "input" } && m.MemberName == "wordsLower")
                 {
@@ -511,6 +539,37 @@ public sealed class DslBinder
     }
     private static bool IsDerivedFrom(INamedTypeSymbol type, INamedTypeSymbol baseType) { for (var t = type.BaseType; t != null; t = t.BaseType) if (SymbolEqualityComparer.Default.Equals(t, baseType)) return true; return false; }
     private static IEnumerable<ISymbol> MembersOf(ITypeSymbol type, string? name = null) { for (var t = type as INamedTypeSymbol; t != null; t = t.BaseType) foreach (var member in name == null ? t.GetMembers() : t.GetMembers(name)) yield return member; }
+    private bool TryGetTypeBySimpleName(string name, out INamedTypeSymbol type)
+    {
+        EnsureTypeIndex();
+        if (typesBySimpleName.TryGetValue(name, out var candidate) && candidate != null)
+        { type = candidate; return true; }
+        type = null!;
+        return false;
+    }
+    private void EnsureTypeIndex()
+    {
+        if (typeIndexBuilt) return;
+        typeIndexBuilt = true;
+        VisitNamespace(compilation.GlobalNamespace);
+    }
+    private void VisitNamespace(INamespaceSymbol current)
+    {
+        foreach (var member in current.GetMembers())
+        {
+            if (member is INamespaceSymbol childNamespace) VisitNamespace(childNamespace);
+            else if (member is INamedTypeSymbol type) VisitType(type);
+        }
+    }
+    private void VisitType(INamedTypeSymbol type)
+    {
+        if (Accessible(type))
+        {
+            if (!typesBySimpleName.TryGetValue(type.Name, out var existing)) typesBySimpleName[type.Name] = type;
+            else if (!SymbolEqualityComparer.Default.Equals(existing, type)) typesBySimpleName[type.Name] = null;
+        }
+        foreach (var nested in type.GetTypeMembers()) VisitType(nested);
+    }
     private ITypeSymbol? TypeOf(string name) => name switch { "int" => compilation.GetSpecialType(SpecialType.System_Int32), "bool" => compilation.GetSpecialType(SpecialType.System_Boolean), "string" => compilation.GetSpecialType(SpecialType.System_String), _ => compilation.GetTypeByMetadataName(name.StartsWith("Seg.", StringComparison.Ordinal) ? name : "Seg." + name) ?? compilation.GetTypeByMetadataName(name) };
     private static string NormalizeKey(string name) => DslNames.Camel(name).ToUpperInvariant();
     private void Require(ITypeSymbol? actual, ITypeSymbol? expected, SourceSpan span, string message) { if (actual == null || expected == null || !Compatible(actual, expected)) Report("SEGDSL313", message, span); }
