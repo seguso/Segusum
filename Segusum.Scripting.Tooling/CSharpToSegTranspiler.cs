@@ -63,7 +63,7 @@ public static class CSharpToSegTranspiler
                 diagnostics.Add(new(MigrationUnitStatus.Partial, path, method.GetLocation().GetLineSpan().StartLinePosition.Line + 1,
                     "special handler round-trip is not yet certifiable"));
             }
-            else if (method.Identifier.ValueText is not "Configure" && method.Body != null && IsHelperCandidate(method))
+            else if (method.Identifier.ValueText is not "Configure" && method.Body != null && IsHelperCandidate(method) && !IsRegistrationContainer(method))
             {
                 EmitTriviaComments(method.GetLeadingTrivia(), sb, 0);
                 sb.Append("def ").Append(method.Identifier.ValueText);
@@ -106,7 +106,7 @@ public static class CSharpToSegTranspiler
             var isolated = IsolateHandler(path, invocation);
             units.Add(CreateUnit(id, path, line, endLine, isolated.Text, isolated.Diagnostics));
         }
-        foreach (var method in root.DescendantNodes().OfType<MethodDeclarationSyntax>().Where(x => x.Body != null && (x.Identifier.ValueText is "afterActionExecutedCSharp" or "beforeRoomChangeManual" or "beforeRoomChangeSegusum" || IsHelperCandidate(x))))
+        foreach (var method in root.DescendantNodes().OfType<MethodDeclarationSyntax>().Where(x => x.Body != null && (x.Identifier.ValueText is "afterActionExecutedCSharp" or "beforeRoomChangeManual" or "beforeRoomChangeSegusum" || (IsHelperCandidate(x) && !IsRegistrationContainer(x)))))
         {
             var line = method.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
             var endLine = method.GetLocation().GetLineSpan().EndLinePosition.Line + 1;
@@ -230,6 +230,9 @@ public static class CSharpToSegTranspiler
 
     private static bool IsHelperCandidate(MethodDeclarationSyntax method)
         => method.Modifiers.Any(x => x.ValueText is "private" or "protected") && method.ParameterList.Parameters.All(x => x.Type != null);
+
+    private static bool IsRegistrationContainer(MethodDeclarationSyntax method)
+        => method.Body?.DescendantNodes().OfType<InvocationExpressionSyntax>().Any(x => RegistrationKind(x) != null) == true;
 
     private static void EmitHandler(InvocationExpressionSyntax invocation, StringBuilder sb, List<MigrationDiagnostic> diagnostics, bool partial)
     {

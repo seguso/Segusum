@@ -87,4 +87,22 @@ public sealed class CSharpToSegTranspilerTests
         var result = CSharpToSegTranspiler.Transpile("x.cs", source);
         Assert.Contains("foo it \"x\"", result.Text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void RegistrationContainerIsNotAHelperUnit()
+    {
+        const string source = "class W { protected void configureActionHandlers() { addHandlerUseHere(a, e => { Helper(); }); addHandlerUseHere(b, e => { }); } private void Helper() { foo(); } }";
+        var result = CSharpToSegTranspiler.Transpile("x.cs", source);
+        Assert.Equal(new[] { "use-here:a", "use-here:b", "Helper" }, result.Units.Select(x => x.Id));
+        Assert.DoesNotContain("def configureActionHandlers", result.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RoomRegistrationContainerIsNotAHelperUnit()
+    {
+        const string source = "class W { private void configureRoomHandlers() { addRoomChangedHandler(roomA, e => { foo(); }); } private void Helper() { bar(); } }";
+        var result = CSharpToSegTranspiler.Transpile("x.cs", source);
+        Assert.Equal(new[] { "room-changed:roomA", "Helper" }, result.Units.Select(x => x.Id));
+        Assert.DoesNotContain("def configureRoomHandlers", result.Text, StringComparison.Ordinal);
+    }
 }
