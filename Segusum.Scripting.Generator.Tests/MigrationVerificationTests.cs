@@ -54,6 +54,43 @@ public sealed class MigrationVerificationTests
     }
 
     [Fact]
+    public void FluentCycleChainExtractsAllElementsInSourceOrder()
+    {
+        const string csharp = "class W { void M() { var cyc = startCycle(bb5, Importance.Important, Repeat.OnlyOnce, x => x.notSeenRecently(30), x => { }).addToCycle(mammaaiuti2, x => x.notSeenRecently(20), x => { }).addToCycle(mammaaiuti3, x => x.notSeenRecently(25), x => { }); } }";
+        var cycle = Assert.Single(MigrationVerifier.ExtractCSharpCycles("worldOnRoomChanged.cs", csharp));
+        Assert.Equal(new[] { "mammaaiuti2", "mammaaiuti3" }, cycle.Elements.Select(x => x.Id));
+        Assert.Equal("$cycleElement.notSeenRecently(20)", cycle.Elements[0].Predicate);
+        Assert.Equal("$cycleElement.notSeenRecently(25)", cycle.Elements[1].Predicate);
+    }
+
+    [Fact]
+    public void FluentAndSeparateCycleFormsHaveEquivalentFingerprints()
+    {
+        const string fluent = "class W { void M() { var cyc = startCycle(bb5, Importance.Important, Repeat.OnlyOnce, x => x.notSeenRecently(30), x => { }).addToCycle(mammaaiuti2, x => x.notSeenRecently(20), x => { }).addToCycle(mammaaiuti3, x => x.notSeenRecently(25), x => { }); } }";
+        const string separate = "class W { void M() { var cyc = startCycle(bb5, Importance.Important, Repeat.OnlyOnce, x => x.notSeenRecently(30), x => { }); cyc.addToCycle(mammaaiuti2, x => x.notSeenRecently(20), x => { }); cyc.addToCycle(mammaaiuti3, x => x.notSeenRecently(25), x => { }); } }";
+        Assert.Equal(EquivalenceStatus.Pass, MigrationVerifier.CompareCycles(
+            MigrationVerifier.ExtractCSharpCycles("fluent.cs", fluent), MigrationVerifier.ExtractCSharpCycles("separate.cs", separate)).Status);
+    }
+
+    [Fact]
+    public void FluentCycleOrderAndCardinalityDifferencesFailAgainstDsl()
+    {
+        const string csharp = "class W { void M() { var cyc = startCycle(bb5, Importance.Important, Repeat.OnlyOnce, x => x.notSeenRecently(30), x => { }).addToCycle(mammaaiuti2, x => x.notSeenRecently(20), x => { }).addToCycle(mammaaiuti3, x => x.notSeenRecently(25), x => { }); } }";
+        const string dsl = "world game\ndef cycle:\n    var cyc = new-cycle\n    add cyc bb5 important once\n     when it not-seen-recently 30\n    end\n    add cyc mammaaiuti3\n     when it not-seen-recently 25\n    end\nend\n";
+        Assert.Equal(EquivalenceStatus.Fail, MigrationVerifier.CompareCycles(
+            MigrationVerifier.ExtractCSharpCycles("fluent.cs", csharp), MigrationVerifier.ExtractDslCycles(new DslSource("current.seg", dsl))).Status);
+    }
+
+    [Fact]
+    public void UnknownCycleEnumValueIsInconclusive()
+    {
+        const string csharp = "class W { void M() { startCycle(bb5, Importance.Unknown, Repeat.OnlyOnce, x => x.notSeenRecently(30), x => { }); } }";
+        var cycle = Assert.Single(MigrationVerifier.ExtractCSharpCycles("unknown.cs", csharp));
+        Assert.StartsWith("unverifiable:Importance.Unknown", cycle.Importance, StringComparison.Ordinal);
+        Assert.Equal(EquivalenceStatus.Inconclusive, MigrationVerifier.CompareCycles(new[] { cycle }, new[] { cycle }).Status);
+    }
+
+    [Fact]
     public void GameplayVerifierNormalizesEquivalentIfAndElseIfConditions()
     {
         const string csharp = "class W { void afterActionExecutedCSharp() { if (objectiveIsCurrent(puX) && !olivia.hasObject(obj)) { foo(obj); } else if (ready || !blocked) { bar(); } } }";

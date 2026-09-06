@@ -510,13 +510,17 @@ public static class MigrationVerifier
             var args = invocation.ArgumentList.Arguments;
             var lambdas = args.Select(x => x.Expression).OfType<AnonymousFunctionExpressionSyntax>().ToArray();
             var id = OperandText(args, 0);
-            var importance = args.Select(x => x.Expression.ToString()).FirstOrDefault(x => x.EndsWith("Importance.Important", StringComparison.Ordinal))?.Split('.').Last();
-            var repeat = args.Select(x => x.Expression.ToString()).FirstOrDefault(x => x.EndsWith("Repeat.OnlyOnce", StringComparison.Ordinal) || x.EndsWith("Repeat.Forever", StringComparison.Ordinal))?.Split('.').Last();
+            var importance = EnumMetadata(args, "Importance", "Important");
+            var repeat = EnumMetadata(args, "Repeat", "OnlyOnce", "Forever");
             var predicate = lambdas.Length > 1 ? CanonicalLambdaBody(lambdas[0], "$cycleElement") : null;
             var body = lambdas.Length == 0 ? Array.Empty<string>() : ExtractCSharpHandlerEffects(lambdas[^1]);
             var variable = invocation.Ancestors().OfType<VariableDeclaratorSyntax>().FirstOrDefault()?.Identifier.ValueText ?? id;
             var elements = statements.SelectMany(x => x.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>())
-                .Where(x => InvocationName(x) == "addToCycle" && x.Expression is MemberAccessExpressionSyntax member && member.Expression.ToString() == variable)
+                .Where(x => InvocationName(x) == "addToCycle" && IsCycleReceiver(x, invocation, variable))
+                // Roslyn's descendant walk visits the outermost invocation of
+                // a fluent chain first. Runtime chain order is the order in
+                // which each invocation closes, i.e. increasing Span.End.
+                .OrderBy(x => x.Span.End)
                 .Select(x => CSharpCycleElement(x, path)).ToArray();
             cycles.Add(new CycleFingerprint(id, importance, repeat, predicate, body, elements, path,
                 invocation.GetLocation().GetLineSpan().StartLinePosition.Line + 1));
@@ -524,12 +528,34 @@ public static class MigrationVerifier
         return cycles;
     }
 
+    private static bool IsCycleReceiver(InvocationExpressionSyntax add, InvocationExpressionSyntax start, string variable)
+    {
+        if (add.Expression is not MemberAccessExpressionSyntax member) return false;
+        var receiver = member.Expression;
+        while (receiver is InvocationExpressionSyntax invocation)
+        {
+            if (invocation == start) return true;
+            if (invocation.Expression is not MemberAccessExpressionSyntax fluent) break;
+            receiver = fluent.Expression;
+        }
+        return receiver == start || receiver is IdentifierNameSyntax identifier && identifier.Identifier.ValueText == variable;
+    }
+
+    private static string? EnumMetadata(SeparatedSyntaxList<ArgumentSyntax> args, string enumType, params string[] supported)
+    {
+        var expression = args.Select(x => x.Expression).OfType<MemberAccessExpressionSyntax>()
+            .FirstOrDefault(x => x.Expression.ToString() == enumType);
+        if (expression is null) return null;
+        var value = expression.Name.Identifier.ValueText;
+        return supported.Contains(value, StringComparer.Ordinal) ? value : "unverifiable:" + enumType + "." + value;
+    }
+
     private static CycleElementFingerprint CSharpCycleElement(InvocationExpressionSyntax invocation, string path)
     {
         var args = invocation.ArgumentList.Arguments;
         var lambdas = args.Select(x => x.Expression).OfType<AnonymousFunctionExpressionSyntax>().ToArray();
-        var importance = args.Select(x => x.Expression.ToString()).FirstOrDefault(x => x.EndsWith("Importance.Important", StringComparison.Ordinal))?.Split('.').Last();
-        var repeat = args.Select(x => x.Expression.ToString()).FirstOrDefault(x => x.EndsWith("Repeat.OnlyOnce", StringComparison.Ordinal) || x.EndsWith("Repeat.Forever", StringComparison.Ordinal))?.Split('.').Last();
+        var importance = EnumMetadata(args, "Importance", "Important");
+        var repeat = EnumMetadata(args, "Repeat", "OnlyOnce", "Forever");
         var predicate = lambdas.Length > 1 ? CanonicalLambdaBody(lambdas[0], "$cycleElement") : null;
         var body = lambdas.Length == 0 ? Array.Empty<string>() : ExtractCSharpHandlerEffects(lambdas[^1]);
         return new CycleElementFingerprint(invocation.Expression is MemberAccessExpressionSyntax member ? member.Expression.ToString() : "", OperandText(args, 0), importance, repeat, predicate, body, path,
@@ -550,6 +576,8 @@ public static class MigrationVerifier
         for (var i = 0; i < csharp.Count; i++)
         {
             var a = csharp[i]; var b = dsl[i];
+            if (new[] { a.Importance, a.Repeat, b.Importance, b.Repeat }.Any(x => x?.StartsWith("unverifiable:", StringComparison.Ordinal) == true))
+                return new("cycle metadata", EquivalenceStatus.Inconclusive, "Unverifiable cycle Importance/Repeat value.");
             if (a.Id != b.Id || a.Importance != b.Importance || a.Repeat != b.Repeat || a.Predicate != b.Predicate)
                 return new("cycle", EquivalenceStatus.Fail, $"C#={a.Id}|{a.Importance}|{a.Repeat}|{a.Predicate}; DSL={b.Id}|{b.Importance}|{b.Repeat}|{b.Predicate}");
             var body = SequenceCheck("cycle body", a.BodyEffects, b.BodyEffects); if (body.Status != EquivalenceStatus.Pass) return body;
@@ -692,8 +720,8 @@ public static class MigrationVerifier
     {
         var args = invocation.ArgumentList.Arguments;
         var lambdas = args.Select(x => x.Expression).OfType<AnonymousFunctionExpressionSyntax>().ToArray();
-        var importance = args.Select(x => x.Expression.ToString()).FirstOrDefault(x => x.EndsWith("Importance.Important", StringComparison.Ordinal))?.Split('.').Last() ?? "-";
-        var repeat = args.Select(x => x.Expression.ToString()).FirstOrDefault(x => x.EndsWith("Repeat.OnlyOnce", StringComparison.Ordinal) || x.EndsWith("Repeat.Forever", StringComparison.Ordinal))?.Split('.').Last() ?? "-";
+        var importance = EnumMetadata(args, "Importance", "Important") ?? "-";
+        var repeat = EnumMetadata(args, "Repeat", "OnlyOnce", "Forever") ?? "-";
         var predicate = lambdas.Length > 1 ? CanonicalLambdaBody(lambdas[0], "$cycleElement") : "-";
         var body = lambdas.Length == 0 ? Array.Empty<string>() : ExtractCSharpHandlerEffects(lambdas[^1]);
         return CanonicalCSharpExpression(OperandText(args, 0)) + "|importance=" + importance + "|repeat=" + repeat + "|predicate=" + predicate + "|body=[" + string.Join(";", body) + "]";
@@ -703,8 +731,8 @@ public static class MigrationVerifier
     {
         var args = invocation.ArgumentList.Arguments;
         var lambdas = args.Select(x => x.Expression).OfType<AnonymousFunctionExpressionSyntax>().ToArray();
-        var importance = args.Select(x => x.Expression.ToString()).FirstOrDefault(x => x.EndsWith("Importance.Important", StringComparison.Ordinal))?.Split('.').Last() ?? "-";
-        var repeat = args.Select(x => x.Expression.ToString()).FirstOrDefault(x => x.EndsWith("Repeat.OnlyOnce", StringComparison.Ordinal) || x.EndsWith("Repeat.Forever", StringComparison.Ordinal))?.Split('.').Last() ?? "-";
+        var importance = EnumMetadata(args, "Importance", "Important") ?? "-";
+        var repeat = EnumMetadata(args, "Repeat", "OnlyOnce", "Forever") ?? "-";
         var predicate = lambdas.Length > 1 ? CanonicalLambdaBody(lambdas[0], "$cycleElement") : "-";
         var body = lambdas.Length == 0 ? Array.Empty<string>() : ExtractCSharpHandlerEffects(lambdas[^1]);
         return CanonicalCSharpExpression(OperandText(args, 0)) + "|importance=" + importance + "|repeat=" + repeat + "|predicate=" + predicate + "|body=[" + string.Join(";", body) + "]";
