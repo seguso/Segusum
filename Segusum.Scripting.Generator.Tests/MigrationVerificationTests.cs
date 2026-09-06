@@ -118,7 +118,77 @@ public sealed class MigrationVerificationTests
         var csharp = "class W { void M() { if (A) { foo(); } else if (B) { bar(); } } }";
         var dsl = "world game\nafter-action-executed:\n    if A:\n        bar\n    elif B:\n        foo\n    end\nend\n";
         var report = GameplayMigrationVerifier.VerifyCSharpToDsl("baseline.cs", csharp, "M", new DslSource("current.seg", dsl));
-        Assert.Contains(report.Findings, x => x.Kind is MigrationFindingKind.MissingSideEffect or MigrationFindingKind.AddedSideEffect);
+        Assert.Contains(report.Findings, x => x.Kind == MigrationFindingKind.OrderMismatch);
+    }
+
+    [Theory]
+    [InlineData("A && B && C", "A and C and B")]
+    [InlineData("A || B", "B or A")]
+    public void GameplayVerifierDoesNotCommuteBooleanTerms(string csharpCondition, string dslCondition)
+    {
+        var report = GameplayMigrationVerifier.VerifyCSharpToDsl("baseline.cs", $"class W {{ void M() {{ if ({csharpCondition}) {{ foo(); }} }} }}", "M",
+            new DslSource("current.seg", $"world game\nafter-action-executed:\n    if {dslCondition}:\n        foo\n    end\nend\n"));
+        Assert.Contains(report.Findings, x => x.Kind == MigrationFindingKind.ChangedBranch);
+    }
+
+    [Theory]
+    [InlineData("foo(a,b,c)", "foo a c b")]
+    [InlineData("foo(a,b,c)", "foo a b")]
+    [InlineData("foo(a,b,c)", "foo a b c d")]
+    public void GameplayVerifierRequiresExactArgumentSequence(string csharpCall, string dslCall)
+    {
+        var report = GameplayMigrationVerifier.VerifyCSharpToDsl("baseline.cs", $"class W {{ void M() {{ if (A) {{ {csharpCall}; }} }} }}", "M",
+            new DslSource("current.seg", $"world game\nafter-action-executed:\n    if A:\n        {dslCall}\n    end\nend\n"));
+        Assert.False(report.IsClean);
+    }
+
+    [Fact]
+    public void GameplayVerifierPreservesNamedArguments()
+    {
+        var report = GameplayMigrationVerifier.VerifyCSharpToDsl("baseline.cs", "class W { void M() { if (A) { foo(first: x, second: y); } } }", "M",
+            new DslSource("current.seg", "world game\nafter-action-executed:\n    if A:\n        foo first: x second: z\n    end\nend\n"));
+        Assert.False(report.IsClean);
+    }
+
+    [Fact]
+    public void GameplayVerifierReportsUnsupportedCSharpStatementAsUnverifiable()
+    {
+        var report = GameplayMigrationVerifier.VerifyCSharpToDsl("baseline.cs", "class W { void M() { if (A) { while (ready) { foo(); } } } }", "M",
+            new DslSource("current.seg", "world game\nafter-action-executed:\n    if A:\n        foo\n    end\nend\n"));
+        Assert.Contains(report.Findings, x => x.Status == MigrationMatchStatus.Unverifiable && x.Message.Contains("WhileStatementSyntax", StringComparison.Ordinal));
+        Assert.False(report.IsClean);
+    }
+
+    [Fact]
+    public void GameplayVerifierSupportsInterleavedMigratedAndRemainingBranches()
+    {
+        var csharp = "class W { void M() { if (A) { a(); } else if (B) { b(); } else if (C) { c(); } } }";
+        var dsl = "world game\nafter-action-executed:\n    if A:\n        a\n    elif C:\n        c\n    end\nend\n";
+        var report = GameplayMigrationVerifier.VerifyCSharpToDsl("baseline.cs", csharp, "M", new DslSource("current.seg", dsl),
+            options: new MigrationVerificationOptions(x => x.Condition is "A" or "C"));
+        Assert.True(report.IsClean, report.ToText());
+        Assert.Equal(2, report.MigratedCSharpBranches.Count);
+        Assert.Single(report.RemainingCSharpBranches);
+    }
+
+    [Fact]
+    public void GameplayVerifierPreservesNestedCallArgumentOrder()
+    {
+        var report = GameplayMigrationVerifier.VerifyCSharpToDsl("baseline.cs", "class W { void M() { if (A) { foo(a(), b()); } } }", "M",
+            new DslSource("current.seg", "world game\nafter-action-executed:\n    if A:\n        foo b() a()\n    end\nend\n"));
+        Assert.False(report.IsClean);
+    }
+
+    [Fact]
+    public void GameplayVerifierUsesExactDirectEffectCardinality()
+    {
+        var report = GameplayMigrationVerifier.VerifyCSharpToDsl("baseline.cs", "class W { void M() { if (A) { foo(); foo(); } } }", "M",
+            new DslSource("current.seg", "world game\nafter-action-executed:\n    if A:\n        foo\n    end\nend\n"));
+        Assert.Contains(report.Findings, x => x.Kind == MigrationFindingKind.MissingSideEffect);
+
+        report = GameplayMigrationVerifier.VerifyCSharpToDsl("baseline.cs", "class W { void M() { if (A) { olivia.Aspect += 1; } } }", "M",
+            new DslSource("current.seg", "world game\nafter-action-executed:\n    if A:\n        olivia.Aspect = 1\n    end\nend\n"));
+        Assert.Contains(report.Findings, x => x.Status == MigrationMatchStatus.ChangedCandidate);
     }
 
     [Fact]

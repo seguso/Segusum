@@ -11,7 +11,7 @@ using DslIfStatement = Segusum.Scripting.Core.IfStatement;
 
 namespace Segusum.Scripting.Tooling;
 
-public enum MigrationFindingKind { MissingBranch, ChangedBranch, MissingSideEffect, AddedSideEffect, MissingString, AddedString, OrderMismatch }
+public enum MigrationFindingKind { MissingBranch, ChangedBranch, MissingSideEffect, AddedSideEffect, MissingString, AddedString, OrderMismatch, Unverifiable }
 public enum MigrationMatchStatus { ExactMatch, LikelyMatch, MissingCandidate, ChangedCandidate, Unverifiable }
 
 public sealed record MigrationEffect(string Kind, string Value, string SourcePath, int SourceLine)
@@ -26,7 +26,7 @@ public sealed record MigrationBranch(string Kind, string? Condition, int Nesting
     public string Fingerprint => $"{Nesting}:{Kind}:{Condition ?? "<else>"}";
 }
 
-public sealed record MigrationVerificationOptions(Func<MigrationBranch, bool>? IsMigrated = null);
+public sealed record MigrationVerificationOptions(Func<MigrationBranch, bool>? IsMigrated = null, Func<MigrationBranch, bool>? IsDslMigrated = null);
 
 public sealed record MigrationFinding(MigrationFindingKind Kind, MigrationMatchStatus Status, string Message,
     string? CSharpSourcePath = null, int? CSharpSourceLine = null, string? DslSourcePath = null, int? DslSourceLine = null);
@@ -103,7 +103,10 @@ public static class GameplayMigrationVerifier
         }
 
         var effectiveOptions = options ?? new();
-        var report = Compare(csharpBranches, dslBranches, csharpEffects, dslEffects, effectiveOptions);
+        var selectedMaxLine = effectiveOptions.IsMigrated is null ? int.MaxValue :
+            csharpBranches.SelectMany(x => Flatten(new[] { x })).Where(effectiveOptions.IsMigrated).Select(x => x.SourceLine).DefaultIfEmpty(0).Max();
+        var report = Compare(csharpBranches, dslBranches, csharpEffects, dslEffects, effectiveOptions,
+            UnsupportedCSharp(method, selectedMaxLine).Concat(UnsupportedDsl(dslBody)).ToArray());
         var allBranches = Flatten(csharpBranches);
         return report with
         {
@@ -115,10 +118,11 @@ public static class GameplayMigrationVerifier
     private static MigrationVerificationReport Compare(
         IReadOnlyList<MigrationBranch> csharpBranches, IReadOnlyList<MigrationBranch> dslBranches,
         IReadOnlyList<MigrationEffect> csharpEffects, IReadOnlyList<MigrationEffect> dslEffects,
-        MigrationVerificationOptions options)
+        MigrationVerificationOptions options, IReadOnlyList<MigrationFinding> unsupported)
     {
         var findings = new List<MigrationFinding>();
-        CompareSiblingLists(csharpBranches, dslBranches, findings, options.IsMigrated, "root");
+        CompareSiblingLists(csharpBranches, dslBranches, findings, options.IsMigrated, options.IsDslMigrated, "root");
+        foreach (var finding in unsupported) AddFinding(findings, finding);
 
         if (options.IsMigrated is null)
             CompareEffectSequence(csharpEffects, dslEffects, findings);
@@ -128,13 +132,14 @@ public static class GameplayMigrationVerifier
     }
 
     private static void CompareSiblingLists(IReadOnlyList<MigrationBranch> left, IReadOnlyList<MigrationBranch> right,
-        List<MigrationFinding> findings, Func<MigrationBranch, bool>? isMigrated, string location)
+        List<MigrationFinding> findings, Func<MigrationBranch, bool>? isMigrated, Func<MigrationBranch, bool>? isDslMigrated, string location)
     {
-        for (var i = 0; i < left.Count; i++)
+        var expected = left.Where(x => isMigrated is null || isMigrated(x)).ToArray();
+        var actual = right.Where(x => isDslMigrated is null || isDslMigrated(x)).ToArray();
+        for (var i = 0; i < expected.Length; i++)
         {
-            var source = left[i];
-            if (isMigrated is not null && !isMigrated(source)) continue;
-            var target = i < right.Count ? right[i] : null;
+            var source = expected[i];
+            var target = i < actual.Length ? actual[i] : null;
             if (target is null)
             {
                 AddFinding(findings, new(MigrationFindingKind.MissingBranch, MigrationMatchStatus.MissingCandidate,
@@ -143,16 +148,20 @@ public static class GameplayMigrationVerifier
             }
             if (source.Kind != target.Kind || !string.Equals(source.Condition, target.Condition, StringComparison.Ordinal))
             {
-                var later = right.Skip(i + 1).FirstOrDefault(x => x.Kind == source.Kind && x.Condition == source.Condition);
+                var later = actual.Skip(i + 1).FirstOrDefault(x => x.Kind == source.Kind && x.Condition == source.Condition);
                 AddFinding(findings, new(later is null ? MigrationFindingKind.ChangedBranch : MigrationFindingKind.OrderMismatch,
                     later is null ? MigrationMatchStatus.ChangedCandidate : MigrationMatchStatus.LikelyMatch,
                     later is null ? $"Changed branch at {location} #{i + 1}: C# {source.Kind} {source.Condition ?? "<else>"}; SEG {target.Kind} {target.Condition ?? "<else>"}" :
-                    $"Branch order changed at {location}: C# #{i + 1} -> SEG #{IndexOf(right, later) + 1}", source.SourcePath, source.SourceLine, target.SourcePath, target.SourceLine));
+                    $"Branch order changed at {location}: C# #{i + 1} -> SEG #{IndexOf(actual, later) + 1}", source.SourcePath, source.SourceLine, target.SourcePath, target.SourceLine));
                 if (later is null) continue;
             }
             CompareEffects(source, target, findings);
-            CompareSiblingLists(source.Children, target.Children, findings, isMigrated, location + "/" + (i + 1));
+            CompareSiblingLists(source.Children, target.Children, findings, isMigrated, isDslMigrated, location + "/" + (i + 1));
         }
+        if (actual.Length > expected.Length)
+            foreach (var extra in actual.Skip(expected.Length))
+                AddFinding(findings, new(MigrationFindingKind.ChangedBranch, MigrationMatchStatus.LikelyMatch,
+                    $"SEG-only branch at {location}: {extra.Kind} {extra.Condition ?? "<else>"}", null, null, extra.SourcePath, extra.SourceLine));
     }
 
     private static IReadOnlyList<MigrationBranch> Flatten(IReadOnlyList<MigrationBranch> roots) =>
@@ -160,15 +169,34 @@ public static class GameplayMigrationVerifier
 
     private static void CompareEffects(MigrationBranch left, MigrationBranch right, List<MigrationFinding> findings)
     {
-        var rightValues = right.Effects.Select(x => x.Fingerprint).ToList();
-        foreach (var effect in left.Effects)
-            if (!rightValues.Remove(effect.Fingerprint))
-                AddFinding(findings, new(IsString(effect) ? MigrationFindingKind.MissingString : MigrationFindingKind.MissingSideEffect, MigrationMatchStatus.MissingCandidate,
-                    $"Missing side effect in branch {left.Condition ?? "<else>"}: {effect.Fingerprint}", effect.SourcePath, effect.SourceLine, right.SourcePath, right.SourceLine));
-        foreach (var effect in right.Effects.Where(x => !left.Effects.Any(y => y.Fingerprint == x.Fingerprint)))
-            AddFinding(findings, new(IsString(effect) ? MigrationFindingKind.AddedString : MigrationFindingKind.AddedSideEffect, MigrationMatchStatus.LikelyMatch,
-                $"Added side effect in branch {right.Condition ?? "<else>"}: {effect.Fingerprint}", left.SourcePath, left.SourceLine, effect.SourcePath, effect.SourceLine));
+        if (left.DirectEffects.Count == right.DirectEffects.Count &&
+            left.DirectEffects.Select(x => x.Fingerprint).OrderBy(x => x).SequenceEqual(right.DirectEffects.Select(x => x.Fingerprint).OrderBy(x => x)) &&
+            !left.DirectEffects.Select(x => x.Fingerprint).SequenceEqual(right.DirectEffects.Select(x => x.Fingerprint)))
+        {
+            AddFinding(findings, new(MigrationFindingKind.OrderMismatch, MigrationMatchStatus.LikelyMatch,
+                $"Direct effect order mismatch in branch {left.Condition ?? "<else>"}: sequences contain the same effects in a different order.",
+                left.SourcePath, left.SourceLine, right.SourcePath, right.SourceLine));
+            return;
+        }
+        var common = Math.Min(left.DirectEffects.Count, right.DirectEffects.Count);
+        for (var i = 0; i < common; i++)
+            if (left.DirectEffects[i].Fingerprint != right.DirectEffects[i].Fingerprint)
+                AddFinding(findings, EffectMismatch(left.DirectEffects[i], right.DirectEffects[i], i + 1));
+        for (var i = common; i < left.DirectEffects.Count; i++)
+            AddFinding(findings, EffectMissing(left.DirectEffects[i], i + 1));
+        for (var i = common; i < right.DirectEffects.Count; i++)
+            AddFinding(findings, EffectAdded(right.DirectEffects[i], i + 1));
     }
+
+    private static MigrationFinding EffectMismatch(MigrationEffect left, MigrationEffect right, int index) =>
+        new(IsString(left) || IsString(right) ? MigrationFindingKind.MissingString : MigrationFindingKind.MissingSideEffect,
+            MigrationMatchStatus.ChangedCandidate, $"effect #{index} mismatch: C#: {left.Fingerprint}; SEG: {right.Fingerprint}", left.SourcePath, left.SourceLine, right.SourcePath, right.SourceLine);
+    private static MigrationFinding EffectMissing(MigrationEffect effect, int index) =>
+        new(IsString(effect) ? MigrationFindingKind.MissingString : MigrationFindingKind.MissingSideEffect,
+            MigrationMatchStatus.MissingCandidate, $"effect #{index} missing in SEG: {effect.Fingerprint}", effect.SourcePath, effect.SourceLine);
+    private static MigrationFinding EffectAdded(MigrationEffect effect, int index) =>
+        new(IsString(effect) ? MigrationFindingKind.AddedString : MigrationFindingKind.AddedSideEffect,
+            MigrationMatchStatus.LikelyMatch, $"effect #{index} added in SEG: {effect.Fingerprint}", null, null, effect.SourcePath, effect.SourceLine);
 
     private static void CompareEffectSequence(IReadOnlyList<MigrationEffect> left, IReadOnlyList<MigrationEffect> right, List<MigrationFinding> findings)
     {
@@ -251,7 +279,8 @@ public static class GameplayMigrationVerifier
             var name = InvocationName(invocation);
             if (name == "getCurTime" && (invocation.Ancestors().OfType<AssignmentExpressionSyntax>().Any() ||
                 invocation.Ancestors().OfType<VariableDeclaratorSyntax>().Any())) continue;
-            var args = invocation.ArgumentList.Arguments.Select(x => CanonicalCSharp(x.Expression)).ToArray();
+            var args = invocation.ArgumentList.Arguments.Select(x =>
+                (x.NameColon is null ? "" : x.NameColon.Name.Identifier.ValueText + "=") + CanonicalCSharp(x.Expression)).ToArray();
             var kind = name switch
             {
                 "dial" => "dialogue",
@@ -348,6 +377,42 @@ public static class GameplayMigrationVerifier
         "pickUp" => "pickUp", "putInRoom" => "putInRoom", "changeRoom" => "changeRoom", _ => "call"
     };
 
+    private static IReadOnlyList<MigrationFinding> UnsupportedCSharp(MethodDeclarationSyntax method, int maxLine)
+    {
+        var nodes = method.DescendantNodes().Where(x => Line(x) <= maxLine && x is
+            ForStatementSyntax or ForEachStatementSyntax or WhileStatementSyntax or DoStatementSyntax or
+            SwitchStatementSyntax or TryStatementSyntax or UsingStatementSyntax or LockStatementSyntax or
+            BreakStatementSyntax or ContinueStatementSyntax or LocalFunctionStatementSyntax or
+            ConditionalExpressionSyntax);
+        return nodes.Select(x => new MigrationFinding(MigrationFindingKind.Unverifiable, MigrationMatchStatus.Unverifiable,
+            $"Unsupported C# construct: {x.GetType().Name} at line {Line(x)}", method.SyntaxTree.FilePath, Line(x))).ToArray();
+    }
+
+    private static IReadOnlyList<MigrationFinding> UnsupportedDsl(IReadOnlyList<DslStatement> statements)
+    {
+        var supported = new[] { typeof(VariableDeclaration), typeof(AssignmentStatement), typeof(IncrementStatement),
+            typeof(CallStatement), typeof(ReturnStatement), typeof(IfStatement), typeof(NarStatement),
+            typeof(NarRoomStatement), typeof(NarImgStatement), typeof(DialogueStatement), typeof(NamedCutsceneStatement) };
+        return FlattenDslStatements(statements).Where(x => !supported.Contains(x.GetType())).Select(x =>
+            new MigrationFinding(MigrationFindingKind.Unverifiable, MigrationMatchStatus.Unverifiable,
+                $"Unsupported SEG construct: {x.GetType().Name}", "", x.Span.Line)).ToArray();
+    }
+
+    private static IEnumerable<DslStatement> FlattenDslStatements(IEnumerable<DslStatement> statements)
+    {
+        foreach (var statement in statements)
+        {
+            yield return statement;
+            if (statement is IfStatement conditional)
+            {
+                foreach (var branch in conditional.Branches) foreach (var nested in FlattenDslStatements(branch.Body)) yield return nested;
+                if (conditional.ElseBody is not null) foreach (var nested in FlattenDslStatements(conditional.ElseBody)) yield return nested;
+            }
+            else if (statement is NamedCutsceneStatement cutscene)
+                foreach (var nested in FlattenDslStatements(cutscene.Body)) yield return nested;
+        }
+    }
+
     private static MigrationVerificationReport EmptyReport(string csharpPath, string dslPath, string message) =>
         new(Array.Empty<MigrationBranch>(), Array.Empty<MigrationBranch>(), Array.Empty<MigrationEffect>(), Array.Empty<MigrationEffect>(),
             Array.Empty<string>(), Array.Empty<string>(), new[] { new MigrationFinding(MigrationFindingKind.ChangedBranch, MigrationMatchStatus.Unverifiable, message, csharpPath, null, dslPath, null) });
@@ -361,7 +426,7 @@ public static class GameplayMigrationVerifier
         BinaryExpression binary => CanonicalDsl(binary.Left) + binary.Operator + CanonicalDsl(binary.Right),
         ParenthesizedExpression parenthesized => "(" + CanonicalDsl(parenthesized.Expression) + ")",
         MemberAccessExpression member => CanonicalDsl(member.Receiver) + "." + member.MemberName,
-        CallExpression call => (call.Receiver is null ? call.Name : CanonicalDsl(call.Receiver) + "." + call.Name) + "(" + string.Join(",", call.Arguments.Select(x => CanonicalDsl(x.Expression))) + ")",
+        CallExpression call => (call.Receiver is null ? call.Name : CanonicalDsl(call.Receiver) + "." + call.Name) + "(" + string.Join(",", call.Arguments.Select(x => (x.Name is null ? "" : x.Name + "=") + CanonicalDsl(x.Expression))) + ")",
         _ => expression.ToString() ?? ""
     });
     private static string CanonicalText(string text)
