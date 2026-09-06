@@ -5358,6 +5358,23 @@ async function onLoClickedRoom(lo, mouseX, mouseY, fromHitTestOnly = false, skip
             {
                 // mostro il context menu:  bm_context_menu
 
+                // Remember is available only when the server has found at
+                // least one already-seen named cutscene mentioning this
+                // object. Keep this in the normal context-menu/action flow.
+                $(".contextMenuItem.ciRemember").hide().off('mousedown');
+                if (lo.ofc_can_be_remembered) {
+                    $(".contextMenuItem.ciRemember").show().on('mousedown', async e => {
+                        e.stopPropagation();
+                        e.preventDefault();
+
+                        $(".contextMenu").hide();
+                        gSelectedVerb = null;
+                        updateToolbar();
+
+                        await callRemember(lo.loId, false, false, false);
+                    });
+                }
+
                 if (lo.ofc_is_character) {
 
 
