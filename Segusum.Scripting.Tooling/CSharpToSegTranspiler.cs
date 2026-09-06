@@ -28,6 +28,7 @@ public static class CSharpToSegTranspiler
         var diagnostics = new List<MigrationDiagnostic>();
         var sb = new StringBuilder("world migrated\n");
         var root = (CompilationUnitSyntax)tree.GetRoot();
+        var reachableHelpers = ReachableHelpers(root);
         foreach (var trivia in root.DescendantTrivia().Where(x => x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.SingleLineCommentTrivia) || x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.MultiLineCommentTrivia)))
             if (trivia.Token.Parent?.AncestorsAndSelf().OfType<MethodDeclarationSyntax>().Any() != true)
                 sb.AppendLine("// " + trivia.ToString().TrimStart('/').Trim());
@@ -63,8 +64,9 @@ public static class CSharpToSegTranspiler
                 diagnostics.Add(new(MigrationUnitStatus.Partial, path, method.GetLocation().GetLineSpan().StartLinePosition.Line + 1,
                     "special handler round-trip is not yet certifiable"));
             }
-            else if (method.Identifier.ValueText is not "Configure" && method.Body != null && IsHelperCandidate(method) && !IsRegistrationContainer(method))
+            else if (method.Identifier.ValueText is not "Configure" && method.Body != null && reachableHelpers.Contains(method))
             {
+                EmitTriviaComments(AdjacentLeadingComments(method), sb, 0);
                 EmitTriviaComments(method.GetLeadingTrivia(), sb, 0);
                 sb.Append("def ").Append(method.Identifier.ValueText);
                 if (method.ParameterList.Parameters.Count != 0) sb.Append(' ').Append(string.Join(" ", method.ParameterList.Parameters.Select(x => x.Identifier.ValueText)));
@@ -82,7 +84,7 @@ public static class CSharpToSegTranspiler
         var parsed = DslParser.Parse(new Segusum.Scripting.Core.DslSource(path + ".generated.seg", generated));
         foreach (var diagnostic in parsed.Diagnostics)
             diagnostics.Add(new(MigrationUnitStatus.Unsupported, path + ".generated.seg", diagnostic.Span.Line, "generated SEG is not parsable: " + diagnostic.Message));
-        var units = BuildUnits(path, root);
+        var units = BuildUnits(path, root, reachableHelpers);
         return new MigrationOutput(generated, diagnostics) { Units = units };
     }
 
@@ -95,7 +97,7 @@ public static class CSharpToSegTranspiler
             .Select(x => x.ToString().Trim())
             .ToArray();
 
-    private static IReadOnlyList<MigrationUnit> BuildUnits(string path, CompilationUnitSyntax root)
+    private static IReadOnlyList<MigrationUnit> BuildUnits(string path, CompilationUnitSyntax root, IReadOnlySet<MethodDeclarationSyntax> reachableHelpers)
     {
         var units = new List<MigrationUnit>();
         foreach (var invocation in root.DescendantNodes().OfType<InvocationExpressionSyntax>().Where(x => RegistrationKind(x) != null))
@@ -106,12 +108,39 @@ public static class CSharpToSegTranspiler
             var isolated = IsolateHandler(path, invocation);
             units.Add(CreateUnit(id, path, line, endLine, isolated.Text, isolated.Diagnostics));
         }
-        foreach (var method in root.DescendantNodes().OfType<MethodDeclarationSyntax>().Where(x => x.Body != null && (x.Identifier.ValueText is "afterActionExecutedCSharp" or "beforeRoomChangeManual" or "beforeRoomChangeSegusum" || (IsHelperCandidate(x) && !IsRegistrationContainer(x)))))
+        foreach (var method in root.DescendantNodes().OfType<MethodDeclarationSyntax>().Where(x => x.Body != null && (x.Identifier.ValueText is "afterActionExecutedCSharp" or "beforeRoomChangeManual" or "beforeRoomChangeSegusum" || reachableHelpers.Contains(x))))
         {
             var line = method.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
             var endLine = method.GetLocation().GetLineSpan().EndLinePosition.Line + 1;
             var isolated = IsolateMethod(path, method);
             units.Add(CreateUnit(method.Identifier.ValueText, path, line, endLine, isolated.Text, isolated.Diagnostics));
+        }
+        var helpers = reachableHelpers
+            .Where(x => x.Body != null)
+            .ToDictionary(x => x.Identifier.ValueText, StringComparer.Ordinal);
+        var helperUnits = units.Where(x => helpers.ContainsKey(x.Id)).ToDictionary(x => x.Id, StringComparer.Ordinal);
+        var dependencyCache = new Dictionary<string, string[]>(StringComparer.Ordinal);
+        string[] Dependencies(MethodDeclarationSyntax helper) => dependencyCache.TryGetValue(helper.Identifier.ValueText, out var cached)
+            ? cached
+            : dependencyCache[helper.Identifier.ValueText] = helper.DescendantNodes().OfType<InvocationExpressionSyntax>()
+                .Select(CallName).Where(helpers.ContainsKey).Distinct(StringComparer.Ordinal).ToArray();
+        bool DependsOnNonTranslatable(string name, HashSet<string> visiting)
+        {
+            if (!visiting.Add(name)) return true;
+            return Dependencies(helpers[name]).Any(x => helperUnits[x].Status != MigrationUnitStatus.Translated || DependsOnNonTranslatable(x, visiting));
+        }
+        foreach (var helper in helpers.Values)
+        {
+            if (!DependsOnNonTranslatable(helper.Identifier.ValueText, new(StringComparer.Ordinal))) continue;
+            var unit = helperUnits[helper.Identifier.ValueText];
+            if (unit.Status != MigrationUnitStatus.Translated || unit.Diagnostics.Any(x => x.Status == MigrationUnitStatus.DependsOnCSharpHelper)) continue;
+            var dependencies = Dependencies(helper).Where(x => helperUnits[x].Status != MigrationUnitStatus.Translated).ToArray();
+            var diagnostic = new MigrationDiagnostic(MigrationUnitStatus.DependsOnCSharpHelper, path, StartLine(helper),
+                "depends on non-translatable local helper: " + string.Join(", ", dependencies));
+            var updated = unit with { Status = MigrationUnitStatus.DependsOnCSharpHelper, Diagnostics = unit.Diagnostics.Concat(new[] { diagnostic }).ToArray() };
+            var index = units.IndexOf(unit);
+            units[index] = updated;
+            helperUnits[helper.Identifier.ValueText] = updated;
         }
         return units;
     }
@@ -132,7 +161,7 @@ public static class CSharpToSegTranspiler
         var diagnostics = new List<MigrationDiagnostic>();
         var sb = new StringBuilder("world migrated\n");
         EmitHandler(invocation, sb, diagnostics, false);
-        var text = sb.ToString();
+        var text = EnsureComments(invocation, sb.ToString());
         VerifyIsolated(path, invocation, text, diagnostics, true);
         return new(text, diagnostics);
     }
@@ -165,6 +194,7 @@ public static class CSharpToSegTranspiler
         }
         else
         {
+            EmitTriviaComments(AdjacentLeadingComments(method), sb, 0);
             sb.Append("def ").Append(method.Identifier.ValueText);
             if (method.ParameterList.Parameters.Count != 0) sb.Append(' ').Append(string.Join(" ", method.ParameterList.Parameters.Select(x => x.Identifier.ValueText)));
             sb.AppendLine(":");
@@ -174,9 +204,8 @@ public static class CSharpToSegTranspiler
             EmitTriviaComments(method.Body.CloseBraceToken.LeadingTrivia, sb, 1);
             EmitTriviaComments(method.Body.CloseBraceToken.TrailingTrivia, sb, 1);
             sb.AppendLine("end");
-            diagnostics.Add(new(MigrationUnitStatus.DependsOnCSharpHelper, path, StartLine(method), "helper unit round-trip is not yet certifiable"));
         }
-        var text = sb.ToString();
+        var text = EnsureComments(method, sb.ToString());
         VerifyIsolated(path, method, text, diagnostics, false);
         return new(text, diagnostics);
     }
@@ -206,6 +235,13 @@ public static class CSharpToSegTranspiler
         }
         if (source is MethodDeclarationSyntax method)
         {
+            if (method.Identifier.ValueText is not ("afterActionExecutedCSharp" or "beforeRoomChangeManual" or "beforeRoomChangeSegusum"))
+            {
+                var helperCheck = MigrationVerifier.CompareHelperMethod(method, new DslSource(path + ".generated.seg", generated));
+                if (helperCheck.Status != EquivalenceStatus.Pass)
+                    diagnostics.Add(new(MigrationUnitStatus.Unsupported, path, StartLine(method),
+                        "helper semantic round-trip mismatch: " + helperCheck.Detail));
+            }
             var csCycles = MigrationVerifier.ExtractCSharpCycles(path, "class W { " + method.ToFullString() + " }");
             var dslCycles = MigrationVerifier.ExtractDslCycles(new DslSource(path + ".generated.seg", generated));
             foreach (var cycle in csCycles)
@@ -220,13 +256,55 @@ public static class CSharpToSegTranspiler
     private static int StartLine(SyntaxNode node) => node.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
 
     private static IReadOnlyList<string> CommentInventory(SyntaxNode node)
-        => node.DescendantTrivia().Where(IsComment).Select(x => x.ToString().Trim()).ToArray();
+        => CommentsForNode(node).Select(x => NormalizeComment(x.ToString())).ToArray();
 
     private static IReadOnlyList<string> CommentInventory(string generated)
-        => generated.Split('\n').Select(x => x.Trim()).Where(x => x.StartsWith("//", StringComparison.Ordinal)).ToArray();
+        => generated.Split('\n').Select(x => x.Trim()).Where(x => x.StartsWith("//", StringComparison.Ordinal)).Select(NormalizeComment).ToArray();
+
+    private static string EnsureComments(SyntaxNode source, string generated)
+    {
+        var expected = CommentsForNode(source).Select(x => NormalizeComment(x.ToString())).ToArray();
+        var actual = CommentInventory(generated).ToList();
+        var missing = new List<string>();
+        foreach (var comment in expected)
+        {
+            var index = actual.IndexOf(comment);
+            if (index >= 0) actual.RemoveAt(index);
+            else missing.Add(comment);
+        }
+        if (missing.Count == 0) return generated;
+        var insertion = generated.LastIndexOf("\nend", StringComparison.Ordinal);
+        if (insertion < 0) return generated + string.Concat(missing.Select(x => "// " + x[2..] + Environment.NewLine));
+        return generated.Insert(insertion, string.Concat(missing.Select(x => "\n// " + x[2..])));
+    }
+
+    private static string NormalizeComment(string comment)
+    {
+        var value = comment.Trim();
+        return value.StartsWith("//", StringComparison.Ordinal) ? "//" + value[2..].TrimStart() : value;
+    }
 
     private static bool IsComment(SyntaxTrivia x)
         => x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.SingleLineCommentTrivia) || x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.MultiLineCommentTrivia);
+
+    private static IEnumerable<SyntaxTrivia> CommentsForNode(SyntaxNode node)
+    {
+        var trivia = node.GetLeadingTrivia().Concat(node.DescendantTrivia()).Concat(node.GetTrailingTrivia());
+        // Leading/trailing trivia can belong to the previous/next sibling when
+        // Roslyn computes FullSpan.  Only trivia structurally inside this node
+        // belongs to its unit; adjacent header trivia is emitted separately.
+        return trivia.Where(IsComment)
+            .Where(x => x.SpanStart >= node.SpanStart && x.Span.End <= node.Span.End)
+            .GroupBy(x => x.SpanStart).Select(x => x.First()).OrderBy(x => x.SpanStart);
+    }
+
+    private static IEnumerable<SyntaxTrivia> AdjacentLeadingComments(SyntaxNode node)
+    {
+        var siblings = node.Parent?.ChildNodes().ToArray();
+        if (siblings is null) return Enumerable.Empty<SyntaxTrivia>();
+        var index = Array.IndexOf(siblings, node);
+        return index > 0 ? siblings[index - 1].GetTrailingTrivia().Where(IsComment) : Enumerable.Empty<SyntaxTrivia>();
+    }
 
     private static bool IsHelperCandidate(MethodDeclarationSyntax method)
         => method.Modifiers.Any(x => x.ValueText is "private" or "protected") && method.ParameterList.Parameters.All(x => x.Type != null);
@@ -234,11 +312,38 @@ public static class CSharpToSegTranspiler
     private static bool IsRegistrationContainer(MethodDeclarationSyntax method)
         => method.Body?.DescendantNodes().OfType<InvocationExpressionSyntax>().Any(x => RegistrationKind(x) != null) == true;
 
+    private static IReadOnlySet<MethodDeclarationSyntax> ReachableHelpers(CompilationUnitSyntax root)
+    {
+        var methods = root.DescendantNodes().OfType<MethodDeclarationSyntax>()
+            .Where(x => x.Body != null && IsHelperCandidate(x) && !IsRegistrationContainer(x))
+            .ToDictionary(x => x.Identifier.ValueText, StringComparer.Ordinal);
+        var work = new Stack<MethodDeclarationSyntax>();
+        var registrationCalls = root.DescendantNodes().OfType<InvocationExpressionSyntax>()
+            .Where(x => RegistrationKind(x) != null).ToArray();
+        foreach (var helper in methods.Values)
+            if (registrationCalls.SelectMany(x => x.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>())
+                .Any(x => CallName(x) == helper.Identifier.ValueText)) work.Push(helper);
+        foreach (var special in root.DescendantNodes().OfType<MethodDeclarationSyntax>()
+                     .Where(x => x.Identifier.ValueText is "afterActionExecutedCSharp" or "beforeRoomChangeManual" or "beforeRoomChangeSegusum"))
+            foreach (var invocation in special.DescendantNodes().OfType<InvocationExpressionSyntax>())
+                if (methods.TryGetValue(CallName(invocation), out var helper)) work.Push(helper);
+        var reachable = new HashSet<MethodDeclarationSyntax>();
+        while (work.Count != 0)
+        {
+            var helper = work.Pop();
+            if (!reachable.Add(helper)) continue;
+            foreach (var invocation in helper.DescendantNodes().OfType<InvocationExpressionSyntax>())
+                if (methods.TryGetValue(CallName(invocation), out var dependency)) work.Push(dependency);
+        }
+        return reachable;
+    }
+
     private static void EmitHandler(InvocationExpressionSyntax invocation, StringBuilder sb, List<MigrationDiagnostic> diagnostics, bool partial)
     {
         var args = invocation.ArgumentList.Arguments;
         var kind = RegistrationKind(invocation)!;
         var first = Arg(args, 0); var second = kind is "combine" or "use-for" ? Arg(args, 1) : null;
+        EmitTriviaComments(HandlerHeaderComments(invocation), sb, 0);
         var header = kind switch
         {
             "combine" => $"combine {first} with {second}",
@@ -272,6 +377,34 @@ public static class CSharpToSegTranspiler
         }
         else if (handler != null) Unsupported(handler, diagnostics, "expression-bodied handler", partial, sb, 1);
         sb.AppendLine("end");
+    }
+
+    private static IEnumerable<SyntaxTrivia> HandlerHeaderComments(InvocationExpressionSyntax invocation)
+    {
+        var statement = invocation.AncestorsAndSelf().OfType<ExpressionStatementSyntax>().FirstOrDefault();
+        var trivia = (statement?.GetLeadingTrivia() ?? default)
+            .Concat(invocation.GetLeadingTrivia())
+            .Concat(invocation.DescendantTrivia())
+            .Concat(invocation.GetTrailingTrivia())
+            .Concat(AdjacentStatementTrivia(statement))
+            .Where(IsComment)
+            .GroupBy(x => x.SpanStart)
+            .Select(x => x.First())
+            .OrderBy(x => x.SpanStart);
+        var lambdaBody = invocation.ArgumentList.Arguments.Select(x => x.Expression)
+            .OfType<AnonymousFunctionExpressionSyntax>().LastOrDefault()?.Body;
+        if (lambdaBody is null) return trivia;
+        return trivia.Where(x => !lambdaBody.FullSpan.Contains(x.SpanStart));
+    }
+
+    private static IEnumerable<SyntaxTrivia> AdjacentStatementTrivia(ExpressionStatementSyntax? statement)
+    {
+        if (statement?.Parent is not BlockSyntax block) return Enumerable.Empty<SyntaxTrivia>();
+        var siblings = block.Statements;
+        var index = siblings.IndexOf(statement);
+        return index == 0
+            ? block.OpenBraceToken.TrailingTrivia
+            : index > 0 ? siblings[index - 1].GetTrailingTrivia() : Enumerable.Empty<SyntaxTrivia>();
     }
 
     private static void EmitStatements(IEnumerable<StatementSyntax> statements, StringBuilder sb, List<MigrationDiagnostic> diagnostics, int level, bool partial, bool includeComments = true)
@@ -442,7 +575,12 @@ public static class CSharpToSegTranspiler
     private static void EmitComments(StatementSyntax statement, StringBuilder sb, int level)
     { EmitTriviaComments(statement.GetLeadingTrivia(), sb, level); }
     private static void EmitTriviaComments(IEnumerable<SyntaxTrivia> trivia, StringBuilder sb, int level)
-    { foreach (var t in trivia.Where(x => x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.SingleLineCommentTrivia) || x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.MultiLineCommentTrivia))) sb.Append(new string(' ', level * 4)).Append("// ").AppendLine(t.ToString().TrimStart('/').Trim()); }
+    { foreach (var t in trivia.Where(IsComment)) sb.Append(new string(' ', level * 4)).Append("// ").AppendLine(CommentPayload(t.ToString())); }
+    private static string CommentPayload(string comment)
+    {
+        var value = comment.Trim();
+        return value.StartsWith("//", StringComparison.Ordinal) ? value[2..].TrimStart() : value;
+    }
     private static void Unsupported(SyntaxNode node, List<MigrationDiagnostic> diagnostics, string reason, bool partial, StringBuilder sb, int level)
     { var line = node.GetLocation().GetLineSpan().StartLinePosition.Line + 1; diagnostics.Add(new(MigrationUnitStatus.Unsupported, node.SyntaxTree?.FilePath ?? "", line, reason, node.ToString())); if (partial) { var i = new string(' ', level * 4); sb.Append(i).AppendLine("// C2SEG-MANUAL-BEGIN").Append(i).Append("// source: ").AppendLine((node.SyntaxTree?.FilePath ?? "") + ":" + line).Append(i).Append("// reason: ").AppendLine(reason); foreach (var l in node.ToString().Split('\n')) sb.Append(i).Append("// ").AppendLine(l); sb.Append(i).AppendLine("// C2SEG-MANUAL-END"); } }
     private static string Expression(SyntaxNode? node)

@@ -9,7 +9,7 @@ public sealed class CSharpToSegTranspilerTests
     [Fact]
     public void ExpressionEmitterPreservesLiteralTokenAndBooleanStructure()
     {
-        var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { private void M() { if (ready && !blocked) { dial(camilla, \"[[translation]] ! &&\"); } } }");
+        var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { void M() { addHandlerUseHere(a, handler: i => { if (ready && !blocked) { dial(camilla, \"[[translation]] ! &&\"); } }); } }");
         Assert.Contains("camilla: \"[[translation]] ! &&\"", result.Text, StringComparison.Ordinal);
         Assert.Contains("if ready and not blocked:", result.Text, StringComparison.Ordinal);
     }
@@ -17,15 +17,16 @@ public sealed class CSharpToSegTranspilerTests
     [Fact]
     public void UnsupportedLinqIsNeverEmittedAsExecutableSeg()
     {
-        var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { private void M() { var n = values.Count(x => x > 0); } }");
+        var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { void M() { addHandlerUseHere(a, handler: i => { var n = values.Count(x => x > 0); }); } }");
         Assert.Contains(result.Diagnostics, x => x.Status == MigrationUnitStatus.Unsupported);
-        Assert.Contains("C2SEG-MANUAL", CSharpToSegTranspiler.Transpile("x.cs", "class W { private void M() { var n = values.Count(x => x > 0); } }", true).Text, StringComparison.Ordinal);
+        var partial = CSharpToSegTranspiler.Transpile("x.cs", "class W { void M() { addHandlerUseHere(a, handler: i => { var n = values.Count(x => x > 0); }); } }", true);
+        Assert.Contains("C2SEG-MANUAL", partial.Text, StringComparison.Ordinal);
     }
 
     [Fact]
     public void CycleAndNamedCutsceneAreEmittedStructurally()
     {
-        const string source = "class W { private void M() { var cyc = startCycle(bb5, Importance.Important, Repeat.OnlyOnce, x => x.notSeenRecently(30), x => { using (namedCutScene(ncs, roomA, objA)) { dial(camilla, \"Hello\"); } }).addToCycle(bb6, x => x.notSeenRecently(20), x => { }); execNextInCycle(cyc); } }";
+        const string source = "class W { void M() { addHandlerUseHere(a, handler: i => { var cyc = startCycle(bb5, Importance.Important, Repeat.OnlyOnce, x => x.notSeenRecently(30), x => { using (namedCutScene(ncs, roomA, objA)) { dial(camilla, \"Hello\"); } }).addToCycle(bb6, x => x.notSeenRecently(20), x => { }); execNextInCycle(cyc); }); } }";
         var result = CSharpToSegTranspiler.Transpile("x.cs", source);
         Assert.Contains("add cyc bb5 important once", result.Text, StringComparison.Ordinal);
         Assert.Contains("add cyc bb6", result.Text, StringComparison.Ordinal);
@@ -36,10 +37,11 @@ public sealed class CSharpToSegTranspilerTests
     [Fact]
     public void HelperParametersAndCommentsAreRetained()
     {
-        const string source = "class W { // design note\n private bool Helper(int x) { // TODO\n return x > 0; // trailing\n } }";
+        const string source = "class W { void M() { addHandlerUseHere(a, handler: i => { Helper(1); }); } // design note\n private bool Helper(int x) { // TODO\n return x > 0; // trailing\n } }";
         var result = CSharpToSegTranspiler.Transpile("x.cs", source);
+        Assert.Contains(result.Units, x => x.Id == "Helper");
         Assert.Contains("def Helper x:", result.Text, StringComparison.Ordinal);
-        Assert.Contains("design note", result.Text, StringComparison.Ordinal);
+        Assert.True(result.Text.Contains("design note", StringComparison.Ordinal), result.Text);
         Assert.Contains("TODO", result.Text, StringComparison.Ordinal);
         Assert.Contains("trailing", result.Text, StringComparison.Ordinal);
     }
@@ -81,9 +83,19 @@ public sealed class CSharpToSegTranspilerTests
     }
 
     [Fact]
+    public void HeaderAndDisabledCodeCommentsArePreserved()
+    {
+        const string source = "class W { void M() { // TODO disabled gameplay\n // addHandlerUseHere(old, e => { });\n addHandlerUseHere(a, handler: e => { foo(); }); } }";
+        var result = CSharpToSegTranspiler.Transpile("x.cs", source);
+        Assert.Contains("TODO disabled gameplay", result.Text, StringComparison.Ordinal);
+        Assert.Contains("addHandlerUseHere(old, e => { });", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(result.Diagnostics, x => x.Reason.StartsWith("comment was not preserved:", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void CycleAliasRewriteDoesNotTouchStringLiteral()
     {
-        const string source = "class W { private void M() { var cyc = startCycle(bb5, Importance.Important, Repeat.OnlyOnce, x => foo(x, \"x\"), x => { }); } }";
+        const string source = "class W { void M() { addHandlerUseHere(a, handler: i => { var cyc = startCycle(bb5, Importance.Important, Repeat.OnlyOnce, x => foo(x, \"x\"), x => { }); }); } }";
         var result = CSharpToSegTranspiler.Transpile("x.cs", source);
         Assert.Contains("foo it \"x\"", result.Text, StringComparison.Ordinal);
     }
@@ -102,7 +114,17 @@ public sealed class CSharpToSegTranspilerTests
     {
         const string source = "class W { private void configureRoomHandlers() { addRoomChangedHandler(roomA, e => { foo(); }); } private void Helper() { bar(); } }";
         var result = CSharpToSegTranspiler.Transpile("x.cs", source);
-        Assert.Equal(new[] { "room-changed:roomA", "Helper" }, result.Units.Select(x => x.Id));
+        Assert.Equal(new[] { "room-changed:roomA" }, result.Units.Select(x => x.Id));
         Assert.DoesNotContain("def configureRoomHandlers", result.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HelperDependencyStatusIsLimitedToReachableHelpers()
+    {
+        const string source = "class W { void M() { addHandlerUseHere(a, handler: i => { Good(); }); } private void Good() { Bad(); } private void Bad() { while (true) { } } private void Uncalled() { while (true) { } } }";
+        var result = CSharpToSegTranspiler.Transpile("x.cs", source);
+        Assert.Equal(MigrationUnitStatus.DependsOnCSharpHelper, result.Units.Single(x => x.Id == "Good").Status);
+        Assert.Equal(MigrationUnitStatus.Unsupported, result.Units.Single(x => x.Id == "Bad").Status);
+        Assert.DoesNotContain(result.Units, x => x.Id == "Uncalled");
     }
 }

@@ -197,6 +197,20 @@ public static class MigrationVerifier
         return new(csharp, dsl, checks);
     }
 
+    public static VerificationCheck CompareHelperMethod(MethodDeclarationSyntax method, DslSource dslSource)
+    {
+        var parsed = DslParser.Parse(dslSource);
+        var function = parsed.Document.Declarations.OfType<FunctionDeclaration>()
+            .FirstOrDefault(x => x.Name == method.Identifier.ValueText);
+        if (function is null)
+            return new("helper", EquivalenceStatus.Fail, "generated helper declaration is missing");
+        if (method.Body is null)
+            return new("helper", EquivalenceStatus.Inconclusive, "helper has no block body");
+        var csharpEffects = new List<string>();
+        CollectCSharpHandlerEffects(method.Body.Statements, csharpEffects);
+        return SequenceCheck("helper body", csharpEffects, ExtractDslHandlerEffects(function.Body));
+    }
+
     public static IReadOnlyList<HandlerEquivalenceResult> VerifyHandlerRegistrations(string csharpPath, string csharpText, DslSource dslSource)
     {
         var tree = CSharpSyntaxTree.ParseText(csharpText, path: csharpPath);
