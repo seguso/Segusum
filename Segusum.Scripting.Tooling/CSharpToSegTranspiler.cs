@@ -149,7 +149,53 @@ public static class CSharpToSegTranspiler
     { foreach (var t in statement.GetLeadingTrivia().Where(x => x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.SingleLineCommentTrivia) || x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.MultiLineCommentTrivia))) sb.Append(new string(' ', level * 4)).Append("// ").AppendLine(t.ToString().TrimStart('/').Trim()); }
     private static void Unsupported(SyntaxNode node, List<MigrationDiagnostic> diagnostics, string reason, bool partial, StringBuilder sb, int level)
     { var line = node.GetLocation().GetLineSpan().StartLinePosition.Line + 1; diagnostics.Add(new(MigrationUnitStatus.Unsupported, node.SyntaxTree?.FilePath ?? "", line, reason, node.ToString())); if (partial) { var i = new string(' ', level * 4); sb.Append(i).AppendLine("// C2SEG-MANUAL-BEGIN").Append(i).Append("// source: ").AppendLine((node.SyntaxTree?.FilePath ?? "") + ":" + line).Append(i).Append("// reason: ").AppendLine(reason); foreach (var l in node.ToString().Split('\n')) sb.Append(i).Append("// ").AppendLine(l); sb.Append(i).AppendLine("// C2SEG-MANUAL-END"); } }
-    private static string Expression(SyntaxNode? node) => (node?.ToString() ?? "").Replace("&&", "and", StringComparison.Ordinal).Replace("||", "or", StringComparison.Ordinal).Replace("!=", "<>", StringComparison.Ordinal).Replace("!", "not ", StringComparison.Ordinal).Replace("<>", "!=", StringComparison.Ordinal).Trim();
+    private static string Expression(SyntaxNode? node)
+    {
+        if (node is null) return "";
+        return node switch
+        {
+            IdentifierNameSyntax x => x.Identifier.ValueText,
+            LiteralExpressionSyntax x => x.Token.Text,
+            ParenthesizedExpressionSyntax x => "(" + Expression(x.Expression) + ")",
+            PrefixUnaryExpressionSyntax x when x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.LogicalNotExpression) => "not " + Expression(x.Operand),
+            PrefixUnaryExpressionSyntax x when x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.UnaryMinusExpression) => "-" + Expression(x.Operand),
+            PrefixUnaryExpressionSyntax x when x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.UnaryPlusExpression) => "+" + Expression(x.Operand),
+            BinaryExpressionSyntax x => Expression(x.Left) + " " + BinaryOperator(x.Kind()) + " " + Expression(x.Right),
+            MemberAccessExpressionSyntax x => Expression(x.Expression) + "." + x.Name.Identifier.ValueText,
+            InvocationExpressionSyntax x => EmitCallExpression(x),
+            ArgumentSyntax x => (x.NameColon is null ? "" : x.NameColon.Name.Identifier.ValueText + ": ") + Expression(x.Expression),
+            _ => throw new InvalidOperationException("Unsupported C# expression: " + node.Kind())
+        };
+    }
+
+    private static string EmitCallExpression(InvocationExpressionSyntax invocation)
+    {
+        var name = invocation.Expression is MemberAccessExpressionSyntax member ? member.Name.Identifier.ValueText : invocation.Expression.ToString();
+        if (name is "Where" or "Select" or "OrderBy" or "ThenBy" or "GroupBy" or "Count" or "Any" or "First" or "FirstOrDefault" || invocation.ArgumentList.Arguments.Any(x => x.Expression is AnonymousFunctionExpressionSyntax or LambdaExpressionSyntax))
+            throw new InvalidOperationException("Unsupported C# call: " + name);
+        return Expression(invocation.Expression) + "(" + string.Join(", ", invocation.ArgumentList.Arguments.Select(Expression)) + ")";
+    }
+
+    private static string BinaryOperator(Microsoft.CodeAnalysis.CSharp.SyntaxKind kind) => kind switch
+    {
+        Microsoft.CodeAnalysis.CSharp.SyntaxKind.LogicalAndExpression => "and",
+        Microsoft.CodeAnalysis.CSharp.SyntaxKind.LogicalOrExpression => "or",
+        Microsoft.CodeAnalysis.CSharp.SyntaxKind.EqualsExpression => "==",
+        Microsoft.CodeAnalysis.CSharp.SyntaxKind.NotEqualsExpression => "!=",
+        _ when kind.ToString().EndsWith("Expression", StringComparison.Ordinal) => kind switch
+        {
+            Microsoft.CodeAnalysis.CSharp.SyntaxKind.AddExpression => "+",
+            Microsoft.CodeAnalysis.CSharp.SyntaxKind.SubtractExpression => "-",
+            Microsoft.CodeAnalysis.CSharp.SyntaxKind.MultiplyExpression => "*",
+            Microsoft.CodeAnalysis.CSharp.SyntaxKind.DivideExpression => "/",
+            Microsoft.CodeAnalysis.CSharp.SyntaxKind.LessThanExpression => "<",
+            Microsoft.CodeAnalysis.CSharp.SyntaxKind.LessThanOrEqualExpression => "<=",
+            Microsoft.CodeAnalysis.CSharp.SyntaxKind.GreaterThanExpression => ">",
+            Microsoft.CodeAnalysis.CSharp.SyntaxKind.GreaterThanOrEqualExpression => ">=",
+            _ => throw new InvalidOperationException("Unsupported C# binary expression: " + kind)
+        },
+        _ => throw new InvalidOperationException("Unsupported C# binary expression: " + kind)
+    };
     private static string LiteralOrExpression(SyntaxNode? node) => node is LiteralExpressionSyntax l && l.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.StringLiteralExpression) ? l.Token.Text : Expression(node);
     private static string Arg(SeparatedSyntaxList<ArgumentSyntax> args, int index) => index >= 0 && index < args.Count ? Expression(args[index].Expression) : "";
     private static string? RegistrationKind(InvocationExpressionSyntax x) => x.Expression.ToString() switch { "addHandlerCombine" => "combine", "addHandlerUseFor" => "use-for", "addHandlerUseHere" => "use-here", "addHandlerPickUp" => "pickup", "addHandlerTalkHere" => "talk-here", "addHandlerCancelTextInput" => "cancel-text-input", "addHandlerSubmitTextInput" => "submit-text-input", "addRoomChangedHandler" => "room-changed", _ => null };
