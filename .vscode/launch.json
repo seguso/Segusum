@@ -1,0 +1,11 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Generate Litgir OnRoomChanged SEG",
+            "type": "node-terminal",
+            "request": "launch",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${workspaceFolder}/scripts/generate-litgir-onroomchanged-seg.ps1\""
+        }
+    ]
+}
