@@ -397,6 +397,14 @@ public sealed class DslBinder
                 if (resolved != null) model.Values[i] = new BoundValue(resolved, lastCSharpName, lastSymbol, lastKind);
                 return resolved;
             case ParenthesizedExpression p: return BindExpression(p.Expression, scope, contextualIt);
+            case ConditionalExpression conditional:
+                var conditionType = BindExpression(conditional.Condition, scope, contextualIt);
+                Require(conditionType, compilation.GetSpecialType(SpecialType.System_Boolean), conditional.Condition.Span, "conditional condition must be bool.");
+                var trueType = BindExpression(conditional.WhenTrue, scope, contextualIt);
+                var falseType = BindExpression(conditional.WhenFalse, scope, contextualIt);
+                if (trueType != null && falseType != null && !Compatible(trueType, falseType) && !Compatible(falseType, trueType))
+                    Report("SEGDSL313", "Conditional branches must have compatible types.", conditional.Span);
+                return trueType ?? falseType;
             case UnaryExpression u: var ut = BindExpression(u.Operand, scope, contextualIt); if (u.Operator == "not") Require(ut, compilation.GetSpecialType(SpecialType.System_Boolean), u.Span, "not requires bool."); return compilation.GetSpecialType(SpecialType.System_Boolean);
             case BinaryExpression b:
                 var lt = BindExpression(b.Left, scope, contextualIt); var rt = BindExpression(b.Right, scope, contextualIt);

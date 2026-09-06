@@ -189,6 +189,7 @@ public sealed class SegusumGenerator : IIncrementalGenerator
         IdentifierExpression i => model.Values.TryGetValue(i, out var value) ? (value.Kind is BoundSymbolKind.CSharpMethod or BoundSymbolKind.Function ? value.CSharpName + "()" : value.CSharpName) : Name(i.Name), LiteralExpression l => l.Kind == "cycle" ? "new Cycle()" : l.Kind == "raw-string" ? "\"" + EscapeString(l.Value) + "\"" : l.Value,
         ListExpression l => "new[] { " + string.Join(", ", l.Elements.Select(x => Emit(x, model))) + " }",
         ParenthesizedExpression p => "(" + Emit(p.Expression, model) + ")", UnaryExpression u => EmitUnary(u, model),
+        ConditionalExpression c => "(" + Emit(c.Condition, model) + " ? " + Emit(c.WhenTrue, model) + " : " + Emit(c.WhenFalse, model) + ")",
         BinaryExpression b => Emit(b.Left, model) + " " + (b.Operator == "and" ? "&&" : b.Operator == "or" ? "||" : b.Operator) + " " + Emit(b.Right, model),
         CallExpression c when model.DomainOperations.TryGetValue(c, out var domain) && domain.Kind == BoundDomainOperationKind.NotSeenRecently => Emit(domain.Receiver, model) + ".notSeenRecently(" + Emit(domain.Argument!, model) + ")",
         CallExpression c when model.DomainOperations.TryGetValue(c, out var seen) && seen.Kind == BoundDomainOperationKind.WasSeenAtLeastOnce => "wasSeenAtLeastOnce(" + Emit(seen.Receiver, model) + ")",

@@ -436,7 +436,8 @@ public static class CSharpToSegTranspiler
                     if (e != null) { sb.Append(indent).AppendLine("else:"); EmitStatements(e.Statement is BlockSyntax eb ? eb.Statements : new[] { e.Statement }, sb, diagnostics, level + 1, partial, includeComments); }
                     sb.Append(indent).AppendLine("end"); break;
                 case ExpressionStatementSyntax x when x.Expression is AssignmentExpressionSyntax a:
-                    if (a.Left.ToString().EndsWith("makesNoSenseAtThisTime", StringComparison.Ordinal) && a.Right.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.TrueLiteralExpression)) sb.Append(indent).AppendLine("makes-no-sense");
+                    if (a.Right is InvocationExpressionSyntax add && CallName(add) == "addToCycle") EmitCycleChain(add, sb, diagnostics, level, partial);
+                    else if (a.Left.ToString().EndsWith("makesNoSenseAtThisTime", StringComparison.Ordinal) && a.Right.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.TrueLiteralExpression)) sb.Append(indent).AppendLine("makes-no-sense");
                     else if (a.Left.ToString().EndsWith("textInputToShow", StringComparison.Ordinal)) sb.Append(indent).Append("text-input ").AppendLine(Expression(a.Right));
                     else sb.Append(indent).Append(Expression(a.Left)).Append(' ').Append(a.OperatorToken.Text).Append(' ').AppendLine(Expression(a.Right)); break;
                 case ExpressionStatementSyntax x when x.Expression is InvocationExpressionSyntax i:
@@ -465,6 +466,11 @@ public static class CSharpToSegTranspiler
                     break;
                 case UsingStatementSyntax x when x.Expression is InvocationExpressionSyntax call && CallName(call) == "namedCutScene":
                     EmitNamedCutscene(call, x.Statement, sb, diagnostics, level, partial); break;
+                case ReturnStatementSyntax x when x.Expression is InvocationExpressionSyntax cycleReturn && FindStartCycle(cycleReturn) != null:
+                    EmitCycle(cycleReturn, "cyc", sb, diagnostics, level, partial);
+                    sb.Append(indent).AppendLine("ret cyc");
+                    break;
+                case EmptyStatementSyntax: break;
                 case ReturnStatementSyntax x: sb.Append(indent).Append("ret ").AppendLine(Expression(x.Expression)); break;
                 default: Unsupported(statement, diagnostics, "unsupported statement " + statement.Kind(), partial, sb, level); break;
             }
@@ -478,7 +484,7 @@ public static class CSharpToSegTranspiler
     private static void EmitInvocation(InvocationExpressionSyntax invocation, StringBuilder sb, List<MigrationDiagnostic> diagnostics, int level, bool partial)
     {
         var indent = new string(' ', level * 4); var name = invocation.Expression.ToString();
-        if (CallName(invocation) == "addToCycle") { EmitCycleElement(invocation, sb, diagnostics, level, partial); return; }
+        if (CallName(invocation) == "addToCycle") { EmitCycleChain(invocation, sb, diagnostics, level, partial); return; }
         if (CallName(invocation) == "execNextInCycle") { sb.Append(indent).Append("next ").AppendLine(Arg(invocation.ArgumentList.Arguments, 0)); return; }
         if (CallName(invocation) == "startCycle") { Unsupported(invocation, diagnostics, "startCycle must be assigned to a cycle variable", partial, sb, level); return; }
         if (name is "dial" or "nar" or "narText" or "narRoom" or "narImg")
@@ -517,6 +523,22 @@ public static class CSharpToSegTranspiler
 
     private static void EmitCycleElement(InvocationExpressionSyntax invocation, StringBuilder sb, List<MigrationDiagnostic> diagnostics, int level, bool partial)
         => EmitCycleElementCore(invocation.Expression is MemberAccessExpressionSyntax member ? Expression(member.Expression) : "cyc", invocation.ArgumentList.Arguments, invocation, sb, diagnostics, level, partial, false);
+
+    private static void EmitCycleChain(InvocationExpressionSyntax outer, StringBuilder sb, List<MigrationDiagnostic> diagnostics, int level, bool partial)
+    {
+        var current = outer;
+        var elements = new List<InvocationExpressionSyntax>();
+        string? cycle = null;
+        while (CallName(current) == "addToCycle" && current.Expression is MemberAccessExpressionSyntax member)
+        {
+            elements.Add(current);
+            if (member.Expression is InvocationExpressionSyntax nested) current = nested;
+            else { cycle = Expression(member.Expression); break; }
+        }
+        if (cycle is null) { Unsupported(outer, diagnostics, "addToCycle receiver is not a cycle expression", partial, sb, level); return; }
+        foreach (var element in elements.AsEnumerable().Reverse())
+            EmitCycleElementCore(cycle, element.ArgumentList.Arguments, element, sb, diagnostics, level, partial, false);
+    }
 
     private static void EmitCycleElementCore(string cycle, SeparatedSyntaxList<ArgumentSyntax> args, InvocationExpressionSyntax invocation, StringBuilder sb, List<MigrationDiagnostic> diagnostics, int level, bool partial, bool start)
     {
@@ -649,13 +671,36 @@ public static class CSharpToSegTranspiler
             PrefixUnaryExpressionSyntax x when x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.LogicalNotExpression) => "not " + Expression(x.Operand),
             PrefixUnaryExpressionSyntax x when x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.UnaryMinusExpression) => "-" + Expression(x.Operand),
             PrefixUnaryExpressionSyntax x when x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.UnaryPlusExpression) => "+" + Expression(x.Operand),
+            BinaryExpressionSyntax x when TryEmitRandomModulo(x, out var random) => random,
             BinaryExpressionSyntax x => Expression(x.Left) + " " + BinaryOperator(x.Kind()) + " " + Expression(x.Right),
             MemberAccessExpressionSyntax x => Expression(x.Expression) + "." + x.Name.Identifier.ValueText,
             InvocationExpressionSyntax x => EmitCallExpression(x),
             CollectionExpressionSyntax x => "[" + string.Join(", ", x.Elements.Select(EmitCollectionElement)) + "]",
+            ConditionalExpressionSyntax x => "if " + Expression(x.Condition) + " then " + Expression(x.WhenTrue) + " else " + Expression(x.WhenFalse),
             ArgumentSyntax x => (x.NameColon is null ? "" : x.NameColon.Name.Identifier.ValueText + ": ") + Expression(x.Expression),
             _ => throw new InvalidOperationException("Unsupported C# expression: " + node.Kind())
         };
+    }
+
+    private static bool TryEmitRandomModulo(BinaryExpressionSyntax expression, out string result)
+    {
+        result = "";
+        if (!expression.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.EqualsExpression)
+            || expression.Right is not LiteralExpressionSyntax zero
+            || !zero.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.NumericLiteralExpression)
+            || zero.Token.ValueText != "0"
+            || expression.Left is not BinaryExpressionSyntax modulo
+            || !modulo.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.ModuloExpression)
+            || modulo.Left is not InvocationExpressionSyntax next
+            || next.Expression is not MemberAccessExpressionSyntax member
+            || member.Name.Identifier.ValueText != "Next"
+            || next.ArgumentList.Arguments.Count != 0
+            || modulo.Right is not LiteralExpressionSyntax bound
+            || !bound.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.NumericLiteralExpression)
+            || !int.TryParse(bound.Token.ValueText, out var n)
+            || n <= 0) return false;
+        result = "random " + n + " == 0";
+        return true;
     }
 
     private static string EmitCollectionElement(CollectionElementSyntax element)
@@ -684,8 +729,11 @@ public static class CSharpToSegTranspiler
             : name;
         return invocation.ArgumentList.Arguments.Count == 0
             ? receiver
-            : receiver + " " + string.Join(" ", invocation.ArgumentList.Arguments.Select(x => Expression(x)));
+            : receiver + " " + string.Join(" ", invocation.ArgumentList.Arguments.Select(x => ExpressionForCallArgument(x.Expression)));
     }
+
+    private static string ExpressionForCallArgument(ExpressionSyntax expression)
+        => expression is ConditionalExpressionSyntax ? "(" + Expression(expression) + ")" : Expression(expression);
 
     private static string EmitAnyQuery(ExpressionSyntax collection, LambdaExpressionSyntax lambda)
     {

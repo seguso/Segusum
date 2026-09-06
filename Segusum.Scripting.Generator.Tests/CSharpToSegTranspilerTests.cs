@@ -24,6 +24,41 @@ public sealed class CSharpToSegTranspilerTests
     }
 
     [Fact]
+    public void ConditionalExpressionIsEmittedAsSegExpression()
+    {
+        var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { void M() { addHandlerUseHere(a, handler: i => { var protag = camilla.isInCurParty() ? camilla : olivia; protag = ifReady ? camilla : olivia; foo(camilla.isInCurParty() ? camilla : olivia); }); } }");
+        Assert.Contains("var protag = if camilla.isInCurParty then camilla else olivia", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(result.Diagnostics, x => x.Status == MigrationUnitStatus.Unsupported);
+    }
+
+    [Fact]
+    public void ExistingCycleFluentChainIsEmittedInSourceOrder()
+    {
+        const string source = "class W { void M() { addRoomChangedHandler(roomA, e => { cyc.addToCycle(bas2, x => x.notSeenRecently(2), x => { if (ready) { dial(camilla, \"[[translation]]\"); } }).addToCycle(bas3, x => x.notSeenRecently(3), x => { timestamp = DateTime.Now; }); }); } }";
+        var result = CSharpToSegTranspiler.Transpile("x.cs", source, true);
+        Assert.True(result.Text.IndexOf("add cyc bas2", StringComparison.Ordinal) < result.Text.IndexOf("add cyc bas3", StringComparison.Ordinal), result.Text);
+        Assert.Contains("[[translation]]", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(result.Diagnostics, x => x.Reason.Contains("Unsupported C# call: addToCycle", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ExistingCycleFluentChainAssignedBackToCycleIsFlattened()
+    {
+        var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { void M() { addRoomChangedHandler(roomA, e => { cyc = cyc.addToCycle(bas2, x => true, x => { foo(); }).addToCycle(bas3, x => true, x => { bar(); }); }); } }");
+        Assert.Contains("add cyc bas2", result.Text, StringComparison.Ordinal);
+        Assert.Contains("add cyc bas3", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(result.Diagnostics, x => x.Reason.Contains("Unsupported C# call: addToCycle", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void RandomNextModuloUsesExistingRandomExpression()
+    {
+        var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { void M() { addRoomChangedHandler(roomA, e => { if (rand.Next() % 2 == 0) { foo(); } }); } }");
+        Assert.Contains("if random 2 == 0:", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(result.Diagnostics, x => x.Status == MigrationUnitStatus.Unsupported);
+    }
+
+    [Fact]
     public void CollectionExpressionUsesExistingListLiteralSyntax()
     {
         var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { void M() { addHandlerUseHere(a, handler: i => { var xs = [one, two, 3]; foo(xs); }); } }");

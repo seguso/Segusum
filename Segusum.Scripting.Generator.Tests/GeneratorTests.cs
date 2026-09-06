@@ -772,6 +772,15 @@ public NamedCutSceneId ncsMikeStalloneIlBenefattore = null!;
     }
 
     [Fact]
+    public void ConditionalExpressionBindsAndGeneratesAsTernary()
+    {
+        var result = Run("def main:\n var selected = if ready then camilla else olivia\nend", "public bool ready; public Character camilla = null!; public Character olivia = null!;");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL", StringComparison.Ordinal));
+        Assert.Contains("var selected = (ready ? camilla : olivia);", Generated(result));
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
     public void PrivateWorldMethodCanBeCalledDirectlyFromDsl()
     {
         var result = Run("def main:\n salvanoJack\nend", "private void salvanoJack() { }");

@@ -105,6 +105,7 @@ public sealed record MemberAccessExpression(DslExpression Receiver,string Member
 }
 public sealed record FunctionReferenceExpression(string Name,SourceSpan Span) : DslExpression(Span);
 public sealed record ParenthesizedExpression(DslExpression Expression,SourceSpan Span) : DslExpression(Span);
+public sealed record ConditionalExpression(DslExpression Condition,DslExpression WhenTrue,DslExpression WhenFalse,SourceSpan Span) : DslExpression(Span);
 public sealed record DslArgument(string? Name,DslExpression Expression,SourceSpan Span);
 public static class DslNames
 {

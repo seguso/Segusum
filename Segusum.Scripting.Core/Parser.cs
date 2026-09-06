@@ -347,7 +347,7 @@ public static class DslParser
         private bool CanStartArgument()
         {
             profile.Count("CanStartArgument");
-            return (Current.Kind is DslTokenKind.Identifier or DslTokenKind.Number or DslTokenKind.String or DslTokenKind.LParen or DslTokenKind.LBracket) && Current.Text is not ("and" or "or" or "else" or "elif" or "end" or "when" or "with" or "for" or "here");
+            return (Current.Kind is DslTokenKind.Identifier or DslTokenKind.Number or DslTokenKind.String or DslTokenKind.LParen or DslTokenKind.LBracket) && Current.Text is not ("and" or "or" or "if" or "then" or "else" or "elif" or "end" or "when" or "with" or "for" or "here");
         }
         private DslArgument ParseArgument()
         {
@@ -406,6 +406,14 @@ public static class DslParser
             while (Current.Kind == DslTokenKind.NewLine) Take(); var span = Current.Span;
             if (Is("not")) { Take(); return new UnaryExpression("not", Expression(Precedence("not")), span); }
             if (Is("exists")) return ParseExists(span);
+            if (Is("if"))
+            {
+                Take();
+                var condition = Expression(); Need("then");
+                var whenTrue = Expression(); Need("else");
+                var whenFalse = Expression();
+                return new ConditionalExpression(condition, whenTrue, whenFalse, span);
+            }
             if (Current.Kind == DslTokenKind.LParen) { Take(); var parenthesized = Expression(); Need(")"); return new ParenthesizedExpression(parenthesized, span); }
             if (Current.Kind == DslTokenKind.LBracket)
             {
