@@ -28,6 +28,7 @@ internal sealed class ToolingHost
     private Dictionary<string, DslSource> sourcesByPath = new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<string, INamedTypeSymbol?> worldsById = new(StringComparer.Ordinal);
     private Dictionary<string, string?> worldIdBySegPath = new(StringComparer.OrdinalIgnoreCase);
+    private DslParseCache parseCache = new();
 
     public async Task RunAsync()
     {
@@ -97,6 +98,7 @@ internal sealed class ToolingHost
         var openStarted = initializeTimer.Elapsed;
         context?.Dispose();
         context = await MsBuildWorkspaceContext.OpenProjectAsync(projectPath, cancellationToken);
+        parseCache = new DslParseCache();
         var openMs = (initializeTimer.Elapsed - openStarted).TotalMilliseconds;
         var generatedTrees = context.Compilation.SyntaxTrees
             .Where(x => SegusumGeneratedSource.IsGenerated(x))
@@ -146,7 +148,7 @@ internal sealed class ToolingHost
                     {
                         var overlayStarted = Stopwatch.StartNew();
                         var overlay = sources.Select(x => string.Equals(x.Path, overlayPathValue, StringComparison.OrdinalIgnoreCase) ? new DslSource(x.Path, overlayTextValue) : x).ToArray();
-                        var candidate = new DslSemanticWorkspace(context, target, overlay);
+                        var candidate = new DslSemanticWorkspace(context, target, overlay, parseCache, overlayPathValue);
                         cancellationToken.ThrowIfCancellationRequested();
                         overlaySemantic = candidate;
                         overlayPath = overlayPathValue;
@@ -161,7 +163,7 @@ internal sealed class ToolingHost
             if (semantic == null || !SymbolEqualityComparer.Default.Equals(target, semanticTarget))
             {
                 var semanticStarted = Stopwatch.StartNew();
-                semantic = new DslSemanticWorkspace(context, target, sources);
+                semantic = new DslSemanticWorkspace(context, target, sources, parseCache, null);
                 semanticTarget = target;
                 Console.Error.WriteLine($"semanticBuild project={projectPath} world={target.ToDisplayString()} elapsed={semanticStarted.Elapsed.TotalMilliseconds:0}ms sources={sources.Count}");
             }

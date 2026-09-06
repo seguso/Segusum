@@ -123,14 +123,16 @@ public sealed class DslBinder
     private readonly object worldMembersGate = new();
     private readonly Dictionary<ISymbol, bool> accessibilityBySymbol = new(SymbolEqualityComparer.Default);
     private readonly object accessibilityGate = new();
+    private readonly CSharpSemanticIndexCache? semanticIndexes;
     private bool typeIndexBuilt;
     private bool suppressDiagnostics;
     private readonly DslBinderProfile profile = new();
 
     public BoundModel Model => model;
     public DslBinderProfile Profile => profile;
-    public DslBinder(Compilation compilation, INamedTypeSymbol world, Action<DslDiagnostic> report)
+    public DslBinder(Compilation compilation, INamedTypeSymbol world, Action<DslDiagnostic> report, CSharpSemanticIndexCache? semanticIndexes = null)
     {
+        this.semanticIndexes = semanticIndexes;
         this.compilation = compilation; this.world = world; this.report = report;
         cycle = GetTypeByMetadataName("Seg.Cycle"); cycleElementId = GetTypeByMetadataName("Seg.CycleElemId"); namedCutsceneId = GetTypeByMetadataName("Seg.NamedCutSceneId");
         logicObj = GetTypeByMetadataName("Seg.LogicObj"); objective = GetTypeByMetadataName("Seg.Objective"); room = GetTypeByMetadataName("Seg.Room"); explanation = GetTypeByMetadataName("Seg.Explanation"); beforeRoomChangeInput = GetTypeByMetadataName("Seg.BeforeRoomChangeInput"); walkPath = GetTypeByMetadataName("Seg.WalkPath");
@@ -661,6 +663,12 @@ public sealed class DslBinder
         if (typeIndexBuilt) return;
         var started = Stopwatch.GetTimestamp();
         typeIndexBuilt = true;
+        if (semanticIndexes != null)
+        {
+            foreach (var item in semanticIndexes.GetTypeIndex(world)) typesBySimpleName[item.Key] = item.Value;
+            profile.Add("EnsureTypeIndex cached", Stopwatch.GetTimestamp() - started);
+            return;
+        }
         VisitNamespace(compilation.GlobalNamespace);
         profile.Add("EnsureTypeIndex build", Stopwatch.GetTimestamp() - started);
     }
@@ -721,6 +729,14 @@ public sealed class DslBinder
     {
         var handlers = declarations.OfType<HandlerDeclaration>().Where(x => x.Kind == "room-changed").ToArray();
         if (handlers.Length == 0) return;
+        if (semanticIndexes != null)
+        {
+            var targets = semanticIndexes.GetRoomChangedTargets();
+            foreach (var handler in handlers)
+                if (dslRoomChangedTargets.Any(targets.Contains))
+                    Report("SEGDSL319", "Duplicate room-changed handler: the Room is already registered by C#.", handler.Span);
+            return;
+        }
         var treeCount = 0;
         var invocationCount = 0;
         foreach (var tree in compilation.SyntaxTrees)

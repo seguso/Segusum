@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -27,6 +28,58 @@ public sealed record RenameResult(IReadOnlyList<WorkspaceTextEdit> Edits, IReadO
     public bool Succeeded => Diagnostics.Count == 0;
 }
 
+public sealed class DslParseCache
+{
+    private sealed record Entry(string Text, DslDocument Document, IReadOnlyList<DslDiagnostic> Diagnostics);
+    private sealed class PathEntries
+    {
+        public Entry? Disk;
+        public Entry? Overlay;
+    }
+
+    private readonly object gate = new();
+    private readonly Dictionary<string, PathEntries> entries = new(StringComparer.OrdinalIgnoreCase);
+    private int parsedCount;
+    private int reusedCount;
+
+    public (int ParsedFiles, int ReusedFiles) Stats
+    {
+        get { lock (gate) return (parsedCount, reusedCount); }
+    }
+
+    public DslParseResult Get(DslSource source, bool overlay, out bool reused)
+    {
+        var key = NormalizePath(source.Path);
+        lock (gate)
+        {
+            if (!entries.TryGetValue(key, out var pathEntries)) entries[key] = pathEntries = new PathEntries();
+            var current = overlay ? pathEntries.Overlay : pathEntries.Disk;
+            if (current != null && string.Equals(current.Text, source.Text, StringComparison.Ordinal))
+            {
+                reused = true;
+                reusedCount++;
+                return new DslParseResult(current.Document, current.Diagnostics);
+            }
+
+            var parsed = DslParser.Parse(source);
+            var next = new Entry(source.Text, parsed.Document, parsed.Diagnostics);
+            if (overlay) pathEntries.Overlay = next; else pathEntries.Disk = next;
+            parsedCount++;
+            reused = false;
+            return new DslParseResult(parsed.Document, parsed.Diagnostics);
+        }
+    }
+
+    public void Clear()
+    {
+        lock (gate) entries.Clear();
+    }
+
+    private static string NormalizePath(string path) => Path.GetFullPath(path);
+}
+
+public sealed record DslParseResult(DslDocument Document, IReadOnlyList<DslDiagnostic> Diagnostics);
+
 /// <summary>Semantic services shared with the generator binder for a set of .seg files.</summary>
 public sealed class DslSemanticWorkspace
 {
@@ -44,11 +97,16 @@ public sealed class DslSemanticWorkspace
     private Solution roslynSolution => workspaceContext.Solution;
 
     public DslSemanticWorkspace(Compilation compilation, INamedTypeSymbol world, IEnumerable<DslSource> sources)
-        : this(new AdhocCSharpWorkspaceContext(compilation), world, sources)
+        : this(new AdhocCSharpWorkspaceContext(compilation), world, sources, new DslParseCache(), null)
     {
     }
 
     public DslSemanticWorkspace(ICSharpWorkspaceContext workspaceContext, INamedTypeSymbol world, IEnumerable<DslSource> sources)
+        : this(workspaceContext, world, sources, new DslParseCache(), null)
+    {
+    }
+
+    public DslSemanticWorkspace(ICSharpWorkspaceContext workspaceContext, INamedTypeSymbol world, IEnumerable<DslSource> sources, DslParseCache parseCache, string? overlayPath)
     {
         var totalTimer = Stopwatch.StartNew();
         var memoryBefore = GC.GetTotalMemory(false);
@@ -64,23 +122,31 @@ public sealed class DslSemanticWorkspace
         Console.Error.WriteLine($"semanticWorkspace phase=documentsDictionary elapsed={documentsTimer.Elapsed.TotalMilliseconds:0.0}ms count={documents.Count}");
         var diagnosticsParseTimer = Stopwatch.StartNew();
         var parsedSources = new List<(DslSource Source, DslDocument Document, IReadOnlyList<DslDiagnostic> Diagnostics)>();
+        var parsedFiles = 0;
+        var reusedFiles = 0;
+        var parsedChars = 0L;
+        var reusedChars = 0L;
         foreach (var source in this.sources)
         {
             var fileTimer = Stopwatch.StartNew();
-            var parsed = DslParser.Parse(source);
+            var isOverlay = overlayPath != null && string.Equals(NormalizePath(source.Path), NormalizePath(overlayPath), StringComparison.OrdinalIgnoreCase);
+            var parsed = parseCache.Get(source, isOverlay, out var reused);
             fileTimer.Stop();
             parsedSources.Add((source, parsed.Document, parsed.Diagnostics));
             diagnostics.AddRange(parsed.Diagnostics);
-            Console.Error.WriteLine($"semanticParse pass=diagnostics path={source.Path} chars={source.Text.Length} lines={CountLines(source.Text)} declarations={parsed.Document.Declarations.Count} elapsed={fileTimer.Elapsed.TotalMilliseconds:0.0}ms");
+            if (reused) reusedFiles++; else { parsedFiles++; parsedChars += source.Text.Length; }
+            if (reused) reusedChars += source.Text.Length;
+            Console.Error.WriteLine($"semanticParse cache={(reused ? "reuse" : "parse")} path={source.Path} chars={source.Text.Length} lines={CountLines(source.Text)} declarations={parsed.Document.Declarations.Count} elapsed={fileTimer.Elapsed.TotalMilliseconds:0.0}ms");
         }
         diagnosticsParseTimer.Stop();
         Console.Error.WriteLine($"semanticParseTotal pass=diagnostics elapsed={diagnosticsParseTimer.Elapsed.TotalMilliseconds:0.0}ms files={this.sources.Count}");
+        Console.Error.WriteLine($"semanticParseCache parsedFiles={parsedFiles} reusedFiles={reusedFiles} parsedChars={parsedChars} reusedChars={reusedChars} elapsed={diagnosticsParseTimer.Elapsed.TotalMilliseconds:0.0}ms");
         var declarationsTimer = Stopwatch.StartNew();
         var declarations = parsedSources.SelectMany(x => x.Document.Declarations).ToArray();
         declarationsTimer.Stop();
         Console.Error.WriteLine($"semanticParseTotal pass=declarations elapsed={declarationsTimer.Elapsed.TotalMilliseconds:0.0}ms files={parsedSources.Count} declarations={declarations.Length} reused=true");
         var binderConstructionTimer = Stopwatch.StartNew();
-        binder = new DslBinder(compilation, world, diagnostics.Add);
+        binder = new DslBinder(compilation, world, diagnostics.Add, workspaceContext.SemanticIndexes);
         binderConstructionTimer.Stop();
         Console.Error.WriteLine($"semanticWorkspace phase=binderConstruction elapsed={binderConstructionTimer.Elapsed.TotalMilliseconds:0.0}ms");
         var bindTimer = Stopwatch.StartNew();
@@ -127,6 +193,7 @@ public sealed class DslSemanticWorkspace
     }
 
     private static int CountLines(string text) => text.Length == 0 ? 0 : text.Count(x => x == '\n') + 1;
+    private static string NormalizePath(string path) => Path.GetFullPath(path);
 
     public IReadOnlyList<DslDiagnostic> Diagnostics => diagnostics;
     public IReadOnlyList<SemanticReference> FindReferences(string path, int line, int column)

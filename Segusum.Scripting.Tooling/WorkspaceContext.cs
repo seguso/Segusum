@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.MSBuild;
 using Microsoft.CodeAnalysis.Text;
+using Segusum.Scripting.Semantics;
 
 namespace Segusum.Scripting.Tooling;
 
@@ -13,16 +14,19 @@ public interface ICSharpWorkspaceContext
 {
     Compilation Compilation { get; }
     Solution Solution { get; }
+    CSharpSemanticIndexCache SemanticIndexes { get; }
 }
 
 public sealed class AdhocCSharpWorkspaceContext : ICSharpWorkspaceContext
 {
     public Compilation Compilation { get; }
     public Solution Solution { get; }
+    public CSharpSemanticIndexCache SemanticIndexes { get; }
 
     public AdhocCSharpWorkspaceContext(Compilation compilation)
     {
         Compilation = compilation;
+        SemanticIndexes = new CSharpSemanticIndexCache(compilation);
         using var workspace = new AdhocWorkspace();
         var projectId = ProjectId.CreateNewId("Segusum.Tooling");
         workspace.AddProject(ProjectInfo.Create(projectId, VersionStamp.Create(), "Segusum.Tooling", "Segusum.Tooling", LanguageNames.CSharp,
@@ -47,7 +51,9 @@ public sealed class MsBuildWorkspaceContext : ICSharpWorkspaceContext, IDisposab
     {
         this.workspace = workspace;
         Compilation = compilation;
+        SemanticIndexes = new CSharpSemanticIndexCache(compilation);
     }
+    public CSharpSemanticIndexCache SemanticIndexes { get; }
 
     public static async Task<MsBuildWorkspaceContext> OpenProjectAsync(string projectPath, CancellationToken cancellationToken = default)
     {
