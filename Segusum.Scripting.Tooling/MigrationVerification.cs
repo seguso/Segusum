@@ -440,7 +440,7 @@ public static class MigrationVerifier
         var possibleExpression = args.FirstOrDefault(x => x.NameColon?.Name.Identifier.ValueText == "isPossibleNow")?.Expression;
         var possible = CanonicalCSharpExpression(possibleExpression is AnonymousFunctionExpressionSyntax possibleLambda
             ? possibleLambda.Body.ToString() : possibleExpression?.ToString());
-        var body = HandlerLambda(invocation) is { } lambda ? ExtractCSharpHandlerEffects(lambda) : null;
+        var body = HandlerLambda(invocation) is { } lambda ? ExtractCSharpHandlerEffects(lambda) : Array.Empty<string>();
         return new(kind, OperandText(args, 0), kind == "combine" ? OperandText(args, 1) : kind == "use-for" ? OperandText(args, 1) : null,
             LiteralText(phrase), CanonicalCSharpExpression(explanation), possible, path,
             invocation.GetLocation().GetLineSpan().StartLinePosition.Line + 1, body);
