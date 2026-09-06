@@ -499,6 +499,11 @@ public static class MigrationVerifier
     private static string CSharpInvocationEffect(InvocationExpressionSyntax invocation)
     {
         var name = InvocationName(invocation);
+        if (name == "setIfNeverHappened" && invocation.ArgumentList.Arguments.Count == 1)
+            return "mark-happened-once:" + CanonicalCSharpExpression(invocation.ArgumentList.Arguments[0].Expression.ToString());
+        if (name is "finishGame" or "finish") return "finish-game";
+        if (name is "doNotAdvanceTime") return "do-not-advance-time";
+        if (name is "preventRoomChange") return "prevent-room-change";
         if (name == "dial" && invocation.ArgumentList.Arguments.Count >= 2)
             return "dialogue:" + CanonicalCSharpExpression(invocation.ArgumentList.Arguments[0].Expression.ToString()) + ":" + LiteralText(invocation.ArgumentList.Arguments[1].Expression.ToString());
         if (name is "nar" or "narText" or "narRoom" or "narImg")
