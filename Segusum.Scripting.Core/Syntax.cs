@@ -31,10 +31,15 @@ public abstract record DslStatement(SourceSpan Span) : DslNode(Span);
 public sealed record VariableDeclaration(string Name,DslExpression Initializer,SourceSpan Span) : DslStatement(Span);
 public sealed record AssignmentStatement(string Name,string Operator,DslExpression Value,SourceSpan Span) : DslStatement(Span)
 {
+    public SourceSpan NameSpan { get; init; } = Span;
     public DslExpression? Receiver { get; init; }
     public string? MemberName { get; init; }
+    public SourceSpan? MemberSpan { get; init; }
 }
-public sealed record IncrementStatement(string Name,SourceSpan Span) : DslStatement(Span);
+public sealed record IncrementStatement(string Name,SourceSpan Span) : DslStatement(Span)
+{
+    public SourceSpan NameSpan { get; init; } = Span;
+}
 public sealed record CallStatement(DslExpression Expression,SourceSpan Span) : DslStatement(Span);
 public sealed record ReturnStatement(DslExpression Expression,SourceSpan Span) : DslStatement(Span);
 public sealed record IfStatement(IReadOnlyList<(DslExpression Condition,IReadOnlyList<DslStatement> Body)> Branches,IReadOnlyList<DslStatement>? ElseBody,SourceSpan Span) : DslStatement(Span);

@@ -120,16 +120,16 @@ public static class DslParser
                 case "nar-img": return ParseNarImg(span);
                 default:
                     if (Is(":")) { return ParseDialogue(keyword, span); }
-                    if (Is("++")) { Take(); return new IncrementStatement(keyword, span); }
+                    if (Is("++")) { Take(); return new IncrementStatement(keyword, span) { NameSpan = span }; }
                     if (Is(".") && position + 1 < tokens.Count && tokens[position + 1].Kind == DslTokenKind.Identifier)
                     {
                         Take(); var memberToken = WordToken(); var member = memberToken.Text; var receiver = new IdentifierExpression(keyword, span);
-                        if (Is("=")) { Take(); return new AssignmentStatement(member, "=", Expression(), span) { Receiver = receiver, MemberName = member }; }
+                        if (Is("=")) { Take(); return new AssignmentStatement(member, "=", Expression(), span) { Receiver = receiver, MemberName = member, MemberSpan = memberToken.Span }; }
                         var memberAccess = new MemberAccessExpression(receiver, member, span) { MemberSpan = memberToken.Span };
                         if (CanStartArgument()) { var memberArgs = new List<DslArgument>(); while (CanStartArgument()) memberArgs.Add(ParseArgument()); return new CallStatement(new CallExpression(member, memberArgs, span) { Receiver = receiver, NameSpan = memberToken.Span }, span); }
                         return new CallStatement(memberAccess, span);
                     }
-                    if (Is("=") || Is("+=") || Is("-=")) { var op = Take().Text; return new AssignmentStatement(keyword, op, Expression(), span); }
+                    if (Is("=") || Is("+=") || Is("-=")) { var op = Take().Text; return new AssignmentStatement(keyword, op, Expression(), span) { NameSpan = span }; }
                     var args = new List<DslArgument>(); while (CanStartArgument()) args.Add(ParseArgument()); return new CallStatement(new CallExpression(keyword, args, span) { NameSpan = span }, span);
             }
         }

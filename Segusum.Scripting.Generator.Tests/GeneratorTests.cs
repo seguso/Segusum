@@ -101,6 +101,37 @@ public sealed class GeneratorTests
     }
 
     [Fact]
+    public void SemanticWorkspaceResolvesAssignmentIncrementAndMemberAssignmentTargets()
+    {
+        const string dslText = "world game\nbefore-room-change:\n    ltVistoZauroz = DateTime.Now\n    quanteVolteVistoZauroz++\n    e.canChangeRoom = false\nend\n";
+        var workspace = CreateSemanticWorkspace(dslText, "public DateTime ltVistoZauroz; public int quanteVolteVistoZauroz; public Character olivia = null!;");
+
+        var assignment = DefinitionAt(workspace, dslText, "ltVistoZauroz =");
+        var increment = DefinitionAt(workspace, dslText, "quanteVolteVistoZauroz++");
+        var memberAssignment = DefinitionAt(workspace, dslText, "canChangeRoom =");
+
+        Assert.Equal("ltVistoZauroz", assignment?.DisplayName);
+        Assert.Equal("quanteVolteVistoZauroz", increment?.DisplayName);
+        Assert.Equal("canChangeRoom", memberAssignment?.DisplayName);
+        Assert.Equal("World.cs", assignment?.Location.Path);
+        Assert.Equal("World.cs", increment?.Location.Path);
+        Assert.Equal("CSharp", memberAssignment?.Location.Language);
+    }
+
+    [Fact]
+    public void SemanticWorkspaceUnresolvedDefinitionDoesNotAffectNextLookup()
+    {
+        const string dslText = "world game\nbefore-room-change:\n    missingField = DateTime.Now\n    if olivia.isHere:\n    end\nend\n";
+        var workspace = CreateSemanticWorkspace(dslText, "public Character olivia = null!;");
+
+        var missing = DefinitionAt(workspace, dslText, "missingField =");
+        var resolved = DefinitionAt(workspace, dslText, "olivia.isHere");
+
+        Assert.Null(missing);
+        Assert.Equal("olivia", resolved?.DisplayName);
+    }
+
+    [Fact]
     public void SemanticWorkspaceResolvesDirtyDslDefinitionByCurrentTokenOffset()
     {
         const string diskText = "world game\ndef creaCicloMikeNonRipete ret bool:\n    ret true\nend\ndef caller ret bool:\n    ret creaCicloMikeNonRipete\nend\n";
@@ -991,6 +1022,15 @@ public NamedCutSceneId ncsMikeStalloneIlBenefattore = null!;
         var tree = CSharpSyntaxTree.ParseText($"using System; using Seg; namespace Demo {{ public partial class Pinco : WorldBase {{ public Pinco() : base(\"en\") {{ }} {worldSource} }} }}", path: "World.cs");
         var compilation = CSharpCompilation.Create("DirtyPositionTooling", new[] { tree }, references, new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
         return new DslSemanticWorkspace(compilation, compilation.GetTypeByMetadataName("Demo.Pinco")!, new[] { new DslSource("Gameplay/Dirty.seg", dslText) });
+    }
+
+    private static SemanticDefinition? DefinitionAt(DslSemanticWorkspace workspace, string text, string tokenContext)
+    {
+        var offset = text.IndexOf(tokenContext, StringComparison.Ordinal);
+        Assert.True(offset >= 0, $"Token context not found: {tokenContext}");
+        var token = tokenContext.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0];
+        var span = SourceSpan.From("Gameplay/Dirty.seg", text, offset, token.Length);
+        return workspace.GetDefinition("Gameplay/Dirty.seg", span.Line, span.Column);
     }
 
     private static string Generated(RunResult result) => string.Join("\n", result.GeneratedSources.Select(x => x.SourceText.ToString()));

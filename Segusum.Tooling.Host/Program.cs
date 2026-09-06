@@ -19,6 +19,11 @@ internal sealed class ToolingHost
     private INamedTypeSymbol? world;
     private INamedTypeSymbol? semanticTarget;
     private DslSemanticWorkspace? semantic;
+    private DslSemanticWorkspace? overlaySemantic;
+    private string? overlayPath;
+    private string? overlayText;
+    private INamedTypeSymbol? overlayTarget;
+    private readonly object semanticGate = new();
     private IReadOnlyList<DslSource> sources = Array.Empty<DslSource>();
 
     public async Task RunAsync()
@@ -111,26 +116,51 @@ internal sealed class ToolingHost
             .OrderBy(x => x, StringComparer.Ordinal).Select(x => new DslSource(x, File.ReadAllText(x))).ToArray();
         semantic = null;
         semanticTarget = null;
+        overlaySemantic = null;
+        overlayPath = null;
+        overlayText = null;
+        overlayTarget = null;
         await Task.CompletedTask;
     }
 
     private DslSemanticWorkspace Workspace(HostParams? parameters, CancellationToken cancellationToken)
     {
         if (context == null) throw new InvalidOperationException("Host is not initialized.");
-        var target = FindWorld(context.Compilation, parameters?.Path) ?? world ?? throw new InvalidOperationException("No target World was found.");
-        if (parameters?.Text != null && parameters.Path != null)
+        lock (semanticGate)
         {
-            var overlay = sources.Select(x => string.Equals(x.Path, parameters.Path, StringComparison.OrdinalIgnoreCase) ? new DslSource(x.Path, parameters.Text) : x).ToArray();
-            return new DslSemanticWorkspace(context, target, overlay);
+            cancellationToken.ThrowIfCancellationRequested();
+            var target = FindWorld(context.Compilation, parameters?.Path) ?? world ?? throw new InvalidOperationException("No target World was found.");
+            if (parameters?.Text is { } overlayTextValue && parameters.Path is { } overlayPathValue)
+            {
+                var diskSource = sources.FirstOrDefault(x => string.Equals(x.Path, overlayPathValue, StringComparison.OrdinalIgnoreCase));
+                if (diskSource == null || !string.Equals(diskSource.Text, overlayTextValue, StringComparison.Ordinal))
+                {
+                    if (overlaySemantic == null || !string.Equals(overlayPath, overlayPathValue, StringComparison.OrdinalIgnoreCase) ||
+                         !string.Equals(overlayText, overlayTextValue, StringComparison.Ordinal) ||
+                         !SymbolEqualityComparer.Default.Equals(target, overlayTarget))
+                    {
+                        var overlayStarted = Stopwatch.StartNew();
+                        var overlay = sources.Select(x => string.Equals(x.Path, overlayPathValue, StringComparison.OrdinalIgnoreCase) ? new DslSource(x.Path, overlayTextValue) : x).ToArray();
+                        var candidate = new DslSemanticWorkspace(context, target, overlay);
+                        cancellationToken.ThrowIfCancellationRequested();
+                        overlaySemantic = candidate;
+                        overlayPath = overlayPathValue;
+                        overlayText = overlayTextValue;
+                        overlayTarget = target;
+                        Console.Error.WriteLine($"semanticOverlay project={projectPath} world={target.ToDisplayString()} elapsed={overlayStarted.Elapsed.TotalMilliseconds:0}ms path={overlayPathValue} textLength={overlayTextValue.Length}");
+                        return overlaySemantic;
+                    }
+                }
+            }
+            if (semantic == null || !SymbolEqualityComparer.Default.Equals(target, semanticTarget))
+            {
+                var semanticStarted = Stopwatch.StartNew();
+                semantic = new DslSemanticWorkspace(context, target, sources);
+                semanticTarget = target;
+                Console.Error.WriteLine($"semanticBuild project={projectPath} world={target.ToDisplayString()} elapsed={semanticStarted.Elapsed.TotalMilliseconds:0}ms sources={sources.Count}");
+            }
+            return semantic;
         }
-        if (semantic == null || !SymbolEqualityComparer.Default.Equals(target, semanticTarget))
-        {
-            var semanticStarted = Stopwatch.StartNew();
-            semantic = new DslSemanticWorkspace(context, target, sources);
-            semanticTarget = target;
-            Console.Error.WriteLine($"semanticBuild project={projectPath} world={target.ToDisplayString()} elapsed={semanticStarted.Elapsed.TotalMilliseconds:0}ms sources={sources.Count}");
-        }
-        return semantic;
     }
 
     private object? Definition(HostParams? p, CancellationToken ct)

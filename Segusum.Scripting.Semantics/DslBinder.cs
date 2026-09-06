@@ -183,11 +183,13 @@ public sealed class DslBinder
                         var receiver = BindExpression(a.Receiver, scope);
                         var target = receiver == null ? null : MembersOf(receiver, a.MemberName ?? a.Name).FirstOrDefault(x => Accessible(x, receiver));
                         if (target is not IPropertySymbol { SetMethod: not null } && target is not IFieldSymbol { IsReadOnly: false }) Report("SEGDSL321", $"Member '{a.MemberName ?? a.Name}' is not writable.", a.Span);
+                        if (target != null)
+                            RecordReference(a.MemberName ?? a.Name, a.MemberSpan ?? a.Span, target is IMethodSymbol ? BoundSymbolKind.CSharpMethod : BoundSymbolKind.CSharpProperty, target, null, "member-name");
                         RequireExpression(a.Value, BindExpression(a.Value, scope), target is IPropertySymbol p ? p.Type : target is IFieldSymbol f ? f.Type : null, "assignment type mismatch.");
                     }
-                    else { var targetType = BindName(a.Name, a.Span, scope); RequireExpression(a.Value, BindExpression(a.Value, scope), targetType, "assignment type mismatch."); }
+                    else { var targetType = BindName(a.Name, a.NameSpan, scope); RequireExpression(a.Value, BindExpression(a.Value, scope), targetType, "assignment type mismatch."); }
                     break;
-                case IncrementStatement i: Require(BindName(i.Name, i.Span, scope), compilation.GetSpecialType(SpecialType.System_Int32), i.Span, "++ requires int."); break;
+                case IncrementStatement i: Require(BindName(i.Name, i.NameSpan, scope), compilation.GetSpecialType(SpecialType.System_Int32), i.Span, "++ requires int."); break;
                 case ReturnStatement r: Require(BindExpression(r.Expression, scope), returnType, r.Span, "return type mismatch."); break;
                 case CallStatement c: BindExpression(c.Expression, scope); break;
                 case NextCycleStatement n: Require(BindExpression(n.Cycle, scope), cycle, n.Span, "next requires a Cycle."); break;
