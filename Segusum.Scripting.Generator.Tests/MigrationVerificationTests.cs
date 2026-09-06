@@ -1,4 +1,6 @@
 using System;
+using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -10,6 +12,89 @@ namespace Segusum.Scripting.Generator.Tests;
 
 public sealed class MigrationVerificationTests
 {
+    [Fact]
+    public void GameplayVerifierNormalizesEquivalentIfAndElseIfConditions()
+    {
+        const string csharp = "class W { void afterActionExecutedCSharp() { if (objectiveIsCurrent(puX) && !olivia.hasObject(obj)) { foo(obj); } else if (ready || !blocked) { bar(); } } }";
+        const string dsl = "world game\nafter-action-executed:\n    if objectiveIsCurrent puX and not olivia.hasObject obj:\n        foo obj\n    elif ready or not blocked:\n        bar\n    end\nend\n";
+        var report = GameplayMigrationVerifier.VerifyCSharpToDsl("baseline.cs", csharp, "afterActionExecutedCSharp", new DslSource("current.seg", dsl));
+        Assert.True(report.IsClean, report.ToText());
+        Assert.Equal(new[] { "if", "else-if" }, report.CSharpBranches.Select(x => x.Kind));
+        Assert.Equal(new[] { "if", "else-if" }, report.DslBranches.Select(x => x.Kind));
+    }
+
+    [Fact]
+    public void GameplayVerifierReportsMissingBranchAndMissingSideEffect()
+    {
+        const string csharp = "class W { void M() { if (ready) { pickUp(obj); } else if (fallback) { changeRoom(room); } } }";
+        const string dsl = "world game\nafter-action-executed:\n    if ready:\n        pickUp obj\n    end\nend\n";
+        var report = GameplayMigrationVerifier.VerifyCSharpToDsl("baseline.cs", csharp, "M", new DslSource("current.seg", dsl));
+        Assert.Contains(report.Findings, x => x.Kind == MigrationFindingKind.MissingBranch && x.Status == MigrationMatchStatus.MissingCandidate);
+        Assert.Contains(report.Findings, x => x.Message.Contains("changeRoom", StringComparison.Ordinal));
+
+        var effectReport = GameplayMigrationVerifier.VerifyCSharpToDsl("baseline.cs", "class W { void M() { if (ready) { pickUp(obj); } } }",
+            "M", new DslSource("current.seg", "world game\nafter-action-executed:\n    if ready:\n        bar\n    end\nend\n"));
+        Assert.Contains(effectReport.Findings, x => x.Kind == MigrationFindingKind.MissingSideEffect && x.Message.Contains("pickUp", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void GameplayVerifierReportsReorderedBranches()
+    {
+        const string csharp = "class W { void M() { if (first) { alpha(); } else if (second) { beta(); } } }";
+        const string dsl = "world game\nafter-action-executed:\n    if second:\n        beta\n    elif first:\n        alpha\n    end\nend\n";
+        var report = GameplayMigrationVerifier.VerifyCSharpToDsl("baseline.cs", csharp, "M", new DslSource("current.seg", dsl));
+        Assert.Contains(report.Findings, x => x.Kind == MigrationFindingKind.OrderMismatch);
+    }
+
+    [Fact]
+    public void GameplayVerifierInventoriesAssignmentsIncrementsCallsAndStrings()
+    {
+        const string csharp = "class W { void M() { if (ready) { value = DateTime.Now; count++; dial(olivia, \"Ciao\"); narText(\"Narr\"); } } }";
+        const string dsl = "world game\nafter-action-executed:\n    if ready:\n        value = DateTime.Now\n        count++\n        olivia: Ciao\n        narText \"Narr\"\n    end\nend\n";
+        var report = GameplayMigrationVerifier.VerifyCSharpToDsl("baseline.cs", csharp, "M", new DslSource("current.seg", dsl));
+        Assert.True(report.IsClean, report.ToText());
+        Assert.Contains(report.CSharpEffects, x => x.Kind == "assign");
+        Assert.Contains(report.CSharpEffects, x => x.Kind == "increment");
+        Assert.Equal(new[] { "Ciao", "Narr" }, report.CSharpStrings);
+        Assert.Equal(report.CSharpStrings, report.DslStrings);
+    }
+
+    [Fact]
+    public void GameplayVerifierRecognizesMemberCallAndPickupEffects()
+    {
+        const string csharp = "class W { void M() { if (ready) { olivia.pickUp(obj); olivia.putInRoom(room); } } }";
+        const string dsl = "world game\nafter-action-executed:\n    if ready:\n        olivia.pickUp obj\n        olivia.putInRoom room\n    end\nend\n";
+        var report = GameplayMigrationVerifier.VerifyCSharpToDsl("baseline.cs", csharp, "M", new DslSource("current.seg", dsl));
+        Assert.True(report.IsClean, report.ToText());
+        Assert.Contains(report.DslEffects, x => x.Kind == "pickUp");
+        Assert.Contains(report.DslEffects, x => x.Kind == "putInRoom");
+    }
+
+    [Fact]
+    public void GameplayVerifierMarksUnparseableOrMissingInputsUnverifiable()
+    {
+        var report = GameplayMigrationVerifier.VerifyCSharpToDsl("baseline.cs", "class W { void Other() {} }", "M", new DslSource("current.seg", "world game\n"));
+        Assert.Contains(report.Findings, x => x.Status == MigrationMatchStatus.Unverifiable);
+    }
+
+    [Fact]
+    public void GameplayVerifierSmokeTestsTheAfterActionBaselineAgainstCurrentLitgirSeg()
+    {
+        var segusumRoot = FindAncestorWithDirectory(AppContext.BaseDirectory, "Segusum");
+        var litgirRoot = segusumRoot is null ? null : Path.Combine(Directory.GetParent(segusumRoot)!.FullName, "litgir");
+        if (litgirRoot is null || !Directory.Exists(litgirRoot)) return;
+
+        var baseline = GitShow(litgirRoot, "cc193814258f564b4a00c3ab8f3c7bb77379713a", "WebApiLitGir/worldAfterActionExecuted.cs");
+        var segPath = Path.Combine(litgirRoot, "WebApiLitGir", "Gameplay", "AfterActionExecuted.seg");
+        var report = GameplayMigrationVerifier.VerifyCSharpToDsl("WebApiLitGir/worldAfterActionExecuted.cs", baseline,
+            "afterActionExecutedCSharp", new DslSource("WebApiLitGir/Gameplay/AfterActionExecuted.seg", File.ReadAllText(segPath)));
+
+        var butler = report.CSharpBranches.FirstOrDefault(x => x.Condition?.Contains("capisciQualcosaDiImportanteSulMaggiordomo", StringComparison.Ordinal) == true);
+        Assert.NotNull(butler);
+        Assert.Contains(report.DslBranches, x => x.Condition?.Contains("capisciQualcosaDiImportanteSulMaggiordomo", StringComparison.Ordinal) == true);
+        Assert.DoesNotContain(report.Findings, x => x.Kind == MigrationFindingKind.MissingBranch && x.CSharpSourceLine == butler!.SourceLine);
+    }
+
     [Fact]
     public void RegistrationAndStringsMatchForTheMigratedMareShape()
     {
@@ -337,5 +422,26 @@ public sealed class MigrationVerificationTests
         var compilation = CSharpCompilation.Create("FingerprintFixture", new[] { tree }, refs);
         var methods = tree.GetRoot().DescendantNodes().OfType<MethodDeclarationSyntax>().ToArray();
         return (compilation.GetSemanticModel(tree), methods);
+    }
+
+    private static string? FindAncestorWithDirectory(string start, string name)
+    {
+        for (var current = new DirectoryInfo(start); current is not null; current = current.Parent)
+            if (current.Name.Equals(name, StringComparison.OrdinalIgnoreCase)) return current.FullName;
+        return null;
+    }
+
+    private static string GitShow(string repository, string commit, string path)
+    {
+        var start = new ProcessStartInfo("git", $"-C \"{repository}\" show {commit}:{path}")
+        {
+            RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true
+        };
+        using var process = Process.Start(start)!;
+        var output = process.StandardOutput.ReadToEnd();
+        var error = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        Assert.True(process.ExitCode == 0, error);
+        return output;
     }
 }
