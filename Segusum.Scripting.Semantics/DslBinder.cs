@@ -119,6 +119,10 @@ public sealed class DslBinder
     private readonly HashSet<ISymbol> dslRoomChangedTargets = new(SymbolEqualityComparer.Default);
     private readonly HashSet<DslExpression> nullLiterals = new(ReferenceComparer<DslExpression>.Instance);
     private readonly Dictionary<string, INamedTypeSymbol?> typesBySimpleName = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, IReadOnlyList<ISymbol>> worldMembersByName = new(StringComparer.Ordinal);
+    private readonly object worldMembersGate = new();
+    private readonly Dictionary<ISymbol, bool> accessibilityBySymbol = new(SymbolEqualityComparer.Default);
+    private readonly object accessibilityGate = new();
     private bool typeIndexBuilt;
     private bool suppressDiagnostics;
     private readonly DslBinderProfile profile = new();
@@ -592,16 +596,31 @@ public sealed class DslBinder
         element = null!; return false;
     }
     private IEnumerable<ISymbol> AllMembers(string name)
-        => profile.MeasureEnumerable("AllMembers", AllMembersCore(name));
-    private IEnumerable<ISymbol> AllMembersCore(string name)
+        => profile.MeasureEnumerable("AllMembers", GetWorldMembers(name));
+    private IReadOnlyList<ISymbol> GetWorldMembers(string name)
     {
-        for (INamedTypeSymbol? t = world; t != null; t = t.BaseType)
-            foreach (var member in profile.MeasureEnumerable("Roslyn.GetMembers", string.IsNullOrEmpty(name) ? t.GetMembers() : t.GetMembers(name)))
-                if (Accessible(member))
-                    yield return member;
+        lock (worldMembersGate)
+        {
+            if (worldMembersByName.TryGetValue(name, out var cached)) return cached;
+            var members = new List<ISymbol>();
+            for (INamedTypeSymbol? t = world; t != null; t = t.BaseType)
+                foreach (var member in profile.MeasureEnumerable("Roslyn.GetMembers", string.IsNullOrEmpty(name) ? t.GetMembers() : t.GetMembers(name)))
+                    if (Accessible(member))
+                        members.Add(member);
+            worldMembersByName[name] = members;
+            return members;
+        }
     }
     private bool Accessible(ISymbol member)
-        => profile.Measure("Accessible", () => !SegusumGeneratedSource.IsGenerated(member) && profile.Measure("Roslyn.IsSymbolAccessibleWithin", () => compilation.IsSymbolAccessibleWithin(member, world, world)));
+    {
+        lock (accessibilityGate)
+        {
+            if (accessibilityBySymbol.TryGetValue(member, out var cached)) return cached;
+            var result = profile.Measure("Accessible", () => !SegusumGeneratedSource.IsGenerated(member) && profile.Measure("Roslyn.IsSymbolAccessibleWithin", () => compilation.IsSymbolAccessibleWithin(member, world, world)));
+            accessibilityBySymbol[member] = result;
+            return result;
+        }
+    }
     private bool Accessible(ISymbol member, ITypeSymbol receiverType)
     {
         if (!Accessible(member)) return false;
