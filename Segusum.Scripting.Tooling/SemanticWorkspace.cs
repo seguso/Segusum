@@ -139,19 +139,24 @@ public sealed class DslSemanticWorkspace
             Console.Error.WriteLine($"semanticParse cache={(reused ? "reuse" : "parse")} path={source.Path} chars={source.Text.Length} lines={CountLines(source.Text)} declarations={parsed.Document.Declarations.Count} elapsed={fileTimer.Elapsed.TotalMilliseconds:0.0}ms");
         }
         diagnosticsParseTimer.Stop();
+        ParseCacheMilliseconds = diagnosticsParseTimer.Elapsed.TotalMilliseconds;
         Console.Error.WriteLine($"semanticParseTotal pass=diagnostics elapsed={diagnosticsParseTimer.Elapsed.TotalMilliseconds:0.0}ms files={this.sources.Count}");
         Console.Error.WriteLine($"semanticParseCache parsedFiles={parsedFiles} reusedFiles={reusedFiles} parsedChars={parsedChars} reusedChars={reusedChars} elapsed={diagnosticsParseTimer.Elapsed.TotalMilliseconds:0.0}ms");
         var declarationsTimer = Stopwatch.StartNew();
         var declarations = parsedSources.SelectMany(x => x.Document.Declarations).ToArray();
+        DeclarationCount = declarations.Length;
         declarationsTimer.Stop();
+        DeclarationsMilliseconds = declarationsTimer.Elapsed.TotalMilliseconds;
         Console.Error.WriteLine($"semanticParseTotal pass=declarations elapsed={declarationsTimer.Elapsed.TotalMilliseconds:0.0}ms files={parsedSources.Count} declarations={declarations.Length} reused=true");
         var binderConstructionTimer = Stopwatch.StartNew();
         binder = new DslBinder(compilation, world, diagnostics.Add, workspaceContext.SemanticIndexes);
         binderConstructionTimer.Stop();
+        BinderConstructionMilliseconds = binderConstructionTimer.Elapsed.TotalMilliseconds;
         Console.Error.WriteLine($"semanticWorkspace phase=binderConstruction elapsed={binderConstructionTimer.Elapsed.TotalMilliseconds:0.0}ms");
         var bindTimer = Stopwatch.StartNew();
         binder.Bind(declarations);
         bindTimer.Stop();
+        BinderMilliseconds = bindTimer.Elapsed.TotalMilliseconds;
         Console.Error.WriteLine($"semanticWorkspace phase=binderBind elapsed={bindTimer.Elapsed.TotalMilliseconds:0.0}ms profile={binder.Profile.Format()}");
         model = binder.Model;
         var referencesTimer = Stopwatch.StartNew();
@@ -160,6 +165,8 @@ public sealed class DslSemanticWorkspace
             .ToDictionary(x => x.Key, x => x.OrderBy(r => r.Span.Start).ToArray(), StringComparer.OrdinalIgnoreCase);
         referencesTimer.Stop();
         totalTimer.Stop();
+        ReferencesByPathMilliseconds = referencesTimer.Elapsed.TotalMilliseconds;
+        TotalMilliseconds = totalTimer.Elapsed.TotalMilliseconds;
         var memoryAfter = GC.GetTotalMemory(false);
         Console.Error.WriteLine($"semanticWorkspace phase=referencesByPath elapsed={referencesTimer.Elapsed.TotalMilliseconds:0.0}ms paths={referencesByPath.Count} references={model.SemanticReferenceList.Count}");
         Console.Error.WriteLine($"semanticWorkspace total={totalTimer.Elapsed.TotalMilliseconds:0.0}ms memoryDeltaMB={(memoryAfter - memoryBefore) / 1024.0 / 1024.0:0.0} diagnostics={diagnostics.Count} declarations={declarations.Length}");
@@ -196,6 +203,18 @@ public sealed class DslSemanticWorkspace
     private static string NormalizePath(string path) => Path.GetFullPath(path);
 
     public IReadOnlyList<DslDiagnostic> Diagnostics => diagnostics;
+    public DslBinderProfile BinderProfile => binder.Profile;
+    public int SemanticReferenceCount => model.SemanticReferenceList.Count;
+    public int DeclarationCount { get; private set; }
+    public int SourceCount => sources.Count;
+    public long SourceCharacters => sources.Sum(x => (long)x.Text.Length);
+    public int ReferencesByPathCount => referencesByPath.Count;
+    public double ParseCacheMilliseconds { get; private set; }
+    public double DeclarationsMilliseconds { get; private set; }
+    public double BinderConstructionMilliseconds { get; private set; }
+    public double BinderMilliseconds { get; private set; }
+    public double ReferencesByPathMilliseconds { get; private set; }
+    public double TotalMilliseconds { get; private set; }
     public IReadOnlyList<SemanticReference> FindReferences(string path, int line, int column)
         => FindReferencesAsync(path, line, column, CancellationToken.None).GetAwaiter().GetResult();
 

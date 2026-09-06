@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -20,11 +21,12 @@ public sealed class CSharpSemanticIndexCache
 
     public IReadOnlyDictionary<string, INamedTypeSymbol?> GetTypeIndex(INamedTypeSymbol world)
     {
+        var started = Stopwatch.StartNew();
         lock (gate)
         {
             if (typeIndexes.TryGetValue(world, out var cached))
             {
-                Console.Error.WriteLine($"csharpSemanticCache typeIndex=hit world={world.ToDisplayString()}");
+                Console.Error.WriteLine($"csharpSemanticCache typeIndex=hit world={world.ToDisplayString()} entries={cached.Count} elapsed={started.Elapsed.TotalMilliseconds:0.0}ms");
                 return cached;
             }
 
@@ -32,18 +34,19 @@ public sealed class CSharpSemanticIndexCache
             VisitNamespace(compilation.GlobalNamespace, compilation, world, index);
             typeIndexes[world] = index;
             TypeIndexBuildCount++;
-            Console.Error.WriteLine($"csharpSemanticCache typeIndex=miss world={world.ToDisplayString()} types={index.Count}");
+            Console.Error.WriteLine($"csharpSemanticCache typeIndex=miss world={world.ToDisplayString()} entries={index.Count} elapsed={started.Elapsed.TotalMilliseconds:0.0}ms");
             return index;
         }
     }
 
     public IReadOnlyCollection<ISymbol> GetRoomChangedTargets()
     {
+        var started = Stopwatch.StartNew();
         lock (gate)
         {
             if (roomChangedTargets != null)
             {
-                Console.Error.WriteLine($"csharpSemanticCache roomChangedIndex=hit targets={roomChangedTargets.Count}");
+                Console.Error.WriteLine($"csharpSemanticCache roomChangedIndex=hit targets={roomChangedTargets.Count} elapsed={started.Elapsed.TotalMilliseconds:0.0}ms");
                 return roomChangedTargets;
             }
 
@@ -66,7 +69,7 @@ public sealed class CSharpSemanticIndexCache
 
             roomChangedTargets = targets;
             RoomChangedIndexBuildCount++;
-            Console.Error.WriteLine($"csharpSemanticCache roomChangedIndex=miss trees={trees} invocations={invocations} targets={targets.Count}");
+            Console.Error.WriteLine($"csharpSemanticCache roomChangedIndex=miss trees={trees} invocations={invocations} targets={targets.Count} elapsed={started.Elapsed.TotalMilliseconds:0.0}ms");
             return targets;
         }
     }

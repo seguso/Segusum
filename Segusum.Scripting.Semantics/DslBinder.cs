@@ -26,6 +26,7 @@ public sealed class DslBinderProfile
     public void Add(string name, long ticks) => Add(counters, name, ticks);
     public void AddPhase(string name, long ticks) => Add(phases, name, ticks);
     public void Count(string name) => Add(name, 0);
+    public void Count(string name, long amount) => Add(counters, name, 0, amount);
     public T Measure<T>(string name, Func<T> action)
     {
         var started = Stopwatch.GetTimestamp();
@@ -37,6 +38,16 @@ public sealed class DslBinderProfile
         var started = Stopwatch.GetTimestamp();
         try { action(); }
         finally { Add(name, Stopwatch.GetTimestamp() - started); }
+    }
+    public (long Calls, double Milliseconds) Get(string name)
+    {
+        if (!counters.TryGetValue(name, out var value)) return (0, 0);
+        return (value.Calls, value.Ticks * 1000.0 / Stopwatch.Frequency);
+    }
+    public (long Calls, double Milliseconds) GetPhase(string name)
+    {
+        if (!phases.TryGetValue(name, out var value)) return (0, 0);
+        return (value.Calls, value.Ticks * 1000.0 / Stopwatch.Frequency);
     }
     public IEnumerable<T> MeasureEnumerable<T>(string name, IEnumerable<T> source)
     {
@@ -54,9 +65,11 @@ public sealed class DslBinderProfile
         return $"phases=[{FormatTable(phases)}] hotspots=[{FormatTable(counters)}]";
     }
     private void Add(Dictionary<string, (long Calls, long Ticks)> target, string name, long ticks)
+        => Add(target, name, ticks, 1);
+    private void Add(Dictionary<string, (long Calls, long Ticks)> target, string name, long ticks, long calls)
     {
         target.TryGetValue(name, out var value);
-        value.Calls++;
+        value.Calls += calls;
         value.Ticks += ticks;
         target[name] = value;
     }
@@ -603,7 +616,12 @@ public sealed class DslBinder
     {
         lock (worldMembersGate)
         {
-            if (worldMembersByName.TryGetValue(name, out var cached)) return cached;
+            if (worldMembersByName.TryGetValue(name, out var cached))
+            {
+                profile.Count("WorldMembersCacheHit");
+                return cached;
+            }
+            profile.Count("WorldMembersCacheMiss");
             var members = new List<ISymbol>();
             for (INamedTypeSymbol? t = world; t != null; t = t.BaseType)
                 foreach (var member in profile.MeasureEnumerable("Roslyn.GetMembers", string.IsNullOrEmpty(name) ? t.GetMembers() : t.GetMembers(name)))
@@ -665,7 +683,9 @@ public sealed class DslBinder
         typeIndexBuilt = true;
         if (semanticIndexes != null)
         {
-            foreach (var item in semanticIndexes.GetTypeIndex(world)) typesBySimpleName[item.Key] = item.Value;
+            var cachedIndex = semanticIndexes.GetTypeIndex(world);
+            profile.Count("EnsureTypeIndex cached copy entries", cachedIndex.Count);
+            foreach (var item in cachedIndex) typesBySimpleName[item.Key] = item.Value;
             profile.Add("EnsureTypeIndex cached", Stopwatch.GetTimestamp() - started);
             return;
         }
