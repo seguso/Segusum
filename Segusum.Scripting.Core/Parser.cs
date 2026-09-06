@@ -309,8 +309,9 @@ public static class DslParser
         }
         private bool IsNamedArgumentStart()
             => Current.Kind == DslTokenKind.Identifier
-                && position + 1 < tokens.Count
-                && tokens[position + 1].Kind == DslTokenKind.Colon;
+                && position + 2 < tokens.Count
+                && tokens[position + 1].Kind == DslTokenKind.Colon
+                && tokens[position + 2].Kind is not (DslTokenKind.NewLine or DslTokenKind.EndOfFile);
         private ExistsExpression ParseExists(SourceSpan span)
         {
             Take(); Need("["); SkipTerminators(); Need("from");

@@ -669,6 +669,34 @@ public NamedCutSceneId ncsMikeStalloneIlBenefattore = null!;
     }
 
     [Fact]
+    public void TerminalColonAfterCallIsNotParsedAsNamedArgument()
+    {
+        var result = Run("def main:\n if objectiveIsCurrent puTest:\n  var value = 1\n end\nend", "public Objective puTest = null!;");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL"));
+        Assert.Contains("if (objectiveIsCurrent(puTest))", Generated(result));
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
+    public void NamedArgumentAndLogicalContinuationRemainDistinctFromBlockColon()
+    {
+        var result = Run("def main:\n if objectiveIsCurrent puTest and flag:\n  changeRoom roomA callRoomChangedHandler:false\n end\nend", "public Objective puTest = null!; public bool flag = true; public Room roomA = null!;");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL"));
+        Assert.Contains("objectiveIsCurrent(puTest) && flag", Generated(result));
+        Assert.Contains("changeRoom(roomA,callRoomChangedHandler: false)", Generated(result));
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
+    public void MemberCallBeforeTerminalColonStillBindsItsArgument()
+    {
+        var result = Run("def main:\n if roomA.wasEverVisitedBy olivia:\n  var value = 1\n end\nend", "public Room roomA = null!; public Character olivia = null!;");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL"));
+        Assert.Contains("roomA.wasEverVisitedBy(olivia)", Generated(result));
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
     public void RandomExpressionUsesTheGeneralWorldCapability()
     {
         var result = Run("def main:\n var variante = random 3\nend");
