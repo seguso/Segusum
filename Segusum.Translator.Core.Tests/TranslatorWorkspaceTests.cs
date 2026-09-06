@@ -146,6 +146,36 @@ public sealed class TranslatorWorkspaceTests
     }
 
     [Fact]
+    public void SynchronizePersistsMetadataAndKeepsItStableOnSecondUnchangedSync()
+    {
+        using var project = NewProject("Gameplay/Scene.seg", "world game\ndef scene:\n    narRoom \"New source\" room\nend\n");
+        var path = Path.Combine(project.Path, "transl_en.xml");
+        File.WriteAllText(path, "<root><str orig=\"Old source\" transl=\"Old translation\" /></root>");
+        var operations = new TranslationCatalogOperations();
+
+        var first = operations.Synchronize(project.Path, path);
+        Assert.True(first.Result.Changed);
+        var saved = XDocument.Load(path);
+        var root = saved.Root!;
+        Assert.False(string.IsNullOrWhiteSpace((string?)root.Attribute("last-sync-id")));
+        Assert.False(string.IsNullOrWhiteSpace((string?)root.Attribute("last-sync-at")));
+        var newEntry = root.Elements("str").Single(x => (string?)x.Attribute("orig") == "New source");
+        Assert.Equal("new", (string?)newEntry.Attribute("sync-status"));
+        Assert.Equal((string?)root.Attribute("last-sync-id"), (string?)newEntry.Attribute("sync-id"));
+        Assert.Equal((string?)root.Attribute("last-sync-at"), (string?)newEntry.Attribute("sync-at"));
+        var obsoleteEntry = root.Elements("str").Single(x => (string?)x.Attribute("orig") == "Old source");
+        Assert.Equal("obsolete", (string?)obsoleteEntry.Attribute("sync-status"));
+
+        var beforeSecond = File.ReadAllBytes(path);
+        var second = operations.Synchronize(project.Path, path);
+        Assert.False(second.Result.Changed);
+        Assert.Equal(beforeSecond, File.ReadAllBytes(path));
+        var reloaded = XDocument.Load(path);
+        Assert.Equal((string?)root.Attribute("last-sync-id"), (string?)reloaded.Root!.Attribute("last-sync-id"));
+        Assert.Equal((string?)newEntry.Attribute("sync-id"), (string?)reloaded.Root.Elements("str").Single(x => (string?)x.Attribute("orig") == "New source").Attribute("sync-id"));
+    }
+
+    [Fact]
     public void WorkspaceExposesPersistedPreviousTranslationAfterLaterRevision()
     {
         using var project = NewProject("World.cs", "dial(character, \"Version 2\");\n");

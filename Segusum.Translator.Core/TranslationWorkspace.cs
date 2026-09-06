@@ -61,7 +61,8 @@ public sealed class TranslationWorkspace
         var entries = document.Root?.Elements("str").ToList() ?? new();
         if (sequenceIndex < 0 || sequenceIndex >= entries.Count) return;
         entries[sequenceIndex].SetAttributeValue("transl", translation);
-        document = new XDocument(document.Declaration, new XElement("root", entries));
+        document = new XDocument(document.Declaration, new XElement(document.Root?.Name ?? "root",
+            document.Root?.Attributes() ?? Enumerable.Empty<XAttribute>(), entries));
         Items = Items.Select((item, index) => index == sequenceIndex ? item with { TargetTranslation = translation, IsTranslated = translation != "+" } : item).ToArray();
         IsDirty = true;
     }
