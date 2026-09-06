@@ -145,6 +145,54 @@ public sealed class TranslationCatalogSynchronizerTests
         Assert.Null(entries[0].Attribute("obsolete"));
     }
 
+    [Fact]
+    public void TrailingWhitespaceFallbackReusesTranslationAndCanonicalizesOriginal()
+    {
+        var result = new TranslationCatalogSynchronizer().Synchronize(new[] { "testo" }, Catalog(("testo ", "translation")));
+        var entry = Assert.Single(result.Document.Root!.Elements("str"));
+        Assert.Equal("testo", entry.Attribute("orig")!.Value);
+        Assert.Equal("translation", entry.Attribute("transl")!.Value);
+        Assert.Equal(0, result.Statistics.NewlyUntranslated);
+        Assert.Equal(0, result.Statistics.NewlyObsolete);
+    }
+
+    [Fact]
+    public void LeadingWhitespaceFallbackReusesTranslationAndCanonicalizesOriginal()
+    {
+        var result = new TranslationCatalogSynchronizer().Synchronize(new[] { "testo" }, Catalog(("  testo", "translation")));
+        var entry = Assert.Single(result.Document.Root!.Elements("str"));
+        Assert.Equal("testo", entry.Attribute("orig")!.Value);
+        Assert.Equal("translation", entry.Attribute("transl")!.Value);
+        Assert.Equal(0, result.Statistics.NewlyUntranslated);
+        Assert.Equal(0, result.Statistics.NewlyObsolete);
+    }
+
+    [Fact]
+    public void InternalWhitespaceIsNotNormalized()
+    {
+        var result = new TranslationCatalogSynchronizer().Synchronize(new[] { "ciao mondo" }, Catalog(("ciao  mondo", "translation")));
+        Assert.Equal(new[] { "ciao mondo", "ciao  mondo" }, Originals(result.Document));
+        Assert.Equal("+", result.Document.Root!.Elements("str").First().Attribute("transl")!.Value);
+    }
+
+    [Fact]
+    public void AmbiguousTrimmedMatchesAreNotReusedArbitrarily()
+    {
+        var result = new TranslationCatalogSynchronizer().Synchronize(new[] { "testo" }, Catalog(("testo ", "first"), (" testo", "second")));
+        var entries = result.Document.Root!.Elements("str").ToArray();
+        Assert.Equal("+", entries[0].Attribute("transl")!.Value);
+        Assert.Contains(entries, x => x.Attribute("transl")!.Value == "first" && x.Attribute("obsolete")?.Value == "true");
+        Assert.Contains(entries, x => x.Attribute("transl")!.Value == "second" && x.Attribute("obsolete")?.Value == "true");
+    }
+
+    [Fact]
+    public void SynchronizationStatisticsCountOnlyNewTransitions()
+    {
+        var result = new TranslationCatalogSynchronizer().Synchronize(new[] { "Current", "New" }, Catalog(("Current", "translation"), ("Removed", "old translation")));
+        Assert.Equal(1, result.Statistics.NewlyUntranslated);
+        Assert.Equal(1, result.Statistics.NewlyObsolete);
+    }
+
     private static XDocument Catalog(params (string Original, string Translation)[] values) => Catalog(values.Select(x => (x.Original, x.Translation, false, (string?)null)).ToArray());
     private static XDocument Catalog(params (string Original, string Translation, bool Obsolete, string? Metadata)[] values) => new(new XElement("root", values.Select(x => new XElement("str", new XAttribute("orig", x.Original), new XAttribute("transl", x.Translation), x.Obsolete ? new XAttribute("obsolete", "true") : null, x.Metadata is null ? null : new XAttribute("metadata", x.Metadata)))));
     private static string[] Originals(XDocument document) => document.Root!.Elements("str").Select(x => x.Attribute("orig")!.Value).ToArray();

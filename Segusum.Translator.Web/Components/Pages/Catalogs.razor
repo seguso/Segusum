@@ -35,7 +35,16 @@
 @code {
     private string root = "", language = "", error = "";
     private void LoadRoot() { try { Translator.ConfigureRoot(root); error = ""; } catch (Exception ex) { error = ex.Message; } }
-    private void Synchronize(string path) { try { Translator.Synchronize(path); error = "Catalogo sincronizzato."; } catch (Exception ex) { error = ex.Message; } }
+    private void Synchronize(string path)
+    {
+        try
+        {
+            var result = Translator.Synchronize(path);
+            var statistics = result.Result.Statistics;
+            error = $"Catalogo sincronizzato. Nuove da tradurre: {statistics.NewlyUntranslated}. Nuove obsolete: {statistics.NewlyObsolete}.";
+        }
+        catch (Exception ex) { error = ex.Message; }
+    }
     private void Create() { try { Translator.Create(language); language = ""; error = "Catalogo creato."; } catch (Exception ex) { error = ex.Message; } }
     private void Open(string path) { try { Translator.Open(path); Navigation.NavigateTo("/"); } catch (Exception ex) { error = ex.Message; } }
 }

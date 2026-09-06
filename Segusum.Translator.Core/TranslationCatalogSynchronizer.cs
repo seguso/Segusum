@@ -36,6 +36,8 @@ public sealed class SyncStatistics
 {
     public int Unchanged { get; internal set; }
     public int New { get; internal set; }
+    public int NewlyUntranslated { get; internal set; }
+    public int NewlyObsolete { get; internal set; }
     public int ModifiedOrReplaced { get; internal set; }
     public int PreservedTranslatedObsolete { get; internal set; }
     public int RemovedUntranslatedObsolete { get; internal set; }
@@ -119,6 +121,29 @@ public sealed class TranslationCatalogSynchronizer
                 retainedObsolete.Add(value); stats.Reactivated++;
                 continue;
             }
+            var trimmedMatches = all.Where(x => string.Equals(x.Original.Trim(), value.Trim(), StringComparison.Ordinal))
+                .Where(x => x.IsObsolete
+                    ? !retainedObsolete.Contains(x.Original)
+                    : IsUnusedActive(x, active, usedActive))
+                .ToList();
+            if (trimmedMatches.Count == 1)
+            {
+                var matched = trimmedMatches[0];
+                var canonical = matched with { Original = value };
+                if (matched.IsObsolete)
+                {
+                    retainedObsolete.Add(matched.Original);
+                    stats.Reactivated++;
+                }
+                else
+                {
+                    usedActive.Add(active.FindIndex(activeEntry => ReferenceEquals(activeEntry, matched)));
+                    stats.Unchanged++;
+                }
+                output.Add(canonical.With(obsolete: false));
+                AppendPreviousTranslated(canonical, all, output, retainedObsolete);
+                continue;
+            }
             if (matchesByNew.TryGetValue(value, out var match))
             {
                 var previous = PreviousTranslated(match.Entry, all);
@@ -140,7 +165,7 @@ public sealed class TranslationCatalogSynchronizer
                 continue;
             }
             output.Add(new TranslationEntry(value, "+", new Dictionary<string, string>(StringComparer.Ordinal)));
-            stats.New++;
+            stats.New++; stats.NewlyUntranslated++;
         }
 
         foreach (var (entry, index) in active.Select((entry, index) => (entry, index)))
@@ -200,9 +225,17 @@ public sealed class TranslationCatalogSynchronizer
         if (entry.IsTranslated)
         {
             output.Add(entry.With(obsolete: true)); retained.Add(entry.Original);
-            stats.PreservedTranslatedObsolete++;
+            stats.PreservedTranslatedObsolete++; stats.NewlyObsolete++;
         }
         else stats.RemovedUntranslatedObsolete++;
+    }
+
+    private static bool IsUnusedActive(TranslationEntry entry, IReadOnlyList<TranslationEntry> active, HashSet<int> usedActive)
+    {
+        for (var index = 0; index < active.Count; index++)
+            if (ReferenceEquals(active[index], entry))
+                return !usedActive.Contains(index);
+        return false;
     }
 
     private List<BlockMatch> MatchBlock(IReadOnlyList<TranslationEntry> oldBlock, IReadOnlyList<string> newBlock)
