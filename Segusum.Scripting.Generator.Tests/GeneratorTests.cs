@@ -49,6 +49,36 @@ public sealed class GeneratorTests
     }
 
     [Fact]
+    public void PartialWorldMethodsFromAnotherSourceFileResolveAsOrdinaryDslCalls()
+    {
+        const string worldSource = """
+            [SegusumWorld("game")] public abstract partial class Pinco : WorldBase
+            {
+                protected Pinco() : base("en") { }
+            }
+            public partial class Pinco
+            {
+                private Character characterHelper() => null!;
+                private bool boolHelper(Character value) => true;
+                private Cycle cycleHelper(int value) => new();
+            }
+            """;
+        var result = RunWithWorldFiles(worldSource, ("partial.seg", """
+            world game
+            def test:
+                var c = characterHelper
+                var ok = boolHelper c
+                var cyc = cycleHelper 3
+            end
+            """));
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL", StringComparison.Ordinal));
+        Assert.Contains("characterHelper()", Generated(result), StringComparison.Ordinal);
+        Assert.Contains("boolHelper(c)", Generated(result), StringComparison.Ordinal);
+        Assert.Contains("cycleHelper(3)", Generated(result), StringComparison.Ordinal);
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
     public void ApplicationParsingIsLeftAssociativeAndParenthesizedCallsNest()
     {
         var result = Run("def direct ret bool:\n    ret foo a b\nend\ndef nested ret bool:\n    ret foo (bar a) b\nend\ndef deeplyNested ret bool:\n    ret foo (bar (baz a)) b\nend\ndef infix ret bool:\n    ret foo a b and c\nend\ndef groupedInfix ret bool:\n    ret foo a (b and c)\nend", "public bool a; public bool b; public bool c; public bool foo(bool x, bool y) => x && y; public bool bar(bool x) => x; public bool baz(bool x) => x;");

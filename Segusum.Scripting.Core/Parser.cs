@@ -492,7 +492,11 @@ public static class DslParser
             if (identifier is null) return expression;
             if (Is("not-seen-recently")) { Take(); return new CallExpression("not-seen-recently", new[] { new DslArgument(null, identifier, span), new DslArgument(null, Prefix(), Current.Span) }, span); }
             if (Is("was-seen-at-least-once")) { Take(); return new CallExpression("was-seen-at-least-once", new[] { new DslArgument(null, identifier, span) }, span); }
-            if (!parsingCallArgument && CanStartArgument() && !IsNamedArgumentStart())
+            // A named argument is still an argument of this call.  The
+            // argument parser owns the `name: expression` distinction; do
+            // not suppress the whole call merely because its first argument
+            // is named (for example `helper flag: true`).
+            if (!parsingCallArgument && CanStartArgument())
             {
                 profile.Count("calls");
                 var args = new List<DslArgument>(); while (CanStartArgument()) args.Add(ParseArgument()); return new CallExpression(identifier.Name, args, span) { NameSpan = identifier.Span };
