@@ -98,6 +98,8 @@ public sealed class CSharpToSegTranspilerTests
         {
             Assert.True(index > 0 && lines[index - 1].Length == 0, result.Text);
             Assert.True(index < 2 || lines[index - 2].Length != 0, result.Text);
+            Assert.True(index + 1 < lines.Length && lines[index + 1].Length == 0, result.Text);
+            Assert.True(index + 2 >= lines.Length || lines[index + 2].Length != 0, result.Text);
         }
     }
 
@@ -108,6 +110,18 @@ public sealed class CSharpToSegTranspilerTests
         var result = CSharpToSegTranspiler.Transpile("x.cs", source, true);
         foreach (var line in result.Text.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n').Where(x => x.Trim().Length != 0))
             Assert.Equal(0, line.TakeWhile(char.IsWhiteSpace).Count() % 4);
+    }
+
+    [Fact]
+    public void ConditionHeadersHaveExactlyOneBlankLineBeforeTheirBodies()
+    {
+        const string source = "class W { void M() { addRoomChangedHandler(roomA, e => { var cyc = startCycle(bb5, x => first && second && third, x => { if (first && second && third) { foo(); } }); }); } }";
+        var result = CSharpToSegTranspiler.Transpile("x.cs", source);
+        var normalized = result.Text.Replace("\r\n", "\n", StringComparison.Ordinal);
+
+        Assert.Contains("when first\n            and second\n            and third\n\n", normalized, StringComparison.Ordinal);
+        Assert.Contains("if first\n            and second\n            and third:\n\n", normalized, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n\n\n", normalized, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -163,6 +177,22 @@ public sealed class CSharpToSegTranspilerTests
             var result = CSharpToSegTranspiler.Transpile(sourcePath, "class W { void M() { addHandlerUseHere(a, handler: i => { using (namedCutScene(ncs, roomA)) { dial(camilla, \"A\"); } }); } }");
             Assert.Contains("named-cutscene ncs \"A title\" roomA", result.Text, StringComparison.Ordinal);
             Assert.DoesNotContain(result.Diagnostics, x => x.Reason.Contains("title cannot be resolved", StringComparison.Ordinal));
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    [Fact]
+    public void NamedCutsceneTitleUsesTitleUntranslatedInsteadOfSerId()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "segusum-c2seg-title-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            File.WriteAllText(Path.Combine(directory, "worldObjects.cs"), "class W { NamedCutSceneId ncs = new NamedCutSceneId { serId = \"ncsId\", titleUntranslated = \"Correct title\".translatable() }; }");
+            var sourcePath = Path.Combine(directory, "handlers.cs");
+            var result = CSharpToSegTranspiler.Transpile(sourcePath, "class W { void M() { addHandlerUseHere(a, handler: i => { using (namedCutScene(ncs, roomA)) { dial(camilla, \"A\"); } }); } }", true);
+            Assert.Contains("named-cutscene ncs \"Correct title\" roomA", result.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain("named-cutscene ncs \"ncsId\"", result.Text, StringComparison.Ordinal);
         }
         finally { Directory.Delete(directory, true); }
     }
