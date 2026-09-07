@@ -245,7 +245,7 @@ public sealed class DslBinder
         activeDslSymbols.Clear(); foreach (var item in previous) activeDslSymbols[item.Key] = item.Value;
     }
     private void AddGlobal(string name, ITypeSymbol? type, SourceSpan span, BoundSymbolKind kind)
-    { if (kind == BoundSymbolKind.CycleElementId) { if (!Microsoft.CodeAnalysis.CSharp.SyntaxFacts.IsValidIdentifier(name) || name.Contains('-')) { Report("SEGDSL318", "CycleElementId must be a stable C# identifier and cannot contain '-'.", span); return; } if (cycleElementGlobals.ContainsKey(name)) { Report("SEGDSL314", $"Duplicate CycleElementId '{name}'.", span); return; } if (ResolveCSharpCandidates(name).Count != 0) Report("SEGDSL317", $"CycleElementId '{name}' collides with an existing World member.", span); if (type != null) cycleElementGlobals[name] = type; AddDslIdentity(name, "cycle-element", span); model.References[name] = name; return; } var key = NormalizeKey(name); if (globals.ContainsKey(key)) Report(kind == BoundSymbolKind.NamedCutsceneId ? "SEGDSL324" : "SEGDSL304", $"Duplicate or normalized-colliding global '{name}'.", span); else if (type != null) { globals[key] = type; globalKinds[key] = kind; model.References[name] = Name(name); } }
+    { if (kind == BoundSymbolKind.CycleElementId) { if (!Microsoft.CodeAnalysis.CSharp.SyntaxFacts.IsValidIdentifier(name) || name.Contains('-')) { Report("SEGDSL318", "CycleElementId must be a stable C# identifier and cannot contain '-'.", span); return; } if (cycleElementGlobals.ContainsKey(name)) { Report("SEGDSL314", $"Duplicate CycleElementId '{name}'.", span); return; } var existing = ResolveCSharpCandidates(name).FirstOrDefault(); if (existing != null) { var existingType = existing switch { IFieldSymbol field => field.Type, IPropertySymbol property => property.Type, _ => null }; if (existingType != null) cycleElementGlobals[name] = existingType; } else if (type != null) cycleElementGlobals[name] = type; AddDslIdentity(name, "cycle-element", span); model.References[name] = name; return; } var key = NormalizeKey(name); if (globals.ContainsKey(key)) Report(kind == BoundSymbolKind.NamedCutsceneId ? "SEGDSL324" : "SEGDSL304", $"Duplicate or normalized-colliding global '{name}'.", span); else if (type != null) { globals[key] = type; globalKinds[key] = kind; model.References[name] = Name(name); } }
     private void BindFunction(FunctionDeclaration f)
     { var scope = new Dictionary<string, ITypeSymbol>(StringComparer.Ordinal); currentParameters.Clear(); activeDslSymbols.Clear(); foreach (var p in f.Parameters) { scope[NormalizeKey(p.Name)] = TypeOf(p.Type)!; currentParameters.Add(NormalizeKey(p.Name)); AddLocalIdentity(p.Name, "parameter", f.Span); } BindStatements(f.Body, scope, f.ReturnType == null ? null : TypeOf(f.ReturnType)); currentParameters.Clear(); activeDslSymbols.Clear(); }
     private void BindHandler(HandlerDeclaration h)
@@ -294,7 +294,13 @@ public sealed class DslBinder
                     else { var targetType = BindName(a.Name, a.NameSpan, scope); RequireExpression(a.Value, BindExpression(a.Value, scope), targetType, "assignment type mismatch."); }
                     break;
                 case IncrementStatement i: Require(BindName(i.Name, i.NameSpan, scope), compilation.GetSpecialType(SpecialType.System_Int32), i.Span, "++ requires int."); break;
-                case ReturnStatement r: Require(BindExpression(r.Expression, scope), returnType, r.Span, "return type mismatch."); break;
+                case ReturnStatement r:
+                    if (r.Expression == null)
+                    {
+                        if (returnType != null) Report("SEGDSL313", "A bare ret is only valid in a void function.", r.Span);
+                    }
+                    else Require(BindExpression(r.Expression, scope), returnType, r.Span, "return type mismatch.");
+                    break;
                 case CallStatement c: BindExpression(c.Expression, scope); break;
                 case NextCycleStatement n: Require(BindExpression(n.Cycle, scope), cycle, n.Span, "next requires a Cycle."); break;
                 case AddCycleElementStatement a: BindCycle(a.Cycle, a.Repeat, a.Condition, a.Body, a.Span, scope); break;
@@ -364,8 +370,15 @@ public sealed class DslBinder
     private void AddNamedCutsceneGlobal(NamedCutsceneStatement statement)
     {
         var key = NormalizeKey(statement.Id);
+        var existing = ResolveCSharpMembers(statement.Id).FirstOrDefault();
+        if (existing != null)
+        {
+            var existingType = existing switch { IFieldSymbol field => field.Type, IPropertySymbol property => property.Type, _ => null };
+            if (existingType != null && namedCutsceneId != null) namedCutsceneGlobals[key] = existingType;
+            model.References[statement.Id] = Name(statement.Id);
+            return;
+        }
         if (namedCutsceneGlobals.ContainsKey(key) || globals.ContainsKey(key)) { Report("SEGDSL324", $"Duplicate named-cutscene id '{statement.Id}'.", statement.IdSpan); return; }
-        if (ResolveCSharpMembers(statement.Id).Count != 0) { Report("SEGDSL325", $"Named-cutscene id '{statement.Id}' collides with an existing World member; remove the C# member before migrating it.", statement.IdSpan); return; }
         if (namedCutsceneId != null) namedCutsceneGlobals[key] = namedCutsceneId;
         model.References[statement.Id] = Name(statement.Id);
     }
@@ -475,7 +488,7 @@ public sealed class DslBinder
     {
         if (call.Name == "not-seen-recently") { if (call.Arguments.Count == 2) { var receiver = call.Arguments[0].Expression; Require(BindExpression(receiver, scope, contextualIt), dateTimeNullable, call.Arguments[0].Span, "not-seen-recently receiver must be DateTime?."); Require(BindExpression(call.Arguments[1].Expression, scope), compilation.GetSpecialType(SpecialType.System_Int32), call.Arguments[1].Span, "cooldown must be numeric."); model.DomainOperations[call] = new BoundDomainOperation(BoundDomainOperationKind.NotSeenRecently, receiver, call.Arguments[1].Expression, null); } return compilation.GetSpecialType(SpecialType.System_Boolean); }
         if (call.Name == "was-seen-at-least-once") { if (call.Arguments.Count == 1) { var receiver = call.Arguments[0].Expression; var t = BindExpression(receiver, scope); Require(t, cycleElementId, call.Arguments[0].Span, "was-seen-at-least-once requires CycleElemId."); model.DomainOperations[call] = new BoundDomainOperation(BoundDomainOperationKind.WasSeenAtLeastOnce, receiver, null, null); } return compilation.GetSpecialType(SpecialType.System_Boolean); }
-        if (functions.TryGetValue(NormalizeKey(call.Name), out var function)) { var result = BindArgumentList(call, function.Parameters.Select(p => new ParameterInfo(p.Name, TypeOf(p.Type)!, false)).ToArray(), scope, contextualIt); if (result.Call == null) { ReportFailure(call, new[] { result }); return null; } RecordDslReference(call.Name, call.NameSpan, BoundSymbolKind.Function, function.Name, "invocation"); model.Calls[call] = new BoundCall(null, Name(function.Name), result.Call.Arguments, TypeOf(function.ReturnType ?? "void")); return TypeOf(function.ReturnType ?? "void"); }
+        if (functions.TryGetValue(NormalizeKey(call.Name), out var function)) { var result = BindArgumentList(call, function.Parameters.Select(p => new ParameterInfo(p.Name, TypeOf(p.Type), false)).ToArray(), scope, contextualIt); if (result.Call == null) { ReportFailure(call, new[] { result }); return null; } RecordDslReference(call.Name, call.NameSpan, BoundSymbolKind.Function, function.Name, "invocation"); model.Calls[call] = new BoundCall(null, Name(function.Name), result.Call.Arguments, TypeOf(function.ReturnType ?? "void")); return TypeOf(function.ReturnType ?? "void"); }
         var receiverType = call.Receiver == null ? null : BindExpression(call.Receiver, scope, contextualIt);
         var exactMethods = (receiverType == null ? AllMembers(call.Name) : MembersOf(receiverType, call.Name).Where(x => Accessible(x, receiverType))).OfType<IMethodSymbol>().ToArray();
         var fallbackMembers = receiverType == null ? DslNames.Candidates(call.Name).Skip(1).SelectMany(AllMembers) : MembersOf(receiverType).Where(x => Accessible(x, receiverType) && NormalizeKey(x.Name) == NormalizeKey(call.Name));
@@ -491,7 +504,7 @@ public sealed class DslBinder
         RecordReference(call.Name, call.NameSpan, BoundSymbolKind.CSharpMethod, boundCall.Method, null, "invocation");
         model.Calls[call] = boundCall; return boundCall.ReturnType;
     }
-    private sealed record ParameterInfo(string Name, ITypeSymbol Type, bool Optional, IParameterSymbol? Symbol = null);
+    private sealed record ParameterInfo(string Name, ITypeSymbol? Type, bool Optional, IParameterSymbol? Symbol = null);
     private CandidateResult TryBind(CallExpression call, IMethodSymbol method, Dictionary<string, ITypeSymbol> scope, ITypeSymbol? contextualIt)
         => profile.Measure("TryBind", () => TryBindCore(call, method, scope, contextualIt));
     private CandidateResult TryBindCore(CallExpression call, IMethodSymbol method, Dictionary<string, ITypeSymbol> scope, ITypeSymbol? contextualIt)
@@ -523,7 +536,7 @@ public sealed class DslBinder
         return new CandidateResult(new BoundCall(null, "", result, null), CallFailureKind.None, call.Span, "", score);
     }
     private CandidateResult Failure(CallFailureKind kind, SourceSpan span, string detail) => new(null, kind, span, detail, int.MaxValue);
-    private Conversion Classify(ITypeSymbol? actual, ITypeSymbol expected) => actual == null ? default : Microsoft.CodeAnalysis.CSharp.CSharpExtensions.ClassifyConversion(compilation, actual, expected);
+    private Conversion Classify(ITypeSymbol? actual, ITypeSymbol? expected) => actual == null || expected == null ? default : Microsoft.CodeAnalysis.CSharp.CSharpExtensions.ClassifyConversion(compilation, actual, expected);
     private static int ConversionScore(Conversion conversion) => conversion.IsIdentity ? 0 : conversion.IsImplicit ? 1 : 1000;
     private void ReportFailure(CallExpression call, IReadOnlyList<CandidateResult> results)
     { var failure = results.Where(x => x.Call == null).OrderBy(x => FailurePriority(x.FailureKind)).FirstOrDefault(); if (failure == null) { Report("SEGDSL306", $"No overload of '{call.Name}' accepts these arguments.", call.Span); return; } Report(failure.FailureKind switch { CallFailureKind.UnknownNamedArgument => "SEGDSL307", CallFailureKind.DuplicateNamedArgument => "SEGDSL308", CallFailureKind.PositionalAfterNamed => "SEGDSL310", CallFailureKind.IncompatibleArgument => "SEGDSL309", CallFailureKind.MissingRequiredArgument => "SEGDSL306", _ => "SEGDSL306" }, failure.FailureDetail, failure.FailureSpan); }

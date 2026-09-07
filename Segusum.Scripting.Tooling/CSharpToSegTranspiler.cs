@@ -29,10 +29,13 @@ public static class CSharpToSegTranspiler
     private static string Indent(int level) => new(' ', level * 4);
 
     public static MigrationOutput Transpile(string path, string text, bool emitPartial = false, string? methodName = null)
+        => Transpile(path, text, emitPartial, methodName, "game");
+
+    public static MigrationOutput Transpile(string path, string text, bool emitPartial, string? methodName, string worldId)
     {
         var tree = CSharpSyntaxTree.ParseText(text, path: path);
         var diagnostics = new List<MigrationDiagnostic>();
-        var sb = new StringBuilder("world migrated\n");
+        var sb = new StringBuilder().Append("world ").Append(worldId).Append('\n');
         var root = (CompilationUnitSyntax)tree.GetRoot();
         var reachableHelpers = ReachableHelpers(root);
         foreach (var trivia in root.DescendantTrivia().Where(x => x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.SingleLineCommentTrivia) || x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.MultiLineCommentTrivia)))
@@ -74,8 +77,7 @@ public static class CSharpToSegTranspiler
             {
                 EmitTriviaComments(AdjacentLeadingComments(method), sb, 0);
                 EmitTriviaComments(method.GetLeadingTrivia(), sb, 0);
-                sb.Append("def ").Append(method.Identifier.ValueText);
-                if (method.ParameterList.Parameters.Count != 0) sb.Append(' ').Append(string.Join(" ", method.ParameterList.Parameters.Select(x => x.Identifier.ValueText)));
+                AppendFunctionHeader(sb, method, diagnostics);
                 sb.AppendLine(":");
                 EmitTriviaComments(method.Body.OpenBraceToken.TrailingTrivia, sb, 1);
                 EmitStatements(method.Body.Statements, sb, diagnostics, 1, emitPartial, true);
@@ -165,7 +167,7 @@ public static class CSharpToSegTranspiler
     private static IsolatedUnit IsolateHandler(string path, InvocationExpressionSyntax invocation)
     {
         var diagnostics = new List<MigrationDiagnostic>();
-        var sb = new StringBuilder("world migrated\n");
+        var sb = new StringBuilder("world game\n");
         EmitHandler(invocation, sb, diagnostics, false);
         var text = EnsureComments(invocation, sb.ToString());
         VerifyIsolated(path, invocation, text, diagnostics, true);
@@ -175,7 +177,7 @@ public static class CSharpToSegTranspiler
     private static IsolatedUnit IsolateMethod(string path, MethodDeclarationSyntax method)
     {
         var diagnostics = new List<MigrationDiagnostic>();
-        var sb = new StringBuilder("world migrated\n");
+        var sb = new StringBuilder("world game\n");
         if (method.Identifier.ValueText == "afterActionExecutedCSharp")
         {
             EmitTriviaComments(method.GetLeadingTrivia(), sb, 0);
@@ -201,8 +203,7 @@ public static class CSharpToSegTranspiler
         else
         {
             EmitTriviaComments(AdjacentLeadingComments(method), sb, 0);
-            sb.Append("def ").Append(method.Identifier.ValueText);
-            if (method.ParameterList.Parameters.Count != 0) sb.Append(' ').Append(string.Join(" ", method.ParameterList.Parameters.Select(x => x.Identifier.ValueText)));
+            AppendFunctionHeader(sb, method, diagnostics);
             sb.AppendLine(":");
             EmitTriviaComments(method.GetLeadingTrivia(), sb, 0);
             EmitTriviaComments(method.Body!.OpenBraceToken.TrailingTrivia, sb, 1);
@@ -214,6 +215,43 @@ public static class CSharpToSegTranspiler
         var text = EnsureComments(method, sb.ToString());
         VerifyIsolated(path, method, text, diagnostics, false);
         return new(text, diagnostics);
+    }
+
+    private static void AppendFunctionHeader(StringBuilder sb, MethodDeclarationSyntax method, List<MigrationDiagnostic> diagnostics)
+    {
+        sb.Append("def ").Append(method.Identifier.ValueText);
+        foreach (var parameter in method.ParameterList.Parameters)
+        {
+            sb.Append(' ').Append(parameter.Identifier.ValueText).Append(": ");
+            sb.Append(MapType(parameter.Type, method, diagnostics, "parameter"));
+        }
+        if (method.ReturnType is not PredefinedTypeSyntax { Keyword.RawKind: (int)SyntaxKind.VoidKeyword })
+            sb.Append(" ret ").Append(MapType(method.ReturnType, method, diagnostics, "return"));
+    }
+
+    private static string MapType(TypeSyntax? type, MethodDeclarationSyntax method, List<MigrationDiagnostic> diagnostics, string role)
+    {
+        if (type == null)
+        {
+            diagnostics.Add(new(MigrationUnitStatus.Unsupported, method.SyntaxTree.FilePath ?? "<source>", StartLine(method), $"helper {role} type is missing"));
+            return "<missing-type>";
+        }
+
+        var mapped = type switch
+        {
+            PredefinedTypeSyntax predefined when predefined.Keyword.IsKind(SyntaxKind.BoolKeyword) => "bool",
+            PredefinedTypeSyntax predefined when predefined.Keyword.IsKind(SyntaxKind.IntKeyword) => "int",
+            PredefinedTypeSyntax predefined when predefined.Keyword.IsKind(SyntaxKind.StringKeyword) => "string",
+            IdentifierNameSyntax identifier => identifier.Identifier.ValueText,
+            QualifiedNameSyntax qualified => qualified.ToString(),
+            _ => null
+        };
+
+        if (mapped != null) return mapped;
+
+        diagnostics.Add(new(MigrationUnitStatus.Unsupported, method.SyntaxTree.FilePath ?? "<source>", StartLine(method),
+            $"helper {role} type '{type}' is not representable by the SEG type mapping"));
+        return type.ToString();
     }
 
     private static void VerifyIsolated(string path, SyntaxNode source, string generated, List<MigrationDiagnostic> diagnostics, bool handler)
@@ -478,7 +516,11 @@ public static class CSharpToSegTranspiler
                     sb.Append(indent).AppendLine("ret cyc");
                     break;
                 case EmptyStatementSyntax: break;
-                case ReturnStatementSyntax x: sb.Append(indent).Append("ret ").AppendLine(Expression(x.Expression)); break;
+                case ReturnStatementSyntax x:
+                    sb.Append(indent).Append("ret");
+                    if (x.Expression != null) sb.Append(' ').Append(Expression(x.Expression));
+                    sb.AppendLine();
+                    break;
                 default: Unsupported(statement, diagnostics, "unsupported statement " + statement.Kind(), partial, sb, level); break;
             }
             foreach (var t in includeComments ? statement.GetTrailingTrivia().Where(x => x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.SingleLineCommentTrivia) || x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.MultiLineCommentTrivia)) : Enumerable.Empty<SyntaxTrivia>())

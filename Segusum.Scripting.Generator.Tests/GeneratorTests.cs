@@ -16,6 +16,16 @@ namespace Segusum.Scripting.Generator.Tests;
 public sealed class GeneratorTests
 {
     [Fact]
+    public void BareRetParsesAndGeneratesVoidReturn()
+    {
+        var parsed = DslParser.Parse(new DslSource("bare-ret.seg", "world game\ndef helper:\n    ret\nend\n"));
+        Assert.DoesNotContain(parsed.Diagnostics, x => x.Id.StartsWith("SEGDSL", StringComparison.Ordinal));
+        var result = Run("def helper:\n    ret\nend", "");
+        Assert.Contains("return;", Generated(result), StringComparison.Ordinal);
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
     public void SemanticWorkspaceRenamesCSharpSymbolAndBoundDslReferencesOnly()
     {
         const string worldText = "using Seg; namespace Demo { public partial class Pinco : WorldBase { public Pinco() : base(\"en\") { } public Character olivia = null!; public Character camilla = null!; } }";

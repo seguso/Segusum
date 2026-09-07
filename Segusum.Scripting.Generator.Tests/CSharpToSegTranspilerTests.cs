@@ -223,10 +223,44 @@ public sealed class CSharpToSegTranspilerTests
         const string source = "class W { void M() { addHandlerUseHere(a, handler: i => { Helper(1); }); } // design note\n private bool Helper(int x) { // TODO\n return x > 0; // trailing\n } }";
         var result = CSharpToSegTranspiler.Transpile("x.cs", source);
         Assert.Contains(result.Units, x => x.Id == "Helper");
-        Assert.Contains("def Helper x:", result.Text, StringComparison.Ordinal);
+        Assert.Contains("def Helper x: int:", result.Text, StringComparison.Ordinal);
         Assert.True(result.Text.Contains("design note", StringComparison.Ordinal), result.Text);
         Assert.Contains("TODO", result.Text, StringComparison.Ordinal);
         Assert.Contains("trailing", result.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HelperParameterTypesAreMappedFromRoslynSyntax()
+    {
+        const string source = "class W { void M() { addHandlerUseHere(a, handler: i => { Helper(true, 1, \"x\", DateTime.Now, cyc, character, room); }); } private void Helper(bool flag, int count, string text, DateTime when, Cycle cyc, Character character, Room room) { foo(); } }";
+        var result = CSharpToSegTranspiler.Transpile("x.cs", source, true, null, "game");
+        Assert.Contains("def Helper flag: bool count: int text: string when: DateTime cyc: Cycle character: Character room: Room:", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(result.Diagnostics, x => x.Reason.Contains("parameter type", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void HelperReturnTypeIsPreservedInSegSignature()
+    {
+        const string source = "class W { void M() { addRoomChangedHandler(roomA, handler: e => { var cyc = MakeCycle(true); }); } private Cycle MakeCycle(bool flag) { return startCycle(bb5, Importance.Important, Repeat.OnlyOnce, x => true, x => { }); } }";
+        var result = CSharpToSegTranspiler.Transpile("x.cs", source, true, null, "game");
+        Assert.Contains("def MakeCycle flag: bool ret Cycle:", result.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UnsupportedHelperParameterTypeIsReportedWithoutDroppingTheType()
+    {
+        const string source = "class W { void M() { addHandlerUseHere(a, handler: i => { Helper(default); }); } private void Helper(List<int> value) { foo(); } }";
+        var result = CSharpToSegTranspiler.Transpile("x.cs", source, true, null, "game");
+        Assert.Contains("def Helper value: List<int>:", result.Text, StringComparison.Ordinal);
+        Assert.Contains(result.Diagnostics, x => x.Reason.Contains("parameter type", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void WorldIdIsExplicitAndNeverUsesMigratedPlaceholder()
+    {
+        var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { void M() { addRoomChangedHandler(roomA, e => { foo(); }); } }", true, null, "game");
+        Assert.StartsWith("world game\n", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("world migrated", result.Text, StringComparison.Ordinal);
     }
 
     [Fact]

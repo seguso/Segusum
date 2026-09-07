@@ -21,6 +21,15 @@ public sealed class SegusumGenerator : IIncrementalGenerator
     }
     private static void Generate(SourceProductionContext sp, ImmutableArray<DslSource> sources, Compilation compilation)
     {
+        try { GenerateCore(sp, sources, compilation); }
+        catch (Exception ex)
+        {
+            var details = ex.ToString().Replace("\r\n", " | ").Replace("\n", " | ").Replace("\r", " | ");
+            sp.ReportDiagnostic(Diagnostic.Create(Error, Location.None, "Segusum generator failure: " + details));
+        }
+    }
+    private static void GenerateCore(SourceProductionContext sp, ImmutableArray<DslSource> sources, Compilation compilation)
+    {
         var parsed = sources.Select(x => (Source: x, Result: DslParser.Parse(x))).ToArray();
         foreach (var item in parsed) foreach (var diagnostic in item.Result.Diagnostics) sp.ReportDiagnostic(Diagnostic.Create(Error, ToLocation(diagnostic.Span), diagnostic.Message));
         var worldAttribute = compilation.GetTypeByMetadataName("Seg.SegusumWorldAttribute");
@@ -63,9 +72,9 @@ public sealed class SegusumGenerator : IIncrementalGenerator
         sb.Append("partial class ").Append(world.Name).AppendLine("\n{");
         foreach (var state in declarations.OfType<StateDeclaration>()) { EmitLine(sb, state.Span); sb.Append(" private ").Append(Type(state.Type)).Append(' ').Append(Name(state.Name)).Append(" = ").Append(Emit(state.Initializer, binder.Model)).AppendLine(";"); EmitDefaultLine(sb); }
         foreach (var cycle in declarations.OfType<CycleDeclaration>()) { EmitLine(sb, cycle.Span); sb.Append(" private readonly Cycle ").Append(Name(cycle.Variable)).AppendLine(" = new Cycle();"); EmitDefaultLine(sb); }
-        foreach (var element in declarations.SelectMany(AllCycleElements).GroupBy(x => Name(x.Id), StringComparer.Ordinal).Select(x => x.First()))
+        foreach (var element in declarations.SelectMany(AllCycleElements).GroupBy(x => Name(x.Id), StringComparer.Ordinal).Select(x => x.First()).Where(x => world.GetMembers(Name(x.Id)).Length == 0))
         { EmitLine(sb, element.Span); sb.Append(" public CycleElemId ").Append(Name(element.Id)).AppendLine(" { get; set; } = new();"); EmitDefaultLine(sb); }
-        foreach (var id in declarations.SelectMany(AllNamedCutscenes).GroupBy(x => Name(x.Id), StringComparer.Ordinal).Select(x => x.First()))
+        foreach (var id in declarations.SelectMany(AllNamedCutscenes).GroupBy(x => Name(x.Id), StringComparer.Ordinal).Select(x => x.First()).Where(x => world.GetMembers(Name(x.Id)).Length == 0))
         { EmitLine(sb, id.Span); sb.Append(" public NamedCutSceneId ").Append(Name(id.Id)).Append(" = new NamedCutSceneId { serId = \"").Append(EscapeString(id.Id)).Append("\", titleUntranslated = ").Append(Emit(id.Title, binder.Model)).AppendLine(".translatable() };"); EmitDefaultLine(sb); }
         foreach (var function in declarations.OfType<FunctionDeclaration>()) EmitFunction(sb, function, binder.Model);
         foreach (var before in declarations.OfType<BeforeRoomChangeDeclaration>().Take(1)) EmitBeforeRoomChange(sb, before, binder.Model);
@@ -145,7 +154,11 @@ public sealed class SegusumGenerator : IIncrementalGenerator
             case VariableDeclaration v: sb.Append(indent).Append("var ").Append(Name(v.Name)).Append(" = ").Append(Emit(v.Initializer, model)).AppendLine(";"); break;
             case AssignmentStatement a: sb.Append(indent).Append(a.Receiver == null ? Name(a.Name) : Emit(a.Receiver, model) + "." + Name(a.MemberName ?? a.Name)).Append(a.Operator).Append(Emit(a.Value, model)).AppendLine(";"); break;
             case IncrementStatement i: sb.Append(indent).Append(Name(i.Name)).AppendLine("++;"); break;
-            case ReturnStatement r: sb.Append(indent).Append("return ").Append(Emit(r.Expression, model)).AppendLine(";"); break;
+            case ReturnStatement r:
+                sb.Append(indent).Append("return");
+                if (r.Expression != null) sb.Append(' ').Append(Emit(r.Expression, model));
+                sb.AppendLine(";");
+                break;
             case CallStatement c: sb.Append(indent).Append(Emit(c.Expression, model)).AppendLine(";"); break;
             case NarStatement n: sb.Append(indent).Append("narText(").Append(Emit(n.Text, model)).AppendLine(");"); break;
             case NarRoomStatement n: sb.Append(indent).Append("narRoom(").Append(Emit(n.Text, model)).Append(", curRoom, false, false);").AppendLine(); break;

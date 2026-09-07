@@ -69,7 +69,8 @@ public static class DslParser
             var parser = new Parser(tokens, diagnostics, source.Text, profile);
             var document = profile.Measure("ParseDocument", parser.ParseDocument);
             var allocated = GC.GetTotalMemory(false) - allocatedBefore;
-            Console.Error.WriteLine($"dslParser path={source.Path} chars={source.Text.Length} lines={CountLines(source.Text)} tokens={tokens.Count} declarations={document.Declarations.Count} diagnostics={diagnostics.Count} managedMemoryDeltaBytes={allocated} profile={profile.Format()}");
+            if (string.Equals(Environment.GetEnvironmentVariable("SEGUSUM_DSL_PROFILE"), "1", StringComparison.Ordinal))
+                Console.Error.WriteLine($"dslParser path={source.Path} chars={source.Text.Length} lines={CountLines(source.Text)} tokens={tokens.Count} declarations={document.Declarations.Count} diagnostics={diagnostics.Count} managedMemoryDeltaBytes={allocated} profile={profile.Format()}");
             return (document, diagnostics);
         }
         finally { ActiveProfile = null; }
@@ -87,6 +88,7 @@ public static class DslParser
         public Parser(IReadOnlyList<DslToken> tokens, List<DslDiagnostic> diagnostics, string sourceText, DslParserProfile profile) { this.tokens = tokens; this.diagnostics = diagnostics; this.sourceText = sourceText; this.profile = profile; }
         private DslToken Current => tokens[position];
         private bool Is(string text) { profile.Count("Is"); return Current.Text == text; }
+        private bool Is(DslTokenKind kind) { profile.Count("IsKind"); return Current.Kind == kind; }
         private DslToken Take() { profile.Count("Take"); return tokens[position++]; }
         private void SkipTerminators() { while (Current.Kind is DslTokenKind.NewLine or DslTokenKind.Semicolon) Take(); }
         private void Need(string text) { if (Is(text)) Take(); else Error($"Expected '{text}'."); }
@@ -203,7 +205,7 @@ public static class DslParser
         {
             switch (keyword)
             {
-                case "if": return ParseIf(span); case "ret": return new ReturnStatement(Expression(), span); case "nar": if (Is(":")) Take(); return new NarStatement(RawTextAfterKeyword(), span);
+                case "if": return ParseIf(span); case "ret": return new ReturnStatement(Is(DslTokenKind.NewLine) || Is(DslTokenKind.Semicolon) || Is(DslTokenKind.EndOfFile) ? null : Expression(), span); case "nar": if (Is(":")) Take(); return new NarStatement(RawTextAfterKeyword(), span);
                 case "nar-room": if (Is(":")) Take(); return new NarRoomStatement(RawTextAfterKeyword(), span); case "call": Error("The 'call' keyword is no longer part of the DSL syntax."); return new CallStatement(new IdentifierExpression("_error", span), span);
                 case "var": { var name = Word(); Need("="); return new VariableDeclaration(name, Expression(), span); }
                 case "next": return new NextCycleStatement(Expression(), span); case "add": return ParseAdd(span);

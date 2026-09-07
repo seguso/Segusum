@@ -45,6 +45,8 @@ $cliArgs = @(
     '--',
     'migrate-csharp',
     $tempSource,
+    '--world',
+    'game',
     '--output',
     $tempOutput,
     '--emit-partial'
