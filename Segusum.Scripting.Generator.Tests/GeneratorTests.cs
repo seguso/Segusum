@@ -24,6 +24,34 @@ public sealed class GeneratorTests
     }
 
     [Fact]
+    public void CycleBlockMissingEndAtEofIsRejected()
+    {
+        var parsed = DslParser.Parse(new DslSource("missing-end.seg", "world game\ndef main:\n    var cyc = new-cycle\n"));
+        Assert.Contains(parsed.Diagnostics, d => d.Id == "SEGDSL101" && d.Message.Contains("end", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void AddMissingEndAtEofIsRejectedWhenNotFollowedByAnotherAdd()
+    {
+        var parsed = DslParser.Parse(new DslSource("missing-add-end.seg", "world game\nvar cyc = new-cycle\nadd cyc first\nfoo\n"));
+        Assert.Contains(parsed.Diagnostics, d => d.Id == "SEGDSL101" && d.Message.Contains("end", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ConsecutiveAddsMayOmitOnlyTheIntermediateEnd()
+    {
+        var parsed = DslParser.Parse(new DslSource("consecutive-adds.seg", "world game\ndef main:\n    var cyc = new-cycle\n    add cyc first\n    foo\n    add cyc second\n    bar\n    end\nend\n"));
+        Assert.DoesNotContain(parsed.Diagnostics, d => d.Id.StartsWith("SEGDSL", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void LastAddStillRequiresEndAfterAConsecutiveAddChain()
+    {
+        var parsed = DslParser.Parse(new DslSource("last-add-missing-end.seg", "world game\nvar cyc = new-cycle\nadd cyc first\nadd cyc second\n"));
+        Assert.Contains(parsed.Diagnostics, d => d.Id == "SEGDSL101" && d.Message.Contains("end", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void RoomChangedContextResolvesThreeLevelMemberChains()
     {
         var result = Run("room-changed roomA:\n    if isEvenRandomInput i.randomInputs.rnd2:\n        ret\n    end\nend", "public Room roomA = null!; public bool isEvenRandomInput(int value) => true;");

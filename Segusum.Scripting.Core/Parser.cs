@@ -175,7 +175,15 @@ public static class DslParser
             SkipTerminators(); DslExpression? condition = null; var body = new List<DslStatement>();
             while (!Is("end") && !(implicitConsecutiveAdd && Is("add")) && Current.Kind != DslTokenKind.EndOfFile)
             { var s = Current.Span; var w = Word(); if (w == clause) condition = Expression(); else body.Add(ParseStatement(w, s)); SkipTerminators(); }
-            if (Is("end")) Take();
+            if (implicitConsecutiveAdd && Is("add"))
+            {
+                // The next add belongs to the same sibling chain. Leave it
+                // untouched so the enclosing body can parse it.
+            }
+            else
+            {
+                Need("end");
+            }
             return (condition, body);
         }
         private IReadOnlyList<DslStatement> ParseBody(bool colon)
