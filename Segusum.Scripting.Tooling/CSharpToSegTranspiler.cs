@@ -33,9 +33,9 @@ public static class CSharpToSegTranspiler
     private static string Indent(int level) => new(' ', level * 4);
 
     public static MigrationOutput Transpile(string path, string text, bool emitPartial = false, string? methodName = null)
-        => Transpile(path, text, emitPartial, methodName, "game");
+        => Transpile(path, text, emitPartial, methodName, "game", null);
 
-    public static MigrationOutput Transpile(string path, string text, bool emitPartial, string? methodName, string worldId)
+    public static MigrationOutput Transpile(string path, string text, bool emitPartial, string? methodName, string worldId, string? contextRoot = null)
     {
         var tree = CSharpSyntaxTree.ParseText(text, path: path);
         var diagnostics = new List<MigrationDiagnostic>();
@@ -49,7 +49,7 @@ public static class CSharpToSegTranspiler
         foreach (var invocation in root.DescendantNodes().OfType<InvocationExpressionSyntax>().Where(x => RegistrationKind(x) != null))
         {
             if (methodName != null && !invocation.Ancestors().OfType<MethodDeclarationSyntax>().Any(x => x.Identifier.ValueText == methodName)) continue;
-            EmitHandler(invocation, sb, diagnostics, emitPartial);
+            EmitHandler(invocation, sb, diagnostics, emitPartial, contextRoot);
         }
         foreach (var method in root.DescendantNodes().OfType<MethodDeclarationSyntax>().Where(x => methodName == null || x.Identifier.ValueText == methodName || reachableHelpers.Contains(x)))
         {
@@ -58,7 +58,7 @@ public static class CSharpToSegTranspiler
                 EmitTriviaComments(method.GetLeadingTrivia(), sb, 0);
                 sb.AppendLine("after-action-executed:");
                 EmitTriviaComments(method.Body?.OpenBraceToken.TrailingTrivia ?? default, sb, 1);
-                EmitStatements(method.Body?.Statements ?? default, sb, diagnostics, 1, emitPartial);
+                EmitStatements(method.Body?.Statements ?? default, sb, diagnostics, 1, emitPartial, true, contextRoot);
                 EmitTriviaComments(method.Body?.CloseBraceToken.LeadingTrivia ?? default, sb, 1);
                 EmitTriviaComments(method.Body?.CloseBraceToken.TrailingTrivia ?? default, sb, 1);
                 sb.AppendLine("end");
@@ -70,7 +70,7 @@ public static class CSharpToSegTranspiler
                 EmitTriviaComments(method.GetLeadingTrivia(), sb, 0);
                 sb.AppendLine("before-room-change:");
                 EmitTriviaComments(method.Body?.OpenBraceToken.TrailingTrivia ?? default, sb, 1);
-                EmitStatements(method.Body?.Statements ?? default, sb, diagnostics, 1, emitPartial);
+                EmitStatements(method.Body?.Statements ?? default, sb, diagnostics, 1, emitPartial, true, contextRoot);
                 EmitTriviaComments(method.Body?.CloseBraceToken.LeadingTrivia ?? default, sb, 1);
                 EmitTriviaComments(method.Body?.CloseBraceToken.TrailingTrivia ?? default, sb, 1);
                 sb.AppendLine("end");
@@ -85,7 +85,7 @@ public static class CSharpToSegTranspiler
                 AppendFunctionHeader(sb, method, diagnostics);
                 sb.AppendLine(":");
                 EmitTriviaComments(method.Body.OpenBraceToken.TrailingTrivia, sb, 1);
-                EmitStatements(method.Body.Statements, sb, diagnostics, 1, emitPartial, true);
+                EmitStatements(method.Body.Statements, sb, diagnostics, 1, emitPartial, true, contextRoot);
                 EmitTriviaComments(method.Body.CloseBraceToken.LeadingTrivia, sb, 1);
                 EmitTriviaComments(method.Body.CloseBraceToken.TrailingTrivia, sb, 1);
                 sb.AppendLine("end");
@@ -461,7 +461,7 @@ public static class CSharpToSegTranspiler
         return reachable;
     }
 
-    private static void EmitHandler(InvocationExpressionSyntax invocation, StringBuilder sb, List<MigrationDiagnostic> diagnostics, bool partial)
+    private static void EmitHandler(InvocationExpressionSyntax invocation, StringBuilder sb, List<MigrationDiagnostic> diagnostics, bool partial, string? contextRoot = null)
     {
         var args = invocation.ArgumentList.Arguments;
         var kind = RegistrationKind(invocation)!;
@@ -498,7 +498,7 @@ public static class CSharpToSegTranspiler
         if (handler?.Body is BlockSyntax block)
         {
             EmitTriviaComments(block.OpenBraceToken.TrailingTrivia, sb, 1);
-            EmitStatements(block.Statements, sb, diagnostics, 1, partial);
+            EmitStatements(block.Statements, sb, diagnostics, 1, partial, true, contextRoot);
             EmitTriviaComments(block.CloseBraceToken.LeadingTrivia, sb, 1);
             EmitTriviaComments(block.CloseBraceToken.TrailingTrivia, sb, 1);
         }
@@ -534,7 +534,7 @@ public static class CSharpToSegTranspiler
             : index > 0 ? siblings[index - 1].GetTrailingTrivia() : Enumerable.Empty<SyntaxTrivia>();
     }
 
-    private static void EmitStatements(IEnumerable<StatementSyntax> statements, StringBuilder sb, List<MigrationDiagnostic> diagnostics, int level, bool partial, bool includeComments = true)
+    private static void EmitStatements(IEnumerable<StatementSyntax> statements, StringBuilder sb, List<MigrationDiagnostic> diagnostics, int level, bool partial, bool includeComments = true, string? contextRoot = null)
     {
         var statementArray = statements.ToArray();
         for (var statementIndex = 0; statementIndex < statementArray.Length; statementIndex++)
@@ -549,11 +549,11 @@ public static class CSharpToSegTranspiler
                 case IfStatementSyntax x:
                     sb.AppendLine(FormatCondition(x.Condition, indent + "if ", Indent(level + 1), ":"));
                     EnsureOneBlankLineAfterHeader(sb);
-                    EmitStatements(x.Statement is BlockSyntax b ? b.Statements : new[] { x.Statement }, sb, diagnostics, level + 1, partial, includeComments);
+                    EmitStatements(x.Statement is BlockSyntax b ? b.Statements : new[] { x.Statement }, sb, diagnostics, level + 1, partial, includeComments, contextRoot);
                     var e = x.Else;
                     while (e?.Statement is IfStatementSyntax elif)
-                    { sb.AppendLine(FormatCondition(elif.Condition, indent + "elif ", Indent(level + 1), ":")); EnsureOneBlankLineAfterHeader(sb); EmitStatements(elif.Statement is BlockSyntax eb ? eb.Statements : new[] { elif.Statement }, sb, diagnostics, level + 1, partial, includeComments); e = elif.Else; }
-                    if (e != null) { sb.Append(indent).AppendLine("else:"); EnsureOneBlankLineAfterHeader(sb); EmitStatements(e.Statement is BlockSyntax eb ? eb.Statements : new[] { e.Statement }, sb, diagnostics, level + 1, partial, includeComments); }
+                    { sb.AppendLine(FormatCondition(elif.Condition, indent + "elif ", Indent(level + 1), ":")); EnsureOneBlankLineAfterHeader(sb); EmitStatements(elif.Statement is BlockSyntax eb ? eb.Statements : new[] { elif.Statement }, sb, diagnostics, level + 1, partial, includeComments, contextRoot); e = elif.Else; }
+                    if (e != null) { sb.Append(indent).AppendLine("else:"); EnsureOneBlankLineAfterHeader(sb); EmitStatements(e.Statement is BlockSyntax eb ? eb.Statements : new[] { e.Statement }, sb, diagnostics, level + 1, partial, includeComments, contextRoot); }
                     sb.Append(indent).AppendLine("end"); break;
                 case ExpressionStatementSyntax x when x.Expression is AssignmentExpressionSyntax a:
                     if (a.Right is InvocationExpressionSyntax add && CallName(add) == "addToCycle") EmitCycleChain(add, sb, diagnostics, level, partial);
@@ -561,7 +561,7 @@ public static class CSharpToSegTranspiler
                     else if (a.Left.ToString().EndsWith("textInputToShow", StringComparison.Ordinal)) sb.Append(indent).Append("text-input ").AppendLine(Expression(a.Right));
                     else AppendFormattedExpression(sb, indent + Expression(a.Left) + " " + a.OperatorToken.Text + " ", a.Right, level); break;
                 case ExpressionStatementSyntax x when x.Expression is InvocationExpressionSyntax i:
-                    EmitInvocation(i, sb, diagnostics, level, partial, IsConsecutiveAdd(statementArray, statementIndex)); break;
+                    EmitInvocation(i, sb, diagnostics, level, partial, IsConsecutiveAdd(statementArray, statementIndex), contextRoot); break;
                 case ExpressionStatementSyntax x when x.Expression is PostfixUnaryExpressionSyntax p && p.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.PostIncrementExpression):
                     sb.Append(indent).Append(Expression(p.Operand)).AppendLine("++"); break;
                 case ExpressionStatementSyntax x when x.Expression is PrefixUnaryExpressionSyntax p && p.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.PreIncrementExpression):
@@ -571,14 +571,14 @@ public static class CSharpToSegTranspiler
                     catch (InvalidOperationException ex) { Unsupported(x.Expression, diagnostics, ex.Message, partial, sb, level); }
                     break;
                 case BlockSyntax x:
-                    EmitStatements(x.Statements, sb, diagnostics, level, partial, includeComments); break;
+                    EmitStatements(x.Statements, sb, diagnostics, level, partial, includeComments, contextRoot); break;
                 case LocalDeclarationStatementSyntax x:
                     foreach (var v in x.Declaration.Variables)
                     {
                         try
                         {
                             if (v.Initializer?.Value is InvocationExpressionSyntax start && FindStartCycle(start) != null)
-                                EmitCycle(start, v.Identifier.ValueText, sb, diagnostics, level, partial);
+                                EmitCycle(start, v.Identifier.ValueText, sb, diagnostics, level, partial, contextRoot);
                             else if (v.Initializer != null) AppendFormattedExpression(sb, indent + "var " + v.Identifier.ValueText + " = ", v.Initializer.Value, level);
                             else
                             {
@@ -591,9 +591,9 @@ public static class CSharpToSegTranspiler
                     }
                     break;
                 case UsingStatementSyntax x when x.Expression is InvocationExpressionSyntax call && CallName(call) == "namedCutScene":
-                    EmitNamedCutscene(call, x.Statement, sb, diagnostics, level, partial); break;
+                    EmitNamedCutscene(call, x.Statement, sb, diagnostics, level, partial, contextRoot); break;
                 case ReturnStatementSyntax x when x.Expression is InvocationExpressionSyntax cycleReturn && FindStartCycle(cycleReturn) != null:
-                    EmitCycle(cycleReturn, "cyc", sb, diagnostics, level, partial);
+                    EmitCycle(cycleReturn, "cyc", sb, diagnostics, level, partial, contextRoot);
                     sb.Append(indent).AppendLine("ret cyc");
                     break;
                 case EmptyStatementSyntax: break;
@@ -633,10 +633,10 @@ public static class CSharpToSegTranspiler
         return null;
     }
 
-    private static void EmitInvocation(InvocationExpressionSyntax invocation, StringBuilder sb, List<MigrationDiagnostic> diagnostics, int level, bool partial, bool omitConsecutiveCycleEnd = false)
+    private static void EmitInvocation(InvocationExpressionSyntax invocation, StringBuilder sb, List<MigrationDiagnostic> diagnostics, int level, bool partial, bool omitConsecutiveCycleEnd = false, string? contextRoot = null)
     {
         var indent = Indent(level); var name = invocation.Expression.ToString();
-        if (CallName(invocation) == "addToCycle") { EmitCycleChain(invocation, sb, diagnostics, level, partial, !omitConsecutiveCycleEnd); return; }
+        if (CallName(invocation) == "addToCycle") { EmitCycleChain(invocation, sb, diagnostics, level, partial, !omitConsecutiveCycleEnd, contextRoot); return; }
         if (CallName(invocation) == "execNextInCycle") { sb.Append(indent).Append("next ").AppendLine(Arg(invocation.ArgumentList.Arguments, 0)); return; }
         if (CallName(invocation) == "startCycle") { Unsupported(invocation, diagnostics, "startCycle must be assigned to a cycle variable", partial, sb, level); return; }
         if (name is "dial" or "nar" or "narText" or "narRoom" or "narImg")
@@ -679,21 +679,21 @@ public static class CSharpToSegTranspiler
         }
     }
 
-    private static void EmitCycle(InvocationExpressionSyntax initializer, string variable, StringBuilder sb, List<MigrationDiagnostic> diagnostics, int level, bool partial)
+    private static void EmitCycle(InvocationExpressionSyntax initializer, string variable, StringBuilder sb, List<MigrationDiagnostic> diagnostics, int level, bool partial, string? contextRoot = null)
     {
         var start = FindStartCycle(initializer)!;
         var adds = initializer.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>()
             .Where(x => CallName(x) == "addToCycle").OrderBy(x => x.Span.End).ToArray();
         sb.Append(Indent(level)).Append("var ").Append(variable).AppendLine(" = new-cycle");
-        EmitCycleElementCore(variable, start.ArgumentList.Arguments, start, sb, diagnostics, level, partial, true, adds.Length == 0);
+        EmitCycleElementCore(variable, start.ArgumentList.Arguments, start, sb, diagnostics, level, partial, true, adds.Length == 0, contextRoot);
         for (var i = 0; i < adds.Length; i++)
-            EmitCycleElementCore(variable, adds[i].ArgumentList.Arguments, adds[i], sb, diagnostics, level, partial, false, i == adds.Length - 1);
+            EmitCycleElementCore(variable, adds[i].ArgumentList.Arguments, adds[i], sb, diagnostics, level, partial, false, i == adds.Length - 1, contextRoot);
     }
 
-    private static void EmitCycleElement(InvocationExpressionSyntax invocation, StringBuilder sb, List<MigrationDiagnostic> diagnostics, int level, bool partial)
-        => EmitCycleElementCore(invocation.Expression is MemberAccessExpressionSyntax member ? Expression(member.Expression) : "cyc", invocation.ArgumentList.Arguments, invocation, sb, diagnostics, level, partial, false);
+    private static void EmitCycleElement(InvocationExpressionSyntax invocation, StringBuilder sb, List<MigrationDiagnostic> diagnostics, int level, bool partial, string? contextRoot = null)
+        => EmitCycleElementCore(invocation.Expression is MemberAccessExpressionSyntax member ? Expression(member.Expression) : "cyc", invocation.ArgumentList.Arguments, invocation, sb, diagnostics, level, partial, false, true, contextRoot);
 
-    private static void EmitCycleChain(InvocationExpressionSyntax outer, StringBuilder sb, List<MigrationDiagnostic> diagnostics, int level, bool partial, bool emitFinalEnd = true)
+    private static void EmitCycleChain(InvocationExpressionSyntax outer, StringBuilder sb, List<MigrationDiagnostic> diagnostics, int level, bool partial, bool emitFinalEnd = true, string? contextRoot = null)
     {
         var current = outer;
         var elements = new List<InvocationExpressionSyntax>();
@@ -707,7 +707,7 @@ public static class CSharpToSegTranspiler
         if (cycle is null) { Unsupported(outer, diagnostics, "addToCycle receiver is not a cycle expression", partial, sb, level); return; }
         var ordered = elements.AsEnumerable().Reverse().ToArray();
         for (var i = 0; i < ordered.Length; i++)
-            EmitCycleElementCore(cycle, ordered[i].ArgumentList.Arguments, ordered[i], sb, diagnostics, level, partial, false, emitFinalEnd && i == ordered.Length - 1);
+            EmitCycleElementCore(cycle, ordered[i].ArgumentList.Arguments, ordered[i], sb, diagnostics, level, partial, false, emitFinalEnd && i == ordered.Length - 1, contextRoot);
     }
 
     private static bool IsConsecutiveAdd(IReadOnlyList<StatementSyntax> statements, int index)
@@ -715,7 +715,7 @@ public static class CSharpToSegTranspiler
             && statements[index + 1] is ExpressionStatementSyntax { Expression: InvocationExpressionSyntax next }
             && CallName(next) == "addToCycle";
 
-    private static void EmitCycleElementCore(string cycle, SeparatedSyntaxList<ArgumentSyntax> args, InvocationExpressionSyntax invocation, StringBuilder sb, List<MigrationDiagnostic> diagnostics, int level, bool partial, bool start, bool emitEnd = true)
+    private static void EmitCycleElementCore(string cycle, SeparatedSyntaxList<ArgumentSyntax> args, InvocationExpressionSyntax invocation, StringBuilder sb, List<MigrationDiagnostic> diagnostics, int level, bool partial, bool start, bool emitEnd = true, string? contextRoot = null)
     {
         var indent = Indent(level);
         var id = Arg(args, 0);
@@ -734,29 +734,31 @@ public static class CSharpToSegTranspiler
             EnsureOneBlankLineAfterHeader(sb);
         }
         else sb.AppendLine();
-        if (body != null) EmitStatements(body.Statements, sb, diagnostics, level + 1, partial);
+        if (body != null) EmitStatements(body.Statements, sb, diagnostics, level + 1, partial, true, contextRoot);
         if (emitEnd) sb.Append(indent).AppendLine("end");
         if (important?.StartsWith("unsupported:", StringComparison.Ordinal) == true || repeat?.StartsWith("unsupported:", StringComparison.Ordinal) == true)
             Unsupported(invocation, diagnostics, "unsupported cycle metadata", partial, sb, level);
     }
 
-    private static void EmitNamedCutscene(InvocationExpressionSyntax invocation, StatementSyntax statement, StringBuilder sb, List<MigrationDiagnostic> diagnostics, int level, bool partial)
+    private static void EmitNamedCutscene(InvocationExpressionSyntax invocation, StatementSyntax statement, StringBuilder sb, List<MigrationDiagnostic> diagnostics, int level, bool partial, string? contextRoot = null)
     {
         var indent = Indent(level);
         var id = Arg(invocation.ArgumentList.Arguments, 0);
-        var title = NamedCutsceneTitle(invocation, id);
+        var title = NamedCutsceneTitle(invocation, id, contextRoot);
         if (title is null) Unsupported(invocation, diagnostics, "NamedCutSceneId title cannot be resolved structurally", partial, sb, level);
         sb.Append(indent).Append("named-cutscene ").Append(id).Append(' ').Append(title ?? "\"\"");
         foreach (var arg in invocation.ArgumentList.Arguments.Skip(1)) sb.Append(' ').Append(Expression(arg.Expression));
         sb.AppendLine(":");
-        if (statement is BlockSyntax block) EmitStatements(block.Statements, sb, diagnostics, level + 1, partial);
+        if (statement is BlockSyntax block) EmitStatements(block.Statements, sb, diagnostics, level + 1, partial, true, contextRoot);
         sb.Append(indent).AppendLine("end");
     }
 
-    private static string? NamedCutsceneTitle(InvocationExpressionSyntax invocation, string id)
+    private static string? NamedCutsceneTitle(InvocationExpressionSyntax invocation, string id, string? contextRoot = null)
     {
         var sourcePath = invocation.SyntaxTree.FilePath;
-        var directory = string.IsNullOrEmpty(sourcePath) ? "" : Path.GetDirectoryName(sourcePath) ?? "";
+        var directory = !string.IsNullOrWhiteSpace(contextRoot)
+            ? Path.GetFullPath(contextRoot)
+            : string.IsNullOrEmpty(sourcePath) ? "" : Path.GetDirectoryName(sourcePath) ?? "";
         if (directory.Length == 0)
         {
             return FindNamedCutsceneTitle(invocation.SyntaxTree.GetRoot(), id);
@@ -767,16 +769,19 @@ public static class CSharpToSegTranspiler
             if (!NamedCutsceneIndexCache.TryGetValue(directory, out index!))
             {
                 var map = new Dictionary<string, string?>(StringComparer.Ordinal);
-                foreach (var candidatePath in Directory.EnumerateFiles(directory, "*.cs", SearchOption.TopDirectoryOnly))
+                var searchOption = !string.IsNullOrWhiteSpace(contextRoot) ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+                foreach (var candidatePath in Directory.EnumerateFiles(directory, "*.cs", searchOption))
                 {
                     try
                     {
                         var root = CSharpSyntaxTree.ParseText(File.ReadAllText(candidatePath), path: candidatePath).GetRoot();
-                        foreach (var declaration in root.DescendantNodes().OfType<VariableDeclaratorSyntax>().Where(x => x.Initializer?.Value is ObjectCreationExpressionSyntax creation && creation.Type.ToString().EndsWith("NamedCutSceneId", StringComparison.Ordinal)))
+                        foreach (var declaration in FindNamedCutsceneDeclarations(root))
                         {
-                            var title = FindNamedCutsceneTitle(root, declaration.Identifier.ValueText);
-                            if (map.ContainsKey(declaration.Identifier.ValueText)) map[declaration.Identifier.ValueText] = null;
-                            else map[declaration.Identifier.ValueText] = title;
+                            var identifier = DeclarationIdentifier(declaration);
+                            if (identifier is null) continue;
+                            var title = NamedCutsceneTitleFromDeclaration(declaration);
+                            if (map.ContainsKey(identifier)) map[identifier] = null;
+                            else map[identifier] = title;
                         }
                     }
                     catch (IOException) { }
@@ -787,15 +792,83 @@ public static class CSharpToSegTranspiler
         return index.TryGetValue(id, out var result) ? result : FindNamedCutsceneTitle(invocation.SyntaxTree.GetRoot(), id);
     }
 
+    private static IEnumerable<SyntaxNode> FindNamedCutsceneDeclarations(SyntaxNode root)
+    {
+        foreach (var variable in root.DescendantNodes().OfType<VariableDeclaratorSyntax>())
+        {
+            if (variable.Initializer is null) continue;
+            if (variable.Parent is VariableDeclarationSyntax declaration
+                && IsNamedCutsceneType(declaration.Type)
+                && IsNamedCutsceneCreation(variable.Initializer.Value, declaration.Type))
+                yield return variable;
+        }
+
+        foreach (var property in root.DescendantNodes().OfType<PropertyDeclarationSyntax>())
+        {
+            if (property.Initializer is not null
+                && IsNamedCutsceneType(property.Type)
+                && IsNamedCutsceneCreation(property.Initializer.Value, property.Type))
+                yield return property;
+        }
+
+        foreach (var assignment in root.DescendantNodes().OfType<AssignmentExpressionSyntax>())
+        {
+            if (assignment.Left is IdentifierNameSyntax
+                && IsNamedCutsceneCreation(assignment.Right, null))
+                yield return assignment;
+        }
+    }
+
     private static string? FindNamedCutsceneTitle(SyntaxNode root, string id)
     {
-        var declaration = root.DescendantNodes().OfType<VariableDeclaratorSyntax>().FirstOrDefault(x =>
-            x.Identifier.ValueText == id && x.Initializer?.Value is ObjectCreationExpressionSyntax creation
-            && creation.Type.ToString().EndsWith("NamedCutSceneId", StringComparison.Ordinal));
-        var creation = declaration?.Initializer?.Value as ObjectCreationExpressionSyntax;
-        var title = creation?.Initializer?.Expressions.OfType<AssignmentExpressionSyntax>()
-            .FirstOrDefault(x => x.Left.ToString() == "titleUntranslated")?.Right;
+        var declaration = FindNamedCutsceneDeclarations(root)
+            .FirstOrDefault(x => DeclarationIdentifier(x) == id);
+        return declaration is null ? null : NamedCutsceneTitleFromDeclaration(declaration);
+    }
+
+    private static string? DeclarationIdentifier(SyntaxNode declaration) => declaration switch
+    {
+        VariableDeclaratorSyntax variable => variable.Identifier.ValueText,
+        PropertyDeclarationSyntax property => property.Identifier.ValueText,
+        AssignmentExpressionSyntax assignment when assignment.Left is IdentifierNameSyntax identifier => identifier.Identifier.ValueText,
+        _ => null
+    };
+
+    private static ExpressionSyntax? DeclarationInitializer(SyntaxNode declaration) => declaration switch
+    {
+        VariableDeclaratorSyntax variable => variable.Initializer?.Value,
+        PropertyDeclarationSyntax property => property.Initializer?.Value,
+        AssignmentExpressionSyntax assignment => assignment.Right,
+        _ => null
+    };
+
+    private static string? NamedCutsceneTitleFromDeclaration(SyntaxNode declaration)
+    {
+        var initializer = DeclarationInitializer(declaration);
+        var objectInitializer = initializer switch
+        {
+            ObjectCreationExpressionSyntax creation => creation.Initializer,
+            ImplicitObjectCreationExpressionSyntax creation => creation.Initializer,
+            _ => null
+        };
+        var title = objectInitializer?.Expressions.OfType<AssignmentExpressionSyntax>()
+            .FirstOrDefault(x => x.Left is IdentifierNameSyntax identifier
+                && identifier.Identifier.ValueText == "titleUntranslated")?.Right;
         return NamedCutsceneTitleLiteral(title);
+    }
+
+    private static bool IsNamedCutsceneType(TypeSyntax? type) =>
+        type is not null && type.ToString().EndsWith("NamedCutSceneId", StringComparison.Ordinal);
+
+    private static bool IsNamedCutsceneCreation(ExpressionSyntax expression, TypeSyntax? declaredType)
+    {
+        return expression switch
+        {
+            ObjectCreationExpressionSyntax creation => IsNamedCutsceneType(creation.Type)
+                || (declaredType is not null && IsNamedCutsceneType(declaredType)),
+            ImplicitObjectCreationExpressionSyntax => declaredType is not null && IsNamedCutsceneType(declaredType),
+            _ => false
+        };
     }
 
     private static string? NamedCutsceneTitleLiteral(ExpressionSyntax? expression)

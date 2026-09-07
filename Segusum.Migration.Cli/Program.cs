@@ -3,7 +3,7 @@ using Segusum.Scripting.Core;
 
 if (args.Length == 0 || args[0] is "--help" or "-h")
 {
-    Console.WriteLine("segusum migrate-csharp <file.cs> --world WORLD [--output FILE] [--audit] [--emit-partial] [--method NAME] [--dry-run]");
+    Console.WriteLine("segusum migrate-csharp <file.cs> --world WORLD [--output FILE] [--audit] [--emit-partial] [--method NAME] [--context-root DIR] [--dry-run]");
     Console.WriteLine("segusum audit-ownership <file.seg> --runtime-root DIR --history FILE [--apply]");
     Console.WriteLine("segusum parse-seg <file.seg>");
     return 0;
@@ -60,10 +60,10 @@ if (string.Equals(args[0], "audit-ownership", StringComparison.OrdinalIgnoreCase
 }
 if (!string.Equals(args[0], "migrate-csharp", StringComparison.OrdinalIgnoreCase) || args.Length < 2)
 {
-    Console.Error.WriteLine("Usage: migrate-csharp <file.cs> --world WORLD [--output FILE] [--audit] [--emit-partial] [--method NAME] [--dry-run]");
+    Console.Error.WriteLine("Usage: migrate-csharp <file.cs> --world WORLD [--output FILE] [--audit] [--emit-partial] [--method NAME] [--context-root DIR] [--dry-run]");
     return 2;
 }
-var input = Path.GetFullPath(args[1]); var output = (string?)null; var partial = false; var audit = false; var dryRun = false; string? method = null; string? world = null;
+var input = Path.GetFullPath(args[1]); var output = (string?)null; var partial = false; var audit = false; var dryRun = false; string? method = null; string? world = null; string? contextRoot = null;
 for (var i = 2; i < args.Length; i++)
     switch (args[i])
     {
@@ -73,10 +73,11 @@ for (var i = 2; i < args.Length; i++)
         case "--dry-run": dryRun = true; break;
         case "--method": method = args[++i]; break;
         case "--world": world = args[++i]; break;
+        case "--context-root": contextRoot = Path.GetFullPath(args[++i]); break;
         default: Console.Error.WriteLine($"Unknown option: {args[i]}"); return 2;
     }
 if (string.IsNullOrWhiteSpace(world)) { Console.Error.WriteLine("Missing required option: --world WORLD"); return 2; }
-var result = CSharpToSegTranspiler.Transpile(input, File.ReadAllText(input), partial, method, world);
+var result = CSharpToSegTranspiler.Transpile(input, File.ReadAllText(input), partial, method, world, contextRoot);
 Console.WriteLine($"file: {input}");
 Console.WriteLine($"status: {(result.IsFullyTranslated ? "TRANSLATED" : partial ? "PARTIAL" : "UNSUPPORTED")}");
 foreach (var group in result.Units.GroupBy(x => x.Status).OrderBy(x => x.Key)) Console.WriteLine($"units {group.Key}: {group.Count()}");

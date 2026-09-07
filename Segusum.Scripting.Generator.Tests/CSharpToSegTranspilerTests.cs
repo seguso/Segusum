@@ -290,6 +290,80 @@ public sealed class CSharpToSegTranspilerTests
     }
 
     [Fact]
+    public void NamedCutsceneTitleSupportsTargetTypedPropertyInitializerAcrossContextRoot()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "segusum-c2seg-property-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            File.WriteAllText(Path.Combine(directory, "worldObjects.cs"),
+                "class W { public NamedCutSceneId Ncs { get; set; } = new() { titleUntranslated = \"Property title[[p]]\".translatable() }; }");
+            var sourcePath = Path.Combine(directory, "handlers.cs");
+            var result = CSharpToSegTranspiler.Transpile(sourcePath,
+                "class W { void M() { addHandlerUseHere(a, handler: i => { using (namedCutScene(Ncs, roomA)) { dial(camilla, \"A\"); } }); } }",
+                true, null, "game", directory);
+            Assert.Contains("named-cutscene Ncs \"Property title[[p]]\" roomA", result.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain(result.Diagnostics, x => x.Reason.Contains("title cannot be resolved", StringComparison.Ordinal));
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    [Fact]
+    public void NamedCutsceneTitleReportsUnresolvedStaticValueWithoutInventingTitle()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "segusum-c2seg-unresolved-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            File.WriteAllText(Path.Combine(directory, "worldObjects.cs"),
+                "class W { NamedCutSceneId ncs = new() { titleUntranslated = GetTitle() }; }");
+            var result = CSharpToSegTranspiler.Transpile(Path.Combine(directory, "handlers.cs"),
+                "class W { void M() { addHandlerUseHere(a, handler: i => { using (namedCutScene(ncs, roomA)) { dial(camilla, \"A\"); } }); } }",
+                true, null, "game", directory);
+            Assert.Contains(result.Diagnostics, x => x.Reason.Contains("title cannot be resolved", StringComparison.Ordinal));
+            Assert.Contains("C2SEG-MANUAL", result.Text, StringComparison.Ordinal);
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    [Fact]
+    public void NamedCutsceneContextIndexScansManyFilesOnceWithoutChangingResolution()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "segusum-c2seg-context-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            for (var i = 0; i < 100; i++)
+                File.WriteAllText(Path.Combine(directory, $"unrelated{i}.cs"), $"class Unrelated{i} {{ int Value => {i}; }}");
+            File.WriteAllText(Path.Combine(directory, "objects.cs"),
+                "partial class W { NamedCutSceneId ncs = new NamedCutSceneId { titleUntranslated = \"Indexed title\".translatable() }; }");
+            var result = CSharpToSegTranspiler.Transpile(Path.Combine(directory, "handlers.cs"),
+                "partial class W { void M() { addHandlerUseHere(a, handler: i => { using (namedCutScene(ncs, roomA)) { dial(camilla, \"A\"); } }); } }",
+                true, null, "game", directory);
+            Assert.Contains("named-cutscene ncs \"Indexed title\" roomA", result.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain(result.Diagnostics, x => x.Reason.Contains("title cannot be resolved", StringComparison.Ordinal));
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    [Fact]
+    public void NamedCutsceneContextFlowsThroughCycleBodies()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "segusum-c2seg-cycle-context-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            File.WriteAllText(Path.Combine(directory, "objects.cs"),
+                "partial class W { NamedCutSceneId ncs = new() { titleUntranslated = \"Cycle title\".translatable() }; }");
+            var source = "partial class W { void M() { addHandlerUseHere(a, handler: i => { var cyc = startCycle(cid, x => true, x => { using (namedCutScene(ncs, roomA)) { dial(camilla, \"A\"); } }); }); } }";
+            var result = CSharpToSegTranspiler.Transpile(Path.Combine(directory, "handlers.cs"), source, true, null, "game", directory);
+            Assert.Contains("named-cutscene ncs \"Cycle title\" roomA", result.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain(result.Diagnostics, x => x.Reason.Contains("title cannot be resolved", StringComparison.Ordinal));
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    [Fact]
     public void UnsupportedLinqIsNeverEmittedAsExecutableSeg()
     {
         var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { void M() { addHandlerUseHere(a, handler: i => { var n = values.Count(x => x > 0); }); } }");
