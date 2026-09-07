@@ -27,7 +27,12 @@ public sealed record MigrationOutput(string Text, IReadOnlyList<MigrationDiagnos
 /// <summary>Deterministic Roslyn-based first-pass C# to SEG emitter.</summary>
 public static class CSharpToSegTranspiler
 {
-    private sealed record NamedCutsceneContextValue(string? Title, bool Conflict);
+    private sealed record NamedCutsceneContextValue(
+        bool HasCSharpDeclaration,
+        string? CSharpTitle,
+        bool HasSegDeclaration,
+        string? SegTitle,
+        bool Conflict);
     private static readonly Dictionary<string, IReadOnlyDictionary<string, NamedCutsceneContextValue>> NamedCutsceneIndexCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly object NamedCutsceneIndexLock = new();
 
@@ -764,9 +769,11 @@ public static class CSharpToSegTranspiler
     {
         var indent = Indent(level);
         var id = Arg(invocation.ArgumentList.Arguments, 0);
-        var title = NamedCutsceneTitle(invocation, id, contextRoot, out var conflict);
+        var title = NamedCutsceneTitle(invocation, id, contextRoot, out var conflict, out var invalid);
         if (conflict)
             Unsupported(invocation, diagnostics, $"NamedCutSceneId title conflict for '{id}' in migration context", partial, sb, level);
+        else if (invalid)
+            Unsupported(invocation, diagnostics, $"NamedCutSceneId declaration for '{id}' has no resolvable title", partial, sb, level);
         else if (title is null)
             Unsupported(invocation, diagnostics, "NamedCutSceneId title cannot be resolved structurally", partial, sb, level);
         sb.Append(indent).Append("named-cutscene ").Append(id).Append(' ').Append(title ?? "\"\"");
@@ -776,16 +783,18 @@ public static class CSharpToSegTranspiler
         sb.Append(indent).AppendLine("end");
     }
 
-    private static string? NamedCutsceneTitle(InvocationExpressionSyntax invocation, string id, string? contextRoot, out bool conflict)
+    private static string? NamedCutsceneTitle(InvocationExpressionSyntax invocation, string id, string? contextRoot, out bool conflict, out bool invalid)
     {
         conflict = false;
+        invalid = false;
         var sourcePath = invocation.SyntaxTree.FilePath;
         var directory = !string.IsNullOrWhiteSpace(contextRoot)
             ? Path.GetFullPath(contextRoot)
             : string.IsNullOrEmpty(sourcePath) ? "" : Path.GetDirectoryName(sourcePath) ?? "";
         if (directory.Length == 0)
         {
-            return FindNamedCutsceneTitle(invocation.SyntaxTree.GetRoot(), id);
+            var local = FindNamedCutsceneContext(invocation.SyntaxTree.GetRoot(), id);
+            return ResolveNamedCutsceneContext(local, ref conflict, ref invalid);
         }
         var cacheKey = directory + (string.IsNullOrWhiteSpace(contextRoot) ? "|top-directory" : "|all-directories");
         IReadOnlyDictionary<string, NamedCutsceneContextValue> index;
@@ -794,16 +803,29 @@ public static class CSharpToSegTranspiler
             if (!NamedCutsceneIndexCache.TryGetValue(cacheKey, out index!))
             {
                 var map = new Dictionary<string, NamedCutsceneContextValue>(StringComparer.Ordinal);
-                static void Add(Dictionary<string, NamedCutsceneContextValue> target, string id, string? title)
+                static void Add(Dictionary<string, NamedCutsceneContextValue> target, string id, string? title, bool isCSharp)
                 {
                     if (!target.TryGetValue(id, out var previous))
                     {
-                        target[id] = new(title, false);
+                        target[id] = isCSharp
+                            ? new(true, title, false, null, false)
+                            : new(false, null, true, title, false);
                         return;
                     }
-                    if (previous.Conflict) return;
-                    if (!string.Equals(previous.Title, title, StringComparison.Ordinal))
-                        target[id] = new(null, true);
+                    if (isCSharp)
+                    {
+                        if (previous.HasCSharpDeclaration && !string.Equals(previous.CSharpTitle, title, StringComparison.Ordinal))
+                            target[id] = previous with { Conflict = true };
+                        else
+                            target[id] = previous with { HasCSharpDeclaration = true, CSharpTitle = title };
+                    }
+                    else
+                    {
+                        if (previous.HasSegDeclaration && !string.Equals(previous.SegTitle, title, StringComparison.Ordinal))
+                            target[id] = previous with { Conflict = true };
+                        else
+                            target[id] = previous with { HasSegDeclaration = true, SegTitle = title };
+                    }
                 }
                 var searchOption = !string.IsNullOrWhiteSpace(contextRoot) ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
                 foreach (var candidatePath in Directory.EnumerateFiles(directory, "*.cs", searchOption))
@@ -816,7 +838,7 @@ public static class CSharpToSegTranspiler
                             var identifier = DeclarationIdentifier(declaration);
                             if (identifier is null) continue;
                             var title = NamedCutsceneTitleFromDeclaration(declaration);
-                            Add(map, identifier, title);
+                            Add(map, identifier, title, isCSharp: true);
                         }
                     }
                     catch (IOException) { }
@@ -828,7 +850,7 @@ public static class CSharpToSegTranspiler
                         var source = new DslSource(candidatePath, File.ReadAllText(candidatePath));
                         var parsed = DslParser.Parse(source);
                         foreach (var named in FindNamedCutscenes(parsed.Document.Declarations))
-                            Add(map, named.Id, DslNamedCutsceneTitle(named));
+                            Add(map, named.Id, DslNamedCutsceneTitle(named), isCSharp: false);
                     }
                     catch (IOException) { }
                 }
@@ -837,14 +859,10 @@ public static class CSharpToSegTranspiler
         }
         if (index.TryGetValue(id, out var result))
         {
-            if (result.Conflict)
-            {
-                conflict = true;
-                return null;
-            }
-            return result.Title;
+            return ResolveNamedCutsceneContext(result, ref conflict, ref invalid);
         }
-        return FindNamedCutsceneTitle(invocation.SyntaxTree.GetRoot(), id);
+        var fallback = FindNamedCutsceneContext(invocation.SyntaxTree.GetRoot(), id);
+        return ResolveNamedCutsceneContext(fallback, ref conflict, ref invalid);
     }
 
     private static IEnumerable<NamedCutsceneStatement> FindNamedCutscenes(IEnumerable<DslDeclaration> declarations)
@@ -897,11 +915,36 @@ public static class CSharpToSegTranspiler
         }
     }
 
-    private static string? FindNamedCutsceneTitle(SyntaxNode root, string id)
+    private static NamedCutsceneContextValue? FindNamedCutsceneContext(SyntaxNode root, string id)
     {
         var declaration = FindNamedCutsceneDeclarations(root)
             .FirstOrDefault(x => DeclarationIdentifier(x) == id);
-        return declaration is null ? null : NamedCutsceneTitleFromDeclaration(declaration);
+        return declaration is null
+            ? null
+            : new(true, NamedCutsceneTitleFromDeclaration(declaration), false, null, false);
+    }
+
+    private static string? ResolveNamedCutsceneContext(NamedCutsceneContextValue? value, ref bool conflict, ref bool invalid)
+    {
+        if (value is null) return null;
+        if (value.Conflict)
+        {
+            conflict = true;
+            return null;
+        }
+        if ((value.HasCSharpDeclaration && value.CSharpTitle is null)
+            || (value.HasSegDeclaration && value.SegTitle is null))
+        {
+            invalid = true;
+            return null;
+        }
+        if (value.CSharpTitle is not null && value.SegTitle is not null
+            && !string.Equals(value.CSharpTitle, value.SegTitle, StringComparison.Ordinal))
+        {
+            conflict = true;
+            return null;
+        }
+        return value.CSharpTitle ?? value.SegTitle;
     }
 
     private static string? DeclarationIdentifier(SyntaxNode declaration) => declaration switch

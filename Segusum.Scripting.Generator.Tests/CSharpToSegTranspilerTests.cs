@@ -450,6 +450,22 @@ public sealed class CSharpToSegTranspilerTests
     }
 
     [Fact]
+    public void NamedCutsceneDeclarationWithoutResolvableTitleIsDiagnostic()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "segusum-c2seg-missing-title-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            File.WriteAllText(Path.Combine(directory, "objects.cs"), "class W { NamedCutSceneId ncs = new() { serId = \"ncs\" }; }");
+            var result = CSharpToSegTranspiler.Transpile(Path.Combine(directory, "handlers.cs"),
+                "class W { void M() { addHandlerUseHere(a, handler: i => { using (namedCutScene(ncs, roomA)) { dial(camilla, \"A\"); } }); } }",
+                true, null, "game", directory);
+            Assert.Contains(result.Diagnostics, x => x.Reason.Contains("has no resolvable title", StringComparison.Ordinal));
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    [Fact]
     public void NamedCutsceneTitleConflictBetweenCSharpAndSegIsDiagnostic()
     {
         var directory = Path.Combine(Path.GetTempPath(), "segusum-c2seg-seg-conflict-" + Guid.NewGuid().ToString("N"));
