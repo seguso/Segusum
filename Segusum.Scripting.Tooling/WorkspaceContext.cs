@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -58,9 +59,12 @@ public sealed class MsBuildWorkspaceContext : ICSharpWorkspaceContext, IDisposab
     public static async Task<MsBuildWorkspaceContext> OpenProjectAsync(string projectPath, CancellationToken cancellationToken = default)
     {
         var workspace = MSBuildWorkspace.Create();
+        LogMemory("msbuild-workspace-created", projectPath);
         var project = await workspace.OpenProjectAsync(projectPath, cancellationToken: cancellationToken).ConfigureAwait(false);
+        LogMemory("msbuild-project-opened", projectPath);
         var compilation = await project.GetCompilationAsync(cancellationToken).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"Could not create a compilation for '{projectPath}'.");
+        LogMemory("msbuild-compilation-created", projectPath);
         return new MsBuildWorkspaceContext(workspace, compilation);
     }
 
@@ -76,4 +80,10 @@ public sealed class MsBuildWorkspaceContext : ICSharpWorkspaceContext, IDisposab
     }
 
     public void Dispose() => workspace.Dispose();
+
+    private static void LogMemory(string phase, string projectPath)
+    {
+        using var process = Process.GetCurrentProcess();
+        Console.Error.WriteLine($"workspaceMemory phase={phase} project={projectPath} workingSetMB={process.WorkingSet64 / 1024 / 1024} privateMB={process.PrivateMemorySize64 / 1024 / 1024} managedMB={GC.GetTotalMemory(false) / 1024 / 1024}");
+    }
 }
