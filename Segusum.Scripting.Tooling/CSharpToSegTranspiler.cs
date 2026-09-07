@@ -556,7 +556,7 @@ public static class CSharpToSegTranspiler
                     if (e != null) { sb.Append(indent).AppendLine("else:"); EnsureOneBlankLineAfterHeader(sb); EmitStatements(e.Statement is BlockSyntax eb ? eb.Statements : new[] { e.Statement }, sb, diagnostics, level + 1, partial, includeComments, contextRoot); }
                     sb.Append(indent).AppendLine("end"); break;
                 case ExpressionStatementSyntax x when x.Expression is AssignmentExpressionSyntax a:
-                    if (a.Right is InvocationExpressionSyntax add && CallName(add) == "addToCycle") EmitCycleChain(add, sb, diagnostics, level, partial);
+                    if (a.Right is InvocationExpressionSyntax add && CallName(add) == "addToCycle") EmitCycleChain(add, sb, diagnostics, level, partial, true, contextRoot);
                     else if (a.Left.ToString().EndsWith("makesNoSenseAtThisTime", StringComparison.Ordinal) && a.Right.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.TrueLiteralExpression)) sb.Append(indent).AppendLine("makes-no-sense");
                     else if (a.Left.ToString().EndsWith("textInputToShow", StringComparison.Ordinal)) sb.Append(indent).Append("text-input ").AppendLine(Expression(a.Right));
                     else AppendFormattedExpression(sb, indent + Expression(a.Left) + " " + a.OperatorToken.Text + " ", a.Right, level); break;
@@ -763,10 +763,11 @@ public static class CSharpToSegTranspiler
         {
             return FindNamedCutsceneTitle(invocation.SyntaxTree.GetRoot(), id);
         }
+        var cacheKey = directory + (string.IsNullOrWhiteSpace(contextRoot) ? "|top-directory" : "|all-directories");
         IReadOnlyDictionary<string, string?> index;
         lock (NamedCutsceneIndexLock)
         {
-            if (!NamedCutsceneIndexCache.TryGetValue(directory, out index!))
+            if (!NamedCutsceneIndexCache.TryGetValue(cacheKey, out index!))
             {
                 var map = new Dictionary<string, string?>(StringComparer.Ordinal);
                 var searchOption = !string.IsNullOrWhiteSpace(contextRoot) ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
@@ -786,7 +787,7 @@ public static class CSharpToSegTranspiler
                     }
                     catch (IOException) { }
                 }
-                NamedCutsceneIndexCache[directory] = index = map;
+                NamedCutsceneIndexCache[cacheKey] = index = map;
             }
         }
         return index.TryGetValue(id, out var result) ? result : FindNamedCutsceneTitle(invocation.SyntaxTree.GetRoot(), id);
