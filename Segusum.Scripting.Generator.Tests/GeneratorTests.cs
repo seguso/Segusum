@@ -696,13 +696,28 @@ public NamedCutSceneId ncsMikeStalloneIlBenefattore = null!;
     public void CycleElementIdGeneratesOneExactPropertyAndUsesIt()
     {
         var result = Run("var cyc = new-cycle\nadd cyc xww7\nend\nadd cyc xww7\nend");
-        Assert.Contains(result.Diagnostics, d => d.GetMessage().Contains("Duplicate CycleElementId"));
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL"));
 
         var valid = Run("var cyc = new-cycle\nadd cyc xww7\nend\nnext cyc");
         AssertGeneratedCompilationSucceeds(valid);
         var generated = Generated(valid);
         Assert.Equal(1, Count(generated, "public CycleElemId xww7 { get; set; } = new();"));
         Assert.Contains("addToCycle(xww7", generated);
+    }
+
+    [Fact]
+    public void ReusedNamedCutsceneIdInternsOneSymbolWhenMetadataMatches()
+    {
+        var result = Run("use thing here:\n    named-cutscene ncsTest \"Titolo\" curRoom thing:\n    end\n    named-cutscene ncsTest \"Titolo\" curRoom thing:\n    end\nend", "public LogicObj thing = null!;");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL"));
+        Assert.Equal(1, Count(Generated(result), "NamedCutSceneId ncsTest"));
+    }
+
+    [Fact]
+    public void UnknownHelperTypeProducesExplicitDiagnostic()
+    {
+        var result = Run("def helper value: DefinitelyUnknownType:\nend");
+        Assert.Contains(result.Diagnostics, d => d.GetMessage().Contains("Unknown SEG type 'DefinitelyUnknownType'", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -1014,7 +1029,7 @@ public NamedCutSceneId ncsMikeStalloneIlBenefattore = null!;
     public void NamedCutsceneIdsMustBeUnique()
     {
         var result = Run("use thing here:\n    named-cutscene ncsTest \"Titolo 1\" curRoom thing:\n    end\n    named-cutscene ncsTest \"Titolo 2\" curRoom thing:\n    end\n    named-cutscene missing \"Titolo 3\" curRoom thing:\n    end\nend", "public LogicObj thing = null!;");
-        Assert.Contains(result.Diagnostics, d => d.GetMessage().Contains("Duplicate named-cutscene id 'ncsTest'", StringComparison.Ordinal));
+        Assert.Contains(result.Diagnostics, d => d.GetMessage().Contains("reused with incompatible titles", StringComparison.Ordinal));
     }
 
     [Fact]

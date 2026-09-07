@@ -109,6 +109,7 @@ public sealed class DslBinder
     private readonly Dictionary<string, ITypeSymbol> globals = new(StringComparer.Ordinal);
     private readonly Dictionary<string, ITypeSymbol> cycleElementGlobals = new(StringComparer.Ordinal);
     private readonly Dictionary<string, ITypeSymbol> namedCutsceneGlobals = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> namedCutsceneMetadata = new(StringComparer.Ordinal);
     private readonly Dictionary<string, BoundSymbolKind> globalKinds = new(StringComparer.Ordinal);
     private readonly Dictionary<string, FunctionDeclaration> functions = new(StringComparer.Ordinal);
     private readonly BoundModel model = new();
@@ -247,7 +248,30 @@ public sealed class DslBinder
     private void AddGlobal(string name, ITypeSymbol? type, SourceSpan span, BoundSymbolKind kind)
     { if (kind == BoundSymbolKind.CycleElementId) { if (!Microsoft.CodeAnalysis.CSharp.SyntaxFacts.IsValidIdentifier(name) || name.Contains('-')) { Report("SEGDSL318", "CycleElementId must be a stable C# identifier and cannot contain '-'.", span); return; } if (cycleElementGlobals.ContainsKey(name)) { model.References[name] = name; return; } var existing = ResolveCSharpCandidates(name).FirstOrDefault(); if (existing != null) { var existingType = existing switch { IFieldSymbol field => field.Type, IPropertySymbol property => property.Type, _ => null }; if (existingType != null) cycleElementGlobals[name] = existingType; } else if (type != null) cycleElementGlobals[name] = type; AddDslIdentity(name, "cycle-element", span); model.References[name] = name; return; } var key = NormalizeKey(name); if (globals.ContainsKey(key)) { if (globalKinds.TryGetValue(key, out var existingKind) && existingKind == kind) { model.References[name] = Name(name); return; } Report(kind == BoundSymbolKind.NamedCutsceneId ? "SEGDSL324" : "SEGDSL304", $"Duplicate or normalized-colliding global '{name}'.", span); } else if (type != null) { globals[key] = type; globalKinds[key] = kind; model.References[name] = Name(name); } }
     private void BindFunction(FunctionDeclaration f)
-    { var scope = new Dictionary<string, ITypeSymbol>(StringComparer.Ordinal); currentParameters.Clear(); activeDslSymbols.Clear(); foreach (var p in f.Parameters) { scope[NormalizeKey(p.Name)] = TypeOf(p.Type)!; currentParameters.Add(NormalizeKey(p.Name)); AddLocalIdentity(p.Name, "parameter", f.Span); } BindStatements(f.Body, scope, f.ReturnType == null ? null : TypeOf(f.ReturnType)); currentParameters.Clear(); activeDslSymbols.Clear(); }
+    {
+        var scope = new Dictionary<string, ITypeSymbol>(StringComparer.Ordinal);
+        currentParameters.Clear();
+        activeDslSymbols.Clear();
+        foreach (var p in f.Parameters)
+        {
+            var parameterType = TypeOf(p.Type);
+            if (parameterType == null)
+                Report("SEGDSL313", $"Unknown SEG type '{p.Type}' for parameter '{p.Name}'.", f.Span);
+            scope[NormalizeKey(p.Name)] = parameterType ?? compilation.GetSpecialType(SpecialType.System_Object);
+            currentParameters.Add(NormalizeKey(p.Name));
+            AddLocalIdentity(p.Name, "parameter", f.Span);
+        }
+        ITypeSymbol? returnType = null;
+        if (f.ReturnType != null)
+        {
+            returnType = TypeOf(f.ReturnType);
+            if (returnType == null)
+                Report("SEGDSL313", $"Unknown SEG return type '{f.ReturnType}'.", f.Span);
+        }
+        BindStatements(f.Body, scope, returnType);
+        currentParameters.Clear();
+        activeDslSymbols.Clear();
+    }
     private void BindHandler(HandlerDeclaration h)
     {
         var first = BindName(h.First, h.FirstSpan); var second = h.Second == null ? null : BindName(h.Second, h.SecondSpan ?? h.Span); var target = h.Target == null ? null : BindName(h.Target, h.TargetSpan ?? h.Span);
@@ -370,6 +394,7 @@ public sealed class DslBinder
     private void AddNamedCutsceneGlobal(NamedCutsceneStatement statement)
     {
         var key = NormalizeKey(statement.Id);
+        RegisterNamedCutsceneMetadata(key, statement);
         var existing = ResolveCSharpMembers(statement.Id).FirstOrDefault();
         if (existing != null)
         {
@@ -382,6 +407,17 @@ public sealed class DslBinder
         if (globals.ContainsKey(key)) { Report("SEGDSL324", $"Duplicate named-cutscene id '{statement.Id}'.", statement.IdSpan); return; }
         if (namedCutsceneId != null) namedCutsceneGlobals[key] = namedCutsceneId;
         model.References[statement.Id] = Name(statement.Id);
+    }
+    private void RegisterNamedCutsceneMetadata(string key, NamedCutsceneStatement statement)
+    {
+        if (statement.Title is not LiteralExpression title) return;
+        if (namedCutsceneMetadata.TryGetValue(key, out var previousTitle))
+        {
+            if (!string.Equals(previousTitle, title.Value, StringComparison.Ordinal))
+                Report("SEGDSL324", $"NamedCutSceneId '{statement.Id}' is reused with incompatible titles.", statement.IdSpan);
+            return;
+        }
+        namedCutsceneMetadata[key] = title.Value;
     }
     private ITypeSymbol? BindExpression(DslExpression expression, Dictionary<string, ITypeSymbol> scope, ITypeSymbol? contextualIt = null)
         => profile.Measure("BindExpression", () => BindExpressionCore(expression, scope, contextualIt));
@@ -799,7 +835,40 @@ public sealed class DslBinder
         => profile.Measure("Roslyn.GetSemanticModel", () => compilation.GetSemanticModel(tree));
     private SyntaxNode GetRoot(SyntaxTree tree)
         => profile.Measure("Roslyn.GetRoot", () => tree.GetRoot());
-    private ITypeSymbol? TypeOf(string name) => name switch { "int" => compilation.GetSpecialType(SpecialType.System_Int32), "bool" => compilation.GetSpecialType(SpecialType.System_Boolean), "string" => compilation.GetSpecialType(SpecialType.System_String), _ => GetTypeByMetadataName(name.StartsWith("Seg.", StringComparison.Ordinal) ? name : "Seg." + name) ?? GetTypeByMetadataName(name) };
+    private ITypeSymbol? TypeOf(string name)
+    {
+        var normalized = name.Trim();
+        return normalized switch
+        {
+            "void" => compilation.GetSpecialType(SpecialType.System_Void),
+            "bool" => compilation.GetSpecialType(SpecialType.System_Boolean),
+            "byte" => compilation.GetSpecialType(SpecialType.System_Byte),
+            "char" => compilation.GetSpecialType(SpecialType.System_Char),
+            "decimal" => compilation.GetSpecialType(SpecialType.System_Decimal),
+            "double" => compilation.GetSpecialType(SpecialType.System_Double),
+            "float" => compilation.GetSpecialType(SpecialType.System_Single),
+            "int" => compilation.GetSpecialType(SpecialType.System_Int32),
+            "long" => compilation.GetSpecialType(SpecialType.System_Int64),
+            "object" => compilation.GetSpecialType(SpecialType.System_Object),
+            "short" => compilation.GetSpecialType(SpecialType.System_Int16),
+            "string" => compilation.GetSpecialType(SpecialType.System_String),
+            "DateTime" => dateTime,
+            "DateTime?" => dateTimeNullable,
+            _ => ResolveNominalType(normalized)
+        };
+    }
+    private ITypeSymbol? ResolveNominalType(string name)
+    {
+        var metadataCandidates = name.StartsWith("Seg.", StringComparison.Ordinal)
+            ? new[] { name }
+            : new[] { "Seg." + name, name, "System." + name };
+        foreach (var candidate in metadataCandidates)
+        {
+            var type = GetTypeByMetadataName(candidate);
+            if (type != null) return type;
+        }
+        return TryGetTypeBySimpleName(name, out var simpleType) ? simpleType : null;
+    }
     private string NormalizeKey(string name) => profile.Measure("NormalizeKey", () => DslNames.Camel(name).ToUpperInvariant());
     private void Require(ITypeSymbol? actual, ITypeSymbol? expected, SourceSpan span, string message) { if (actual == null || expected == null || !Compatible(actual, expected)) Report("SEGDSL313", message, span); }
     private void Report(string id, string message, SourceSpan span) { if (!suppressDiagnostics) report(new DslDiagnostic(id, message, span)); }
