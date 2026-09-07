@@ -24,6 +24,19 @@ public sealed class GeneratorTests
     }
 
     [Fact]
+    public void ApplicationParsingIsLeftAssociativeAndParenthesizedCallsNest()
+    {
+        var result = Run("def direct ret bool:\n    ret foo a b\nend\ndef nested ret bool:\n    ret foo (bar a) b\nend\ndef deeplyNested ret bool:\n    ret foo (bar (baz a)) b\nend\ndef infix ret bool:\n    ret foo a b and c\nend\ndef groupedInfix ret bool:\n    ret foo a (b and c)\nend", "public bool a; public bool b; public bool c; public bool foo(bool x, bool y) => x && y; public bool bar(bool x) => x; public bool baz(bool x) => x;");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL", StringComparison.Ordinal));
+        var generated = Generated(result);
+        Assert.Contains("return foo(a, b);", generated, StringComparison.Ordinal);
+        Assert.Contains("return foo(bar(a), b);", generated, StringComparison.Ordinal);
+        Assert.Contains("return foo(bar(baz(a)), b);", generated, StringComparison.Ordinal);
+        Assert.Contains("return foo(a, b) && c;", generated, StringComparison.Ordinal);
+        Assert.Contains("return foo(a, b && c);", generated, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void BareRetParsesAndGeneratesVoidReturn()
     {
         var parsed = DslParser.Parse(new DslSource("bare-ret.seg", "world game\ndef helper:\n    ret\nend\n"));

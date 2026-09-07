@@ -431,7 +431,18 @@ public static class DslParser
                 var whenFalse = Expression();
                 return new ConditionalExpression(condition, whenTrue, whenFalse, span);
             }
-            if (Current.Kind == DslTokenKind.LParen) { Take(); var parenthesized = Expression(); Need(")"); return new ParenthesizedExpression(parenthesized, span); }
+            if (Current.Kind == DslTokenKind.LParen)
+            {
+                Take();
+                // Parentheses explicitly re-enter expression parsing. This is
+                // what makes `foo (bar a) b` different from `foo bar a b`:
+                // the former has one nested call as its first argument,
+                // while the latter has three application arguments.
+                var previous = parsingCallArgument;
+                parsingCallArgument = false;
+                try { return new ParenthesizedExpression(Expression(), span); }
+                finally { parsingCallArgument = previous; }
+            }
             if (Current.Kind == DslTokenKind.LBracket)
             {
                 profile.Count("list-literals");
