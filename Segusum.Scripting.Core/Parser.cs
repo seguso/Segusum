@@ -90,7 +90,10 @@ public static class DslParser
         private DslToken Current => tokens[position];
         private bool Is(string text) { profile.Count("Is"); return Current.Text == text; }
         private bool Is(DslTokenKind kind) { profile.Count("IsKind"); return Current.Kind == kind; }
-        private DslToken Take() { profile.Count("Take"); return tokens[position++]; }
+        private DslToken Take()
+        {
+            profile.Count("Take"); return tokens[position++];
+        }
         private void SkipTerminators() { while (Current.Kind is DslTokenKind.NewLine or DslTokenKind.Semicolon) Take(); }
         private void Need(string text) { if (Is(text)) Take(); else Error($"Expected '{text}'."); }
         private string Word() => WordToken().Text;
@@ -440,7 +443,12 @@ public static class DslParser
                 // while the latter has three application arguments.
                 var previous = parsingCallArgument;
                 parsingCallArgument = false;
-                try { return new ParenthesizedExpression(Expression(), span); }
+                try
+                {
+                    var parenthesized = Expression();
+                    Need(")");
+                    return new ParenthesizedExpression(parenthesized, span);
+                }
                 finally { parsingCallArgument = previous; }
             }
             if (Current.Kind == DslTokenKind.LBracket)
