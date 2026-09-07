@@ -126,6 +126,32 @@ public sealed class CSharpToSegTranspilerTests
     }
 
     [Fact]
+    public void ExplicitArrayCreationUsesExistingListLiteralSyntax()
+    {
+        var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { void M() { addHandlerUseHere(a, handler: i => { foo(new Foo[] { a, b, c }); }); } }");
+        Assert.Contains("foo [a, b, c]", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(result.Diagnostics, x => x.Status == MigrationUnitStatus.Unsupported);
+    }
+
+    [Fact]
+    public void ImplicitArrayCreationUsesExistingListLiteralSyntax()
+    {
+        var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { void M() { addHandlerUseHere(a, handler: i => { var xs = new[] { a, b, c }; foo(xs); }); } }");
+        Assert.Contains("var xs = [a, b, c]", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(result.Diagnostics, x => x.Status == MigrationUnitStatus.Unsupported);
+    }
+
+    [Fact]
+    public void ArrayCreationPreservesNestedExpressionsAndWorksAsNamedCutsceneArgument()
+    {
+        const string source = "class W { void M() { addHandlerUseHere(a, handler: i => { using (namedCutScene(ncs, roomA, new Mentionable[] { foo(x), this, \"[[translation]]\" })) { bar(); } }); } }";
+        var result = CSharpToSegTranspiler.Transpile("x.cs", source, true);
+        Assert.Contains("named-cutscene ncs", result.Text, StringComparison.Ordinal);
+        Assert.Contains("[foo x, this, \"[[translation]]\"]", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(result.Diagnostics, x => x.Reason.Contains("ArrayCreationExpression", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void NamedCutsceneTitleIsResolvedAcrossSiblingSourceFiles()
     {
         var directory = Path.Combine(Path.GetTempPath(), "segusum-c2seg-" + Guid.NewGuid().ToString("N"));

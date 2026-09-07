@@ -687,6 +687,8 @@ public static class CSharpToSegTranspiler
             MemberAccessExpressionSyntax x => Expression(x.Expression) + "." + x.Name.Identifier.ValueText,
             InvocationExpressionSyntax x => EmitCallExpression(x),
             CollectionExpressionSyntax x => "[" + string.Join(", ", x.Elements.Select(EmitCollectionElement)) + "]",
+            ArrayCreationExpressionSyntax x when x.Initializer is not null => EmitArrayInitializer(x.Initializer),
+            ImplicitArrayCreationExpressionSyntax x => EmitArrayInitializer(x.Initializer),
             ConditionalExpressionSyntax x => "if " + Expression(x.Condition) + " then " + Expression(x.WhenTrue) + " else " + Expression(x.WhenFalse),
             ArgumentSyntax x => (x.NameColon is null ? "" : x.NameColon.Name.Identifier.ValueText + ": ") + Expression(x.Expression),
             _ => throw new InvalidOperationException("Unsupported C# expression: " + node.Kind())
@@ -718,6 +720,9 @@ public static class CSharpToSegTranspiler
         => element is ExpressionElementSyntax expression
             ? Expression(expression.Expression)
             : throw new InvalidOperationException("Unsupported C# collection element: " + element.Kind());
+
+    private static string EmitArrayInitializer(InitializerExpressionSyntax initializer)
+        => "[" + string.Join(", ", initializer.Expressions.Select(Expression)) + "]";
 
     private static string EmitCallExpression(InvocationExpressionSyntax invocation)
     {

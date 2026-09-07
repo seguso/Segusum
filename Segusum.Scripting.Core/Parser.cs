@@ -281,7 +281,11 @@ public static class DslParser
             {
                 SkipHeaderNewLines();
                 if (Is(":") || Current.Kind == DslTokenKind.EndOfFile) break;
-                args.Add(ParseSimpleExpression());
+                // Named-cutscene arguments are normally simple atoms, but a
+                // generated C# array is emitted as the existing SEG list
+                // literal. Parse that structured expression instead of
+                // letting ParseSimpleExpression stall on '['.
+                args.Add(Current.Kind == DslTokenKind.LBracket ? Expression() : ParseSimpleExpression());
             }
             Need(":"); return new NamedCutsceneStatement(id.Text, title, args, ParseBody(false), span) { IdSpan = id.Span };
         }
