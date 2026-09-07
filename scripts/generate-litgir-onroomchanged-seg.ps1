@@ -1,9 +1,9 @@
-$ErrorActionPreference = 'Stop'
-
 param(
     [string]$LitgirRoot = (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'litgir'),
     [string]$SegusumRoot = (Split-Path -Parent $PSScriptRoot)
 )
+
+$ErrorActionPreference = 'Stop'
 
 $segusumRoot = (Resolve-Path $SegusumRoot).Path
 $litgirRoot = (Resolve-Path $LitgirRoot).Path
