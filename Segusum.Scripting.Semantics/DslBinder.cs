@@ -815,6 +815,8 @@ public sealed class DslBinder
         if (typeCandidatesBuilt) return;
         typeCandidatesBuilt = true;
         VisitAllTypesForCandidates(compilation.GlobalNamespace);
+        foreach (var assembly in compilation.SourceModule.ReferencedAssemblySymbols)
+            VisitAllTypesForCandidates(assembly.GlobalNamespace);
     }
     private void VisitAllTypesForCandidates(INamespaceSymbol current)
     {
