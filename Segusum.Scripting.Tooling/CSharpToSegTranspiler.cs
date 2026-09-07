@@ -979,10 +979,16 @@ public static class CSharpToSegTranspiler
     {
         result = "";
         InvocationExpressionSyntax source = invocation;
-        if (CallName(source) == "ToList" && source.ArgumentList.Arguments.Count == 0
+        var materialized = false;
+        if ((CallName(source) == "ToList" || CallName(source) == "ToArray") && source.ArgumentList.Arguments.Count == 0
             && source.Expression is MemberAccessExpressionSyntax toListMember
             && toListMember.Expression is InvocationExpressionSyntax nested)
+        {
             source = nested;
+            materialized = true;
+        }
+
+        if (!materialized) return false;
 
         if (CallName(source) != "Where" || source.ArgumentList.Arguments.Count != 1
             || source.Expression is not MemberAccessExpressionSyntax whereMember

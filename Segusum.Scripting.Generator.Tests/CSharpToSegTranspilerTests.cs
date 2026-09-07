@@ -420,6 +420,16 @@ public sealed class CSharpToSegTranspilerTests
     }
 
     [Fact]
+    public void BareLinqWhereIsNotMaterializedAsListComprehension()
+    {
+        const string source = "class W { void M() { addHandlerUseHere(a, handler: i => { var filtered = values.Where(x => x.ready); }); } }";
+        var result = CSharpToSegTranspiler.Transpile("where.cs", source, emitPartial: true);
+
+        Assert.DoesNotContain("[from values", result.Text, StringComparison.Ordinal);
+        Assert.Contains("C2SEG-MANUAL-BEGIN", result.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void UnsupportedLinqIsNeverEmittedAsExecutableSeg()
     {
         var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { void M() { addHandlerUseHere(a, handler: i => { var n = values.Count(x => x > 0); }); } }");
