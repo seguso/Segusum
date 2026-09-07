@@ -14,6 +14,18 @@ public static class DslLexer
    var tokenLine=line;var tokenColumn=column;
    if(c==' '||c=='\t'||c=='\r'){Advance(c);continue;}
    if(c=='#'||(c=='/'&&i+1<t.Length&&t[i+1]=='/')){while(i<t.Length&&t[i]!='\n')Advance(t[i]);continue;}
+   if(c=='/'&&i+1<t.Length&&t[i+1]=='*')
+   {
+    Advance(c); Advance(t[i]);
+    var terminated = false;
+    while(i<t.Length)
+    {
+     if(t[i]=='*'&&i+1<t.Length&&t[i+1]=='/') { Advance(t[i]); Advance(t[i]); terminated = true; break; }
+     Advance(t[i]);
+    }
+    if(!terminated) diagnostics.Add(new("SEGDSL100", "Unterminated block comment.", new SourceSpan(source.Path,s,2,tokenLine,tokenColumn)));
+    continue;
+   }
    if(c=='\n'){r.Add(new(DslTokenKind.NewLine,"\n",new SourceSpan(source.Path,i,1,line,column)));Advance(c);continue;}
    if(c==';'){r.Add(new(DslTokenKind.Semicolon,";",new SourceSpan(source.Path,s,1,tokenLine,tokenColumn)));Advance(c);continue;}
    if(c==':'){r.Add(new(DslTokenKind.Colon,":",new SourceSpan(source.Path,s,1,tokenLine,tokenColumn)));Advance(c);continue;}

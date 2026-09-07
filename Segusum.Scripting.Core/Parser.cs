@@ -84,9 +84,27 @@ public static class DslParser
         private readonly List<DslDiagnostic> diagnostics;
         private readonly string sourceText;
         private readonly DslParserProfile profile;
+        private readonly int[] lineStarts;
         private int position;
         private bool parsingCallArgument;
-        public Parser(IReadOnlyList<DslToken> tokens, List<DslDiagnostic> diagnostics, string sourceText, DslParserProfile profile) { this.tokens = tokens; this.diagnostics = diagnostics; this.sourceText = sourceText; this.profile = profile; }
+        public Parser(IReadOnlyList<DslToken> tokens, List<DslDiagnostic> diagnostics, string sourceText, DslParserProfile profile)
+        {
+            this.tokens = tokens; this.diagnostics = diagnostics; this.sourceText = sourceText; this.profile = profile;
+            lineStarts = BuildLineStarts(sourceText);
+        }
+        private static int[] BuildLineStarts(string text)
+        {
+            var starts = new List<int> { 0 };
+            for (var i = 0; i < text.Length; i++) if (text[i] == '\n') starts.Add(i + 1);
+            return starts.ToArray();
+        }
+        private SourceSpan SpanAt(int start, int length)
+        {
+            start = start < 0 ? 0 : start > sourceText.Length ? sourceText.Length : start;
+            var line = Array.BinarySearch(lineStarts, start);
+            if (line < 0) line = ~line - 1;
+            return new(tokens[0].Span.Path, start, length, line + 1, start - lineStarts[line] + 1);
+        }
         private DslToken Current => tokens[position];
         private bool Is(string text) { profile.Count("Is"); return Current.Text == text; }
         private bool Is(DslTokenKind kind) { profile.Count("IsKind"); return Current.Kind == kind; }
@@ -282,7 +300,7 @@ public static class DslParser
             }
             var text = StripComment(content.Substring(0, textEnd)).Trim();
             if (text.Length == 0) Error("Dialogue text cannot be empty.");
-            var expression = new LiteralExpression(text, text.Length >= 2 && text[0] == '"' && text[text.Length - 1] == '"' ? "string" : "raw-string", SourceSpan.From(colon.Span.Path, sourceText, contentStart, text.Length));
+            var expression = new LiteralExpression(text, text.Length >= 2 && text[0] == '"' && text[text.Length - 1] == '"' ? "string" : "raw-string", SpanAt(contentStart, text.Length));
             return factory(expression, insta);
         }
         private static int FindInstaMarker(string content)
@@ -360,7 +378,7 @@ public static class DslParser
             var actualStart = Math.Min(start, sourceText.Length);
             var text = StripComment(sourceText.Substring(actualStart, Math.Max(0, end - actualStart))).Trim();
             if (text.Length == 0) Error("Dialogue text cannot be empty.");
-            return new LiteralExpression(text, text.Length >= 2 && text[0] == '"' && text[text.Length - 1] == '"' ? "string" : "raw-string", SourceSpan.From(tokens[Math.Max(0, position - 1)].Span.Path, sourceText, actualStart, text.Length));
+            return new LiteralExpression(text, text.Length >= 2 && text[0] == '"' && text[text.Length - 1] == '"' ? "string" : "raw-string", SpanAt(actualStart, text.Length));
         }
         private static string StripComment(string text)
         {

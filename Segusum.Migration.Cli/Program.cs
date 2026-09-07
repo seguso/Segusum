@@ -1,10 +1,27 @@
 using Segusum.Scripting.Tooling;
+using Segusum.Scripting.Core;
 
 if (args.Length == 0 || args[0] is "--help" or "-h")
 {
     Console.WriteLine("segusum migrate-csharp <file.cs> --world WORLD [--output FILE] [--audit] [--emit-partial] [--method NAME] [--dry-run]");
     Console.WriteLine("segusum audit-ownership <file.seg> --runtime-root DIR --history FILE [--apply]");
+    Console.WriteLine("segusum parse-seg <file.seg>");
     return 0;
+}
+if (string.Equals(args[0], "parse-seg", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length != 2) { Console.Error.WriteLine("Usage: parse-seg <file.seg>"); return 2; }
+    var segPath = Path.GetFullPath(args[1]);
+    var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+    var parsed = DslParser.Parse(new Segusum.Scripting.Core.DslSource(segPath, File.ReadAllText(segPath)));
+    stopwatch.Stop();
+    Console.WriteLine($"file: {segPath}");
+    Console.WriteLine($"declarations: {parsed.Document.Declarations.Count}");
+    Console.WriteLine($"diagnostics: {parsed.Diagnostics.Count}");
+    Console.WriteLine($"elapsed-ms: {stopwatch.Elapsed.TotalMilliseconds:0}");
+    Console.WriteLine($"managed-memory: {GC.GetTotalMemory(false)}");
+    foreach (var diagnostic in parsed.Diagnostics) Console.WriteLine($"{diagnostic.Id}: {diagnostic.Span.Line}:{diagnostic.Span.Column}: {diagnostic.Message}");
+    return parsed.Diagnostics.Count == 0 ? 0 : 1;
 }
 if (string.Equals(args[0], "audit-ownership", StringComparison.OrdinalIgnoreCase))
 {

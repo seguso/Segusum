@@ -1,3 +1,5 @@
+using System;
+using System.Linq;
 using Segusum.Scripting.Core;
 
 namespace Segusum.Translator.Core.Tests;
@@ -130,5 +132,28 @@ end
     {
         var result = DslParser.Parse(new DslSource("chained.seg", "world game\ndef check a: int, b: int, c: int ret bool:\n ret a < b < c\nend"));
         Assert.Contains(result.Diagnostics, x => x.Id == "SEGDSL105");
+    }
+
+    [Fact]
+    public void LargeDocumentWithManyNarrativeSpansParsesStructurally()
+    {
+        var handlers = string.Join("\n", Enumerable.Range(0, 1000).Select(i => $"use object{i} here:\n    nar: Narrative {i}\nend"));
+        var result = DslParser.Parse(new DslSource("large.seg", "world game\n" + handlers));
+
+        Assert.Empty(result.Diagnostics);
+        Assert.Equal(1000, result.Document.Declarations.Count);
+        Assert.All(result.Document.Declarations.OfType<HandlerDeclaration>(), handler =>
+            Assert.IsType<NarStatement>(handler.Body.Single()));
+    }
+
+    [Fact]
+    public void LargeDocumentWithBlockCommentsKeepsParserLinearAndStructured()
+    {
+        var handlers = string.Join("\n", Enumerable.Range(0, 500).Select(i => $"/* design note {i}\n   still a comment */\nuse object{i} here:\n    nar: Narrative {i}\nend"));
+        var result = DslParser.Parse(new DslSource("large-comments.seg", "world game\n" + handlers));
+
+        Assert.Empty(result.Diagnostics);
+        Assert.Equal(500, result.Document.Declarations.Count);
+        Assert.All(result.Document.Declarations, declaration => Assert.IsType<HandlerDeclaration>(declaration));
     }
 }
