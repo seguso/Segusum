@@ -37,7 +37,7 @@ public static class DslLexer
    if(c=='"'){Advance(c);while(i<t.Length&&t[i]!='"'){var current=t[i];Advance(current);if(current=='\\'&&i<t.Length)Advance(t[i]);}if(i>=t.Length){diagnostics.Add(new("SEGDSL100","Unterminated string literal.",new SourceSpan(source.Path,s,1,tokenLine,tokenColumn)));break;}Advance(t[i]);r.Add(new(DslTokenKind.String,t.Substring(s,i-s),new SourceSpan(source.Path,s,i-s,tokenLine,tokenColumn)));continue;}
    if(char.IsDigit(c)){while(i<t.Length&&(char.IsDigit(t[i])||t[i]=='.'))Advance(t[i]);r.Add(new(DslTokenKind.Number,t.Substring(s,i-s),new SourceSpan(source.Path,s,i-s,tokenLine,tokenColumn)));continue;}
    if(char.IsLetter(c)||c=='_'){while(i<t.Length&&(char.IsLetterOrDigit(t[i])||t[i]=='_'||t[i]=='-'))Advance(t[i]);r.Add(new(DslTokenKind.Identifier,t.Substring(s,i-s),new SourceSpan(source.Path,s,i-s,tokenLine,tokenColumn)));continue;}
-   var op=c.ToString();Advance(c);if(i<t.Length&&"=+<>".IndexOf(t[i])>=0&&(c=='='||c=='+'||c=='<'||c=='>'||c=='!')){op+=t[i];Advance(t[i]);}r.Add(new(DslTokenKind.Operator,op,new SourceSpan(source.Path,s,i-s,tokenLine,tokenColumn)));
+   var op=c.ToString();Advance(c);if(i<t.Length&&(t[i]=='='||(c=='+'&&t[i]=='+'))&&(c=='='||c=='+'||c=='<'||c=='>'||c=='!')){op+=t[i];Advance(t[i]);}r.Add(new(DslTokenKind.Operator,op,new SourceSpan(source.Path,s,i-s,tokenLine,tokenColumn)));
   }
   if (profile != null) profile.AddPhase("lexer-tokenization-loop", System.Diagnostics.Stopwatch.GetTimestamp() - loopStarted);
   var eofStarted = profile == null ? 0 : System.Diagnostics.Stopwatch.GetTimestamp();

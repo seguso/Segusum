@@ -159,9 +159,27 @@ public static class DslParser
         {
             var name = Word(); var parameters = new List<(string Name, string Type)>();
             while (!Is("ret") && !Is(":") && Current.Kind != DslTokenKind.NewLine && Current.Kind != DslTokenKind.EndOfFile)
-            { var parameter = Word(); Need(":"); parameters.Add((parameter, Word())); if (Is(",")) Take(); }
-            string? returnType = null; if (Is("ret")) { Take(); returnType = Word(); }
+            { var parameter = Word(); Need(":"); parameters.Add((parameter, ParseTypeName())); if (Is(",")) Take(); }
+            string? returnType = null; if (Is("ret")) { Take(); returnType = ParseTypeName(); }
             return new(name, parameters, returnType, ParseBody(true), span);
+        }
+        private string ParseTypeName()
+        {
+            var type = Word();
+            if (Is("<"))
+            {
+                Take();
+                var arguments = new List<string> { ParseTypeName() };
+                while (Is(",")) { Take(); arguments.Add(ParseTypeName()); }
+                Need(">");
+                type += "<" + string.Join(", ", arguments) + ">";
+            }
+            while (Is("["))
+            {
+                Take(); Need("]"); type += "[]";
+            }
+            if (Is("?")) { Take(); type += "?"; }
+            return type;
         }
         private HandlerDeclaration ParseHandler(string kind, SourceSpan span)
         {

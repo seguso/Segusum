@@ -17,6 +17,10 @@ public sealed record MigrationUnit(string Id, string Path, int Line, int EndLine
 public sealed record MigrationOutput(string Text, IReadOnlyList<MigrationDiagnostic> Diagnostics)
 {
     public IReadOnlyList<MigrationUnit> Units { get; init; } = Array.Empty<MigrationUnit>();
+    public IReadOnlyList<string> SourceComments { get; init; } = Array.Empty<string>();
+    public IReadOnlyList<string> GeneratedComments { get; init; } = Array.Empty<string>();
+    public bool CommentsPreserved => SourceComments.OrderBy(x => x, StringComparer.Ordinal)
+        .SequenceEqual(GeneratedComments.OrderBy(x => x, StringComparer.Ordinal), StringComparer.Ordinal);
     public bool IsFullyTranslated => Units.Count != 0 && Units.All(x => x.Status == MigrationUnitStatus.Translated);
 }
 
@@ -37,7 +41,7 @@ public static class CSharpToSegTranspiler
         var diagnostics = new List<MigrationDiagnostic>();
         var sb = new StringBuilder().Append("world ").Append(worldId).Append('\n');
         var root = (CompilationUnitSyntax)tree.GetRoot();
-        var reachableHelpers = ReachableHelpers(root);
+        var reachableHelpers = ReachableHelpers(root, methodName);
         foreach (var trivia in root.DescendantTrivia().Where(x => x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.SingleLineCommentTrivia) || x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.MultiLineCommentTrivia)))
             if (trivia.Token.Parent?.AncestorsAndSelf().OfType<MethodDeclarationSyntax>().Any() != true)
                 sb.AppendLine("// " + trivia.ToString().TrimStart('/').Trim());
@@ -47,7 +51,7 @@ public static class CSharpToSegTranspiler
             if (methodName != null && !invocation.Ancestors().OfType<MethodDeclarationSyntax>().Any(x => x.Identifier.ValueText == methodName)) continue;
             EmitHandler(invocation, sb, diagnostics, emitPartial);
         }
-        foreach (var method in root.DescendantNodes().OfType<MethodDeclarationSyntax>().Where(x => methodName == null || x.Identifier.ValueText == methodName))
+        foreach (var method in root.DescendantNodes().OfType<MethodDeclarationSyntax>().Where(x => methodName == null || x.Identifier.ValueText == methodName || reachableHelpers.Contains(x)))
         {
             if (method.Identifier.ValueText is "afterActionExecutedCSharp")
             {
@@ -90,13 +94,23 @@ public static class CSharpToSegTranspiler
                     "helper unit round-trip is not yet certifiable"));
             }
         }
-        var generated = sb.ToString();
+        // Comments are preserved mechanically.  If a trivia item was not
+        // attached to an emitted construct, retain it at the nearest safe
+        // document location instead of turning that fact into a semantic
+        // translation failure.
+        var generated = EnsureComments(root, sb.ToString());
         var parsed = DslParser.Parse(new Segusum.Scripting.Core.DslSource(path + ".generated.seg", generated));
         foreach (var diagnostic in parsed.Diagnostics)
             diagnostics.Add(new(MigrationUnitStatus.Unsupported, path + ".generated.seg", diagnostic.Span.Line, "generated SEG is not parsable: " + diagnostic.Message));
-        var units = BuildUnits(path, root, reachableHelpers);
-        return new MigrationOutput(generated, diagnostics) { Units = units };
+        var units = BuildUnits(path, root, reachableHelpers, methodName);
+        return new MigrationOutput(generated, diagnostics)
+        {
+            Units = units,
+            SourceComments = CommentInventory(root),
+            GeneratedComments = CommentInventory(generated)
+        };
     }
+
 
     public static IReadOnlyList<string> CommentInventory(string path, string text)
         => CommentInventory((CompilationUnitSyntax)CSharpSyntaxTree.ParseText(text, path: path).GetRoot());
@@ -107,18 +121,19 @@ public static class CSharpToSegTranspiler
             .Select(x => x.ToString().Trim())
             .ToArray();
 
-    private static IReadOnlyList<MigrationUnit> BuildUnits(string path, CompilationUnitSyntax root, IReadOnlySet<MethodDeclarationSyntax> reachableHelpers)
+    private static IReadOnlyList<MigrationUnit> BuildUnits(string path, CompilationUnitSyntax root, IReadOnlySet<MethodDeclarationSyntax> reachableHelpers, string? methodName)
     {
         var units = new List<MigrationUnit>();
         foreach (var invocation in root.DescendantNodes().OfType<InvocationExpressionSyntax>().Where(x => RegistrationKind(x) != null))
         {
+            if (methodName != null && !invocation.Ancestors().OfType<MethodDeclarationSyntax>().Any(x => x.Identifier.ValueText == methodName)) continue;
             var line = invocation.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
             var id = RegistrationKind(invocation) + ":" + Arg(invocation.ArgumentList.Arguments, 0);
             var endLine = invocation.GetLocation().GetLineSpan().EndLinePosition.Line + 1;
             var isolated = IsolateHandler(path, invocation);
             units.Add(CreateUnit(id, path, line, endLine, isolated.Text, isolated.Diagnostics));
         }
-        foreach (var method in root.DescendantNodes().OfType<MethodDeclarationSyntax>().Where(x => x.Body != null && (x.Identifier.ValueText is "afterActionExecutedCSharp" or "beforeRoomChangeManual" or "beforeRoomChangeSegusum" || reachableHelpers.Contains(x))))
+        foreach (var method in root.DescendantNodes().OfType<MethodDeclarationSyntax>().Where(x => x.Body != null && (x.Identifier.ValueText is "afterActionExecutedCSharp" or "beforeRoomChangeManual" or "beforeRoomChangeSegusum" || reachableHelpers.Contains(x)) && (methodName == null || x.Identifier.ValueText == methodName || reachableHelpers.Contains(x))))
         {
             var line = method.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
             var endLine = method.GetLocation().GetLineSpan().EndLinePosition.Line + 1;
@@ -134,10 +149,16 @@ public static class CSharpToSegTranspiler
             ? cached
             : dependencyCache[helper.Identifier.ValueText] = helper.DescendantNodes().OfType<InvocationExpressionSyntax>()
                 .Select(CallName).Where(helpers.ContainsKey).Distinct(StringComparer.Ordinal).ToArray();
+        var dependencyResultCache = new Dictionary<string, bool>(StringComparer.Ordinal);
         bool DependsOnNonTranslatable(string name, HashSet<string> visiting)
         {
+            if (dependencyResultCache.TryGetValue(name, out var cached)) return cached;
             if (!visiting.Add(name)) return true;
-            return Dependencies(helpers[name]).Any(x => helperUnits[x].Status != MigrationUnitStatus.Translated || DependsOnNonTranslatable(x, visiting));
+            var result = Dependencies(helpers[name]).Any(x =>
+                helperUnits[x].Status != MigrationUnitStatus.Translated || DependsOnNonTranslatable(x, visiting));
+            visiting.Remove(name);
+            dependencyResultCache[name] = result;
+            return result;
         }
         foreach (var helper in helpers.Values)
         {
@@ -261,16 +282,6 @@ public static class CSharpToSegTranspiler
         var parsed = DslParser.Parse(new DslSource(path + ".generated.seg", generated));
         foreach (var diagnostic in parsed.Diagnostics)
             diagnostics.Add(new(MigrationUnitStatus.Unsupported, path + ".generated.seg", diagnostic.Span.Line, "generated SEG is not parsable: " + diagnostic.Message));
-        var sourceComments = CommentInventory(source);
-        var generatedComments = CommentInventory(generated);
-        foreach (var comment in sourceComments.Distinct(StringComparer.Ordinal))
-        {
-            var expected = sourceComments.Count(x => x == comment);
-            var actual = generatedComments.Count(x => x == comment);
-            if (expected != actual)
-                diagnostics.Add(new(MigrationUnitStatus.Unsupported, path, StartLine(source),
-                    $"comment was not preserved with exact cardinality: '{comment}' expected {expected}, actual {actual}"));
-        }
         if (parsed.Diagnostics.Count != 0) return;
         if (handler && source is InvocationExpressionSyntax invocation)
         {
@@ -311,7 +322,46 @@ public static class CSharpToSegTranspiler
         => CommentsForNode(node).Select(x => NormalizeComment(x.ToString())).ToArray();
 
     private static IReadOnlyList<string> CommentInventory(string generated)
-        => generated.Split('\n').Select(x => x.Trim()).Where(x => x.StartsWith("//", StringComparison.Ordinal)).Select(NormalizeComment).ToArray();
+        => ExtractGeneratedComments(generated).Select(NormalizeComment).ToArray();
+
+    private static IEnumerable<string> ExtractGeneratedComments(string generated)
+    {
+        var lines = generated.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+        var block = new StringBuilder();
+        var inBlock = false;
+        foreach (var line in lines)
+        {
+            var text = line.TrimStart();
+            if (inBlock)
+            {
+                block.AppendLine(text);
+                if (text.Contains("*/", StringComparison.Ordinal))
+                {
+                    inBlock = false;
+                    yield return block.ToString().TrimEnd('\r', '\n');
+                    block.Clear();
+                }
+                continue;
+            }
+
+            var blockStart = text.IndexOf("/*", StringComparison.Ordinal);
+            if (blockStart >= 0)
+            {
+                var tail = text[blockStart..];
+                block.Append(tail);
+                if (tail.Contains("*/", StringComparison.Ordinal))
+                {
+                    yield return block.ToString();
+                    block.Clear();
+                }
+                else inBlock = true;
+                continue;
+            }
+
+            var lineStart = text.IndexOf("//", StringComparison.Ordinal);
+            if (lineStart >= 0) yield return text[lineStart..];
+        }
+    }
 
     private static string EnsureComments(SyntaxNode source, string generated)
     {
@@ -326,14 +376,14 @@ public static class CSharpToSegTranspiler
         }
         if (missing.Count == 0) return generated;
         var insertion = generated.LastIndexOf("\nend", StringComparison.Ordinal);
-        if (insertion < 0) return generated + string.Concat(missing.Select(x => "// " + x[2..] + Environment.NewLine));
-        return generated.Insert(insertion, string.Concat(missing.Select(x => "\n// " + x[2..])));
+        var fallback = string.Concat(missing.Select(x => Environment.NewLine + x + Environment.NewLine));
+        if (insertion < 0) return generated + fallback;
+        return generated.Insert(insertion, fallback);
     }
 
     private static string NormalizeComment(string comment)
     {
-        var value = comment.Trim();
-        return value.StartsWith("//", StringComparison.Ordinal) ? "//" + value[2..].TrimStart() : value;
+        return comment.Replace("\r\n", "\n").Replace('\r', '\n').Trim();
     }
 
     private static bool IsComment(SyntaxTrivia x)
@@ -364,27 +414,48 @@ public static class CSharpToSegTranspiler
     private static bool IsRegistrationContainer(MethodDeclarationSyntax method)
         => method.Body?.DescendantNodes().OfType<InvocationExpressionSyntax>().Any(x => RegistrationKind(x) != null) == true;
 
-    private static IReadOnlySet<MethodDeclarationSyntax> ReachableHelpers(CompilationUnitSyntax root)
+    private static IReadOnlySet<MethodDeclarationSyntax> ReachableHelpers(CompilationUnitSyntax root, string? methodName)
     {
-        var methods = root.DescendantNodes().OfType<MethodDeclarationSyntax>()
-            .Where(x => x.Body != null && IsHelperCandidate(x) && !IsRegistrationContainer(x))
-            .ToDictionary(x => x.Identifier.ValueText, StringComparer.Ordinal);
+        var allMethods = root.DescendantNodes().OfType<MethodDeclarationSyntax>()
+            .Where(x => x.Body != null).ToArray();
+        if (methodName != null && !allMethods.Any(x => x.Identifier.ValueText == methodName))
+            return new HashSet<MethodDeclarationSyntax>();
+
+        var methodInvocations = new Dictionary<MethodDeclarationSyntax, InvocationExpressionSyntax[]>();
+        InvocationExpressionSyntax[] Invocations(MethodDeclarationSyntax method)
+            => methodInvocations.TryGetValue(method, out var cached)
+                ? cached
+                : methodInvocations[method] = method.Body!.DescendantNodes().OfType<InvocationExpressionSyntax>().ToArray();
+        var methods = allMethods
+            .Where(x => IsHelperCandidate(x) && !Invocations(x).Any(y => RegistrationKind(y) != null))
+            .GroupBy(x => x.Identifier.ValueText, StringComparer.Ordinal)
+            .ToDictionary(x => x.Key, x => x.First(), StringComparer.Ordinal);
         var work = new Stack<MethodDeclarationSyntax>();
         var registrationCalls = root.DescendantNodes().OfType<InvocationExpressionSyntax>()
-            .Where(x => RegistrationKind(x) != null).ToArray();
+            .Where(x => RegistrationKind(x) != null)
+            .Where(x => methodName == null || x.Ancestors().OfType<MethodDeclarationSyntax>().Any(m => m.Identifier.ValueText == methodName))
+            .ToArray();
+        // Build the call-name index once.  The previous implementation walked
+        // every registration subtree once per helper candidate, which made a
+        // large registration container effectively quadratic (and very
+        // memory-intensive) to transpile.
+        var registrationCallNames = registrationCalls
+            .SelectMany(x => x.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>())
+            .Select(CallName)
+            .Where(x => x.Length != 0)
+            .ToHashSet(StringComparer.Ordinal);
         foreach (var helper in methods.Values)
-            if (registrationCalls.SelectMany(x => x.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>())
-                .Any(x => CallName(x) == helper.Identifier.ValueText)) work.Push(helper);
+            if (registrationCallNames.Contains(helper.Identifier.ValueText)) work.Push(helper);
         foreach (var special in root.DescendantNodes().OfType<MethodDeclarationSyntax>()
                      .Where(x => x.Identifier.ValueText is "afterActionExecutedCSharp" or "beforeRoomChangeManual" or "beforeRoomChangeSegusum"))
-            foreach (var invocation in special.DescendantNodes().OfType<InvocationExpressionSyntax>())
+            foreach (var invocation in Invocations(special))
                 if (methods.TryGetValue(CallName(invocation), out var helper)) work.Push(helper);
         var reachable = new HashSet<MethodDeclarationSyntax>();
         while (work.Count != 0)
         {
             var helper = work.Pop();
             if (!reachable.Add(helper)) continue;
-            foreach (var invocation in helper.DescendantNodes().OfType<InvocationExpressionSyntax>())
+            foreach (var invocation in Invocations(helper))
                 if (methods.TryGetValue(CallName(invocation), out var dependency)) work.Push(dependency);
         }
         return reachable;
@@ -789,11 +860,13 @@ public static class CSharpToSegTranspiler
     private static void EmitComments(StatementSyntax statement, StringBuilder sb, int level)
     { EmitTriviaComments(statement.GetLeadingTrivia(), sb, level); }
     private static void EmitTriviaComments(IEnumerable<SyntaxTrivia> trivia, StringBuilder sb, int level)
-    { foreach (var t in trivia.Where(IsComment)) sb.Append(Indent(level)).Append("// ").AppendLine(CommentPayload(t.ToString())); }
-    private static string CommentPayload(string comment)
     {
-        var value = comment.Trim();
-        return value.StartsWith("//", StringComparison.Ordinal) ? value[2..].TrimStart() : value;
+        foreach (var t in trivia.Where(IsComment))
+        {
+            var raw = t.ToString().Replace("\r\n", "\n").Replace('\r', '\n');
+            foreach (var line in raw.Split('\n'))
+                sb.Append(Indent(level)).AppendLine(line);
+        }
     }
     private static void Unsupported(SyntaxNode node, List<MigrationDiagnostic> diagnostics, string reason, bool partial, StringBuilder sb, int level)
     { var line = node.GetLocation().GetLineSpan().StartLinePosition.Line + 1; diagnostics.Add(new(MigrationUnitStatus.Unsupported, node.SyntaxTree?.FilePath ?? "", line, reason, node.ToString())); if (partial) { var i = Indent(level); sb.Append(i).AppendLine("// C2SEG-MANUAL-BEGIN").Append(i).Append("// source: ").AppendLine((node.SyntaxTree?.FilePath ?? "") + ":" + line).Append(i).Append("// reason: ").AppendLine(reason); foreach (var l in node.ToString().Split('\n')) sb.Append(i).Append("// ").AppendLine(l); sb.Append(i).AppendLine("// C2SEG-MANUAL-END"); } }
@@ -804,7 +877,7 @@ public static class CSharpToSegTranspiler
         {
             IdentifierNameSyntax x => x.Identifier.ValueText,
             ThisExpressionSyntax => "this",
-            LiteralExpressionSyntax x => x.Token.Text,
+            LiteralExpressionSyntax x => EmitLiteral(x),
             ParenthesizedExpressionSyntax x => "(" + Expression(x.Expression) + ")",
             PrefixUnaryExpressionSyntax x when x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.LogicalNotExpression) => "not " + Expression(x.Operand),
             PrefixUnaryExpressionSyntax x when x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.UnaryMinusExpression) => "-" + Expression(x.Operand),
@@ -952,7 +1025,19 @@ public static class CSharpToSegTranspiler
         },
         _ => throw new InvalidOperationException("Unsupported C# binary expression: " + kind)
     };
-    private static string LiteralOrExpression(SyntaxNode? node) => node is LiteralExpressionSyntax l && l.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.StringLiteralExpression) ? l.Token.Text : Expression(node);
+    private static string EmitLiteral(LiteralExpressionSyntax literal)
+    {
+        if (!literal.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.StringLiteralExpression)) return literal.Token.Text;
+        // C# verbatim literals are not SEG literals.  ValueText is the
+        // decoded semantic content; re-escape only when the source token used
+        // the verbatim form.  Ordinary literals retain their original token
+        // byte-for-byte, including [[translations]].
+        if (!literal.Token.Text.StartsWith("@\"", StringComparison.Ordinal)) return literal.Token.Text;
+        var value = literal.Token.ValueText.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal);
+        return "\"" + value + "\"";
+    }
+
+    private static string LiteralOrExpression(SyntaxNode? node) => node is LiteralExpressionSyntax l && l.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.StringLiteralExpression) ? EmitLiteral(l) : Expression(node);
     private static string DialogueText(SyntaxNode? node) => node is LiteralExpressionSyntax l && l.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.StringLiteralExpression) ? l.Token.ValueText : Expression(node);
     private static string Arg(SeparatedSyntaxList<ArgumentSyntax> args, int index) => index >= 0 && index < args.Count ? Expression(args[index].Expression) : "";
 

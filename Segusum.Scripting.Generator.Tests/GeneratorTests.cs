@@ -874,6 +874,29 @@ public NamedCutSceneId ncsMikeStalloneIlBenefattore = null!;
     }
 
     [Fact]
+    public void GenericTypesInDefSignaturesParseRecursively()
+    {
+        const string text = "world game\ndef first ret List<string>:\nend\ndef second ret Dictionary<string, int>:\nend\ndef third ret Dictionary<string, List<int>>:\nend\ndef fourth ret List<Dictionary<string, int>>:\nend\ndef fifth value: List<string> ret bool:\nend\n";
+        var parsed = DslParser.Parse(new DslSource("generic-signatures.seg", text));
+
+        Assert.Empty(parsed.Diagnostics);
+        var functions = parsed.Document.Declarations.OfType<FunctionDeclaration>().ToArray();
+        Assert.Equal("List<string>", functions[0].ReturnType);
+        Assert.Equal("Dictionary<string, int>", functions[1].ReturnType);
+        Assert.Equal("Dictionary<string, List<int>>", functions[2].ReturnType);
+        Assert.Equal("List<Dictionary<string, int>>", functions[3].ReturnType);
+        Assert.Equal(("value", "List<string>"), functions[4].Parameters.Single());
+    }
+
+    [Fact]
+    public void MalformedGenericTypeTerminatesWithDiagnostic()
+    {
+        var parsed = DslParser.Parse(new DslSource("malformed-generic.seg", "world game\ndef broken ret List<\n"));
+
+        Assert.NotEmpty(parsed.Diagnostics);
+    }
+
+    [Fact]
     public void ParamsRuntimeMethodAcceptsVariableDslArguments()
     {
         var result = Run("def check ret bool:\n    ret noneOfThemWasSeenRecently 2 1 2\nend");

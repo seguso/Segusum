@@ -34,6 +34,14 @@ public sealed class CSharpToSegTranspilerTests
     }
 
     [Fact]
+    public void VerbatimStringArgumentsBecomeValidSegStringsWithoutChangingContent()
+    {
+        var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { void M() { addHandlerUseHere(a, handler: i => { narImg(\"...\", @\"img/camilla-violin.png\"); }); } }");
+        Assert.Contains("narImg \"...\" \"img/camilla-violin.png\"", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("@\"img/camilla-violin.png\"", result.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RuntimeNarrationCallsKeepAllArgumentsOnTheNormalCallPath()
     {
         var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { void M() { addRoomChangedHandler(roomA, i => { narRoom(\"...\", roomCamilla, false, alsoShowGraphicsInTextMode: true); narImg(\"...\", \"img/a.png\", alsoShowGraphicsInTextMode: true); }); } }");
@@ -427,5 +435,67 @@ public sealed class CSharpToSegTranspilerTests
         Assert.Equal(MigrationUnitStatus.DependsOnCSharpHelper, result.Units.Single(x => x.Id == "Good").Status);
         Assert.Equal(MigrationUnitStatus.Unsupported, result.Units.Single(x => x.Id == "Bad").Status);
         Assert.DoesNotContain(result.Units, x => x.Id == "Uncalled");
+    }
+
+    [Fact]
+    public void ReachableHelperIndexPreservesDirectAndTransitiveCallSemantics()
+    {
+        const string source = "class W { void M() { addHandlerUseHere(a, handler: i => { Direct(); }); } private void Direct() { Nested(); } private void Nested() { leaf(); } private void Uncalled() { never(); } }";
+        var result = CSharpToSegTranspiler.Transpile("helpers.cs", source);
+
+        Assert.Contains("def Direct", result.Text, StringComparison.Ordinal);
+        Assert.Contains("def Nested", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("def Uncalled", result.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MissingRequestedMethodDoesNotBuildHelperGraphOrUnits()
+    {
+        const string source = "class W { void Configure() { addHandlerUseHere(a, handler: i => { Direct(); }); } private void Direct() { Nested(); } private void Nested() { leaf(); } }";
+
+        var result = CSharpToSegTranspiler.Transpile("missing-method.cs", source, emitPartial: true, methodName: "__none__", worldId: "game");
+
+        Assert.Empty(result.Units);
+        Assert.DoesNotContain("def Direct", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("def Nested", result.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RequestedMethodIncludesOnlyItsTransitiveHelpers()
+    {
+        const string source = "class W { void Configure() { addHandlerUseHere(a, handler: i => { Direct(); }); } private void Direct() { Nested(); } private void Nested() { leaf(); } private void Uncalled() { never(); } }";
+
+        var result = CSharpToSegTranspiler.Transpile("single-method.cs", source, emitPartial: true, methodName: "Configure", worldId: "game");
+
+        Assert.Contains("def Direct", result.Text, StringComparison.Ordinal);
+        Assert.Contains("def Nested", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("def Uncalled", result.Text, StringComparison.Ordinal);
+        Assert.Contains(result.Units, x => x.Id == "Direct");
+        Assert.Contains(result.Units, x => x.Id == "Nested");
+    }
+
+    [Fact]
+    public void ManyRegistrationsUseOneReachabilityIndex()
+    {
+        var registrations = string.Join(" ", Enumerable.Range(0, 32)
+            .Select(i => $"addHandlerUseHere(a{i}, handler: i => {{ Shared(); }});"));
+        var source = $"class W {{ void M() {{ {registrations} }} private void Shared() {{ leaf(); }} private void Uncalled() {{ never(); }} }}";
+
+        var result = CSharpToSegTranspiler.Transpile("many-registrations.cs", source);
+
+        Assert.Contains("def Shared", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("def Uncalled", result.Text, StringComparison.Ordinal);
+        Assert.Equal(32, result.Units.Count(x => x.Id.StartsWith("use-here:", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void CommentInventoryPreservesLineAndBlockCommentsWithCardinality()
+    {
+        const string source = "class W { /* design note */ void M() { // before\n addHandlerUseHere(a, handler: i => { /* inside */ foo(); // trailing\n }); } }";
+        var result = CSharpToSegTranspiler.Transpile("comments.cs", source, emitPartial: true);
+
+        Assert.True(result.CommentsPreserved);
+        Assert.Equal(result.SourceComments.Count, result.GeneratedComments.Count);
+        Assert.Equal(4, result.SourceComments.Count);
     }
 }
