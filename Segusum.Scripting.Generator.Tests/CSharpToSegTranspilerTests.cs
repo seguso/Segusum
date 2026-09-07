@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using Segusum.Scripting.Core;
 using Segusum.Scripting.Tooling;
 
 namespace Segusum.Scripting.Generator.Tests;
@@ -41,6 +42,61 @@ public sealed class CSharpToSegTranspilerTests
     }
 
     [Fact]
+    public void NarTextUsesColonSyntaxAndNarrativeLayout()
+    {
+        const string source = "class W { void M() { addRoomChangedHandler(roomA, i => { foo(); narText(\"Un'ora dopo...\"); narRoom(\"La stanza\", roomA, false); narImg(\"Testo\", \"img/a.png\", alsoShowGraphicsInTextMode: true); bar(); }); } }";
+        var result = CSharpToSegTranspiler.Transpile("x.cs", source);
+        var text = result.Text.Replace("\r\n", "\n", StringComparison.Ordinal);
+        Assert.Contains("nar: Un'ora dopo...", text, StringComparison.Ordinal);
+        Assert.Contains("narRoom \"La stanza\" roomA false", text, StringComparison.Ordinal);
+        Assert.Contains("narImg \"Testo\" \"img/a.png\" alsoShowGraphicsInTextMode: true", text, StringComparison.Ordinal);
+        AssertNarrativeHasOneBlankLineAround(text, "nar: Un'ora dopo...");
+        AssertNarrativeHasOneBlankLineAround(text, "narRoom \"La stanza\"");
+        AssertNarrativeHasOneBlankLineAround(text, "narImg \"Testo\"");
+        Assert.Empty(DslParser.Parse(new DslSource("generated.seg", text)).Diagnostics);
+    }
+
+    [Fact]
+    public void ConsecutiveAddBlocksMayOmitIntermediateEnd()
+    {
+        const string source = "world game\nroom-changed roomA:\n    var cyc = new-cycle\n    add cyc cidA\n        when true\n        foo\n    add cyc cidB\n        when true\n        bar\n    add cyc cidC\n        when true\n        baz\n    end\nend\n";
+        var parsed = DslParser.Parse(new DslSource("adds.seg", source));
+        Assert.Empty(parsed.Diagnostics);
+        var room = Assert.IsType<HandlerDeclaration>(parsed.Document.Declarations.Single());
+        Assert.Equal(4, room.Body.Count);
+        Assert.Equal(3, room.Body.OfType<AddCycleElementStatement>().Count());
+    }
+
+    [Fact]
+    public void LongReturnExpressionWrapsAtLogicalAstNodes()
+    {
+        const string source = "class W { void M() { addHandlerUseHere(a, handler: i => { Check(); }); } private bool Check() { return a || b && c && d && e; } }";
+        var result = CSharpToSegTranspiler.Transpile("x.cs", source);
+        var text = result.Text.Replace("\r\n", "\n", StringComparison.Ordinal);
+        Assert.Contains("ret a\n        or b\n        and c\n        and d\n        and e", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TopLevelDefinitionsHaveExactlyOneBlankLineBetweenThem()
+    {
+        const string source = "class W { void M() { addHandlerUseHere(a, handler: i => { Foo(); Bar(); }); } private bool Foo() { return true; } private bool Bar() { return false; } }";
+        var result = CSharpToSegTranspiler.Transpile("x.cs", source);
+        var text = result.Text.Replace("\r\n", "\n", StringComparison.Ordinal);
+        Assert.Contains("end\n\ndef Bar", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("end\n\n\ndef", text, StringComparison.Ordinal);
+    }
+
+    private static void AssertNarrativeHasOneBlankLineAround(string text, string marker)
+    {
+        var line = text.Split('\n').ToList();
+        var index = line.FindIndex(x => x.Contains(marker, StringComparison.Ordinal));
+        Assert.True(index > 0 && line[index - 1].Length == 0, text);
+        Assert.True(index + 1 < line.Count && line[index + 1].Length == 0, text);
+        Assert.True(index < 2 || line[index - 2].Length != 0, text);
+        Assert.True(index + 2 >= line.Count || line[index + 2].Length != 0, text);
+    }
+
+    [Fact]
     public void ConditionalExpressionIsEmittedAsSegExpression()
     {
         var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { void M() { addHandlerUseHere(a, handler: i => { var protag = camilla.isInCurParty() ? camilla : olivia; protag = ifReady ? camilla : olivia; foo(camilla.isInCurParty() ? camilla : olivia); }); } }");
@@ -65,6 +121,17 @@ public sealed class CSharpToSegTranspilerTests
         Assert.Contains("add cyc bas2", result.Text, StringComparison.Ordinal);
         Assert.Contains("add cyc bas3", result.Text, StringComparison.Ordinal);
         Assert.DoesNotContain(result.Diagnostics, x => x.Reason.Contains("Unsupported C# call: addToCycle", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ConsecutiveExistingCycleAddsOmitIntermediateEnd()
+    {
+        const string source = "class W { void M() { addRoomChangedHandler(roomA, e => { cyc.addToCycle(cidA, x => true, x => { foo(); }); cyc.addToCycle(cidB, x => true, x => { bar(); }); cyc.addToCycle(cidC, x => true, x => { baz(); }); }); } }";
+        var result = CSharpToSegTranspiler.Transpile("x.cs", source);
+        Assert.Contains("add cyc cidA", result.Text, StringComparison.Ordinal);
+        Assert.Contains("add cyc cidB", result.Text, StringComparison.Ordinal);
+        Assert.Contains("add cyc cidC", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("foo\n    end\n    add cyc cidB", result.Text.Replace("\r\n", "\n", StringComparison.Ordinal), StringComparison.Ordinal);
     }
 
     [Fact]

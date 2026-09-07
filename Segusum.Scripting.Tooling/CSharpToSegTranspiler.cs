@@ -75,6 +75,7 @@ public static class CSharpToSegTranspiler
             }
             else if (method.Identifier.ValueText is not "Configure" && method.Body != null && reachableHelpers.Contains(method))
             {
+                EnsureExactlyOneBlankLine(sb);
                 EmitTriviaComments(AdjacentLeadingComments(method), sb, 0);
                 EmitTriviaComments(method.GetLeadingTrivia(), sb, 0);
                 AppendFunctionHeader(sb, method, diagnostics);
@@ -84,6 +85,7 @@ public static class CSharpToSegTranspiler
                 EmitTriviaComments(method.Body.CloseBraceToken.LeadingTrivia, sb, 1);
                 EmitTriviaComments(method.Body.CloseBraceToken.TrailingTrivia, sb, 1);
                 sb.AppendLine("end");
+                EnsureExactlyOneBlankLine(sb);
                 diagnostics.Add(new(MigrationUnitStatus.DependsOnCSharpHelper, path, method.GetLocation().GetLineSpan().StartLinePosition.Line + 1,
                     "helper unit round-trip is not yet certifiable"));
             }
@@ -463,8 +465,10 @@ public static class CSharpToSegTranspiler
 
     private static void EmitStatements(IEnumerable<StatementSyntax> statements, StringBuilder sb, List<MigrationDiagnostic> diagnostics, int level, bool partial, bool includeComments = true)
     {
-        foreach (var statement in statements)
+        var statementArray = statements.ToArray();
+        for (var statementIndex = 0; statementIndex < statementArray.Length; statementIndex++)
         {
+            var statement = statementArray[statementIndex];
             try
             {
             if (includeComments) EmitComments(statement, sb, level);
@@ -484,15 +488,15 @@ public static class CSharpToSegTranspiler
                     if (a.Right is InvocationExpressionSyntax add && CallName(add) == "addToCycle") EmitCycleChain(add, sb, diagnostics, level, partial);
                     else if (a.Left.ToString().EndsWith("makesNoSenseAtThisTime", StringComparison.Ordinal) && a.Right.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.TrueLiteralExpression)) sb.Append(indent).AppendLine("makes-no-sense");
                     else if (a.Left.ToString().EndsWith("textInputToShow", StringComparison.Ordinal)) sb.Append(indent).Append("text-input ").AppendLine(Expression(a.Right));
-                    else sb.Append(indent).Append(Expression(a.Left)).Append(' ').Append(a.OperatorToken.Text).Append(' ').AppendLine(Expression(a.Right)); break;
+                    else AppendFormattedExpression(sb, indent + Expression(a.Left) + " " + a.OperatorToken.Text + " ", a.Right, level); break;
                 case ExpressionStatementSyntax x when x.Expression is InvocationExpressionSyntax i:
-                    EmitInvocation(i, sb, diagnostics, level, partial); break;
+                    EmitInvocation(i, sb, diagnostics, level, partial, IsConsecutiveAdd(statementArray, statementIndex)); break;
                 case ExpressionStatementSyntax x when x.Expression is PostfixUnaryExpressionSyntax p && p.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.PostIncrementExpression):
                     sb.Append(indent).Append(Expression(p.Operand)).AppendLine("++"); break;
                 case ExpressionStatementSyntax x when x.Expression is PrefixUnaryExpressionSyntax p && p.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.PreIncrementExpression):
                     sb.Append(indent).Append(Expression(p.Operand)).AppendLine("++"); break;
                 case ExpressionStatementSyntax x:
-                    try { sb.Append(indent).AppendLine(Expression(x.Expression)); }
+                    try { AppendFormattedExpression(sb, indent, x.Expression, level); }
                     catch (InvalidOperationException ex) { Unsupported(x.Expression, diagnostics, ex.Message, partial, sb, level); }
                     break;
                 case BlockSyntax x:
@@ -504,7 +508,7 @@ public static class CSharpToSegTranspiler
                         {
                             if (v.Initializer?.Value is InvocationExpressionSyntax start && FindStartCycle(start) != null)
                                 EmitCycle(start, v.Identifier.ValueText, sb, diagnostics, level, partial);
-                            else if (v.Initializer != null) sb.Append(indent).Append("var ").Append(v.Identifier.ValueText).Append(" = ").Append(Expression(v.Initializer.Value)).AppendLine();
+                            else if (v.Initializer != null) AppendFormattedExpression(sb, indent + "var " + v.Identifier.ValueText + " = ", v.Initializer.Value, level);
                             else
                             {
                                 var type = MapCSharpType(x.Declaration.Type, diagnostics, x);
@@ -523,9 +527,8 @@ public static class CSharpToSegTranspiler
                     break;
                 case EmptyStatementSyntax: break;
                 case ReturnStatementSyntax x:
-                    sb.Append(indent).Append("ret");
-                    if (x.Expression != null) sb.Append(' ').Append(Expression(x.Expression));
-                    sb.AppendLine();
+                    if (x.Expression != null) AppendFormattedExpression(sb, indent + "ret ", x.Expression, level);
+                    else sb.Append(indent).AppendLine("ret");
                     break;
                 default: Unsupported(statement, diagnostics, "unsupported statement " + statement.Kind(), partial, sb, level); break;
             }
@@ -559,20 +562,31 @@ public static class CSharpToSegTranspiler
         return null;
     }
 
-    private static void EmitInvocation(InvocationExpressionSyntax invocation, StringBuilder sb, List<MigrationDiagnostic> diagnostics, int level, bool partial)
+    private static void EmitInvocation(InvocationExpressionSyntax invocation, StringBuilder sb, List<MigrationDiagnostic> diagnostics, int level, bool partial, bool omitConsecutiveCycleEnd = false)
     {
         var indent = Indent(level); var name = invocation.Expression.ToString();
-        if (CallName(invocation) == "addToCycle") { EmitCycleChain(invocation, sb, diagnostics, level, partial); return; }
+        if (CallName(invocation) == "addToCycle") { EmitCycleChain(invocation, sb, diagnostics, level, partial, !omitConsecutiveCycleEnd); return; }
         if (CallName(invocation) == "execNextInCycle") { sb.Append(indent).Append("next ").AppendLine(Arg(invocation.ArgumentList.Arguments, 0)); return; }
         if (CallName(invocation) == "startCycle") { Unsupported(invocation, diagnostics, "startCycle must be assigned to a cycle variable", partial, sb, level); return; }
-        if (name is "dial" or "nar" or "narText")
+        if (name is "dial" or "nar" or "narText" or "narRoom" or "narImg")
         {
             if (name == "dial")
             {
                 EnsureOneBlankLineBeforeDialogue(sb);
                 sb.Append(indent).Append(Arg(invocation.ArgumentList.Arguments, 0)).Append(": ").AppendLine(DialogueText(invocation.ArgumentList.Arguments.ElementAtOrDefault(1)?.Expression));
             }
-            else sb.Append(indent).Append(name == "narText" ? "nar" : name).Append(' ').AppendLine(LiteralOrExpression(invocation.ArgumentList.Arguments.LastOrDefault()?.Expression));
+            else if (name is "nar" or "narText")
+            {
+                EnsureOneBlankLineBeforeDialogue(sb);
+                sb.Append(indent).Append("nar: ").AppendLine(DialogueText(invocation.ArgumentList.Arguments.LastOrDefault()?.Expression));
+                EnsureOneBlankLineAfterDialogue(sb);
+            }
+            else
+            {
+                EnsureOneBlankLineBeforeDialogue(sb);
+                sb.Append(indent).AppendLine(Expression(invocation));
+                EnsureOneBlankLineAfterDialogue(sb);
+            }
             return;
         }
         if (name is "finishGame" or "finish") { sb.Append(indent).AppendLine("finish-game"); return; }
@@ -597,16 +611,18 @@ public static class CSharpToSegTranspiler
     private static void EmitCycle(InvocationExpressionSyntax initializer, string variable, StringBuilder sb, List<MigrationDiagnostic> diagnostics, int level, bool partial)
     {
         var start = FindStartCycle(initializer)!;
+        var adds = initializer.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>()
+            .Where(x => CallName(x) == "addToCycle").OrderBy(x => x.Span.End).ToArray();
         sb.Append(Indent(level)).Append("var ").Append(variable).AppendLine(" = new-cycle");
-        EmitCycleElementCore(variable, start.ArgumentList.Arguments, start, sb, diagnostics, level, partial, true);
-        foreach (var add in initializer.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>().Where(x => CallName(x) == "addToCycle").OrderBy(x => x.Span.End))
-            EmitCycleElementCore(variable, add.ArgumentList.Arguments, add, sb, diagnostics, level, partial, false);
+        EmitCycleElementCore(variable, start.ArgumentList.Arguments, start, sb, diagnostics, level, partial, true, adds.Length == 0);
+        for (var i = 0; i < adds.Length; i++)
+            EmitCycleElementCore(variable, adds[i].ArgumentList.Arguments, adds[i], sb, diagnostics, level, partial, false, i == adds.Length - 1);
     }
 
     private static void EmitCycleElement(InvocationExpressionSyntax invocation, StringBuilder sb, List<MigrationDiagnostic> diagnostics, int level, bool partial)
         => EmitCycleElementCore(invocation.Expression is MemberAccessExpressionSyntax member ? Expression(member.Expression) : "cyc", invocation.ArgumentList.Arguments, invocation, sb, diagnostics, level, partial, false);
 
-    private static void EmitCycleChain(InvocationExpressionSyntax outer, StringBuilder sb, List<MigrationDiagnostic> diagnostics, int level, bool partial)
+    private static void EmitCycleChain(InvocationExpressionSyntax outer, StringBuilder sb, List<MigrationDiagnostic> diagnostics, int level, bool partial, bool emitFinalEnd = true)
     {
         var current = outer;
         var elements = new List<InvocationExpressionSyntax>();
@@ -618,11 +634,17 @@ public static class CSharpToSegTranspiler
             else { cycle = Expression(member.Expression); break; }
         }
         if (cycle is null) { Unsupported(outer, diagnostics, "addToCycle receiver is not a cycle expression", partial, sb, level); return; }
-        foreach (var element in elements.AsEnumerable().Reverse())
-            EmitCycleElementCore(cycle, element.ArgumentList.Arguments, element, sb, diagnostics, level, partial, false);
+        var ordered = elements.AsEnumerable().Reverse().ToArray();
+        for (var i = 0; i < ordered.Length; i++)
+            EmitCycleElementCore(cycle, ordered[i].ArgumentList.Arguments, ordered[i], sb, diagnostics, level, partial, false, emitFinalEnd && i == ordered.Length - 1);
     }
 
-    private static void EmitCycleElementCore(string cycle, SeparatedSyntaxList<ArgumentSyntax> args, InvocationExpressionSyntax invocation, StringBuilder sb, List<MigrationDiagnostic> diagnostics, int level, bool partial, bool start)
+    private static bool IsConsecutiveAdd(IReadOnlyList<StatementSyntax> statements, int index)
+        => index + 1 < statements.Count
+            && statements[index + 1] is ExpressionStatementSyntax { Expression: InvocationExpressionSyntax next }
+            && CallName(next) == "addToCycle";
+
+    private static void EmitCycleElementCore(string cycle, SeparatedSyntaxList<ArgumentSyntax> args, InvocationExpressionSyntax invocation, StringBuilder sb, List<MigrationDiagnostic> diagnostics, int level, bool partial, bool start, bool emitEnd = true)
     {
         var indent = Indent(level);
         var id = Arg(args, 0);
@@ -642,7 +664,7 @@ public static class CSharpToSegTranspiler
         }
         else sb.AppendLine();
         if (body != null) EmitStatements(body.Statements, sb, diagnostics, level + 1, partial);
-        sb.Append(indent).AppendLine("end");
+        if (emitEnd) sb.Append(indent).AppendLine("end");
         if (important?.StartsWith("unsupported:", StringComparison.Ordinal) == true || repeat?.StartsWith("unsupported:", StringComparison.Ordinal) == true)
             Unsupported(invocation, diagnostics, "unsupported cycle metadata", partial, sb, level);
     }
@@ -800,6 +822,38 @@ public static class CSharpToSegTranspiler
         };
     }
 
+    private static void AppendFormattedExpression(StringBuilder sb, string prefix, ExpressionSyntax expression, int level, bool appendNewline = true)
+    {
+        var rendered = Expression(expression);
+        var clauses = new List<(string? Operator, ExpressionSyntax Expression)>();
+        CollectLogicalClauses(expression, clauses);
+        var multiline = clauses.Count >= 3 || rendered.Length > 100;
+        if (!multiline || clauses.Count == 0)
+        {
+            sb.Append(prefix).Append(rendered);
+            if (appendNewline) sb.AppendLine();
+            return;
+        }
+
+        sb.Append(prefix).Append(Expression(clauses[0].Expression));
+        foreach (var clause in clauses.Skip(1))
+            sb.AppendLine().Append(Indent(level + 1)).Append(clause.Operator).Append(' ').Append(Expression(clause.Expression));
+        sb.AppendLine();
+    }
+
+    private static void CollectLogicalClauses(ExpressionSyntax expression, List<(string? Operator, ExpressionSyntax Expression)> clauses, string? incoming = null)
+    {
+        if (expression is BinaryExpressionSyntax binary
+            && (binary.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.LogicalAndExpression)
+                || binary.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.LogicalOrExpression)))
+        {
+            CollectLogicalClauses(binary.Left, clauses, incoming);
+            CollectLogicalClauses(binary.Right, clauses, binary.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.LogicalAndExpression) ? "and" : "or");
+            return;
+        }
+        clauses.Add((incoming, expression));
+    }
+
     private static bool TryEmitRandomModulo(BinaryExpressionSyntax expression, out string result)
     {
         result = "";
@@ -910,6 +964,13 @@ public static class CSharpToSegTranspiler
     }
 
     private static void EnsureOneBlankLineAfterDialogue(StringBuilder sb)
+    {
+        while (sb.Length > 0 && (sb[^1] == '\r' || sb[^1] == '\n')) sb.Remove(sb.Length - 1, 1);
+        sb.AppendLine();
+        sb.AppendLine();
+    }
+
+    private static void EnsureExactlyOneBlankLine(StringBuilder sb)
     {
         while (sb.Length > 0 && (sb[^1] == '\r' || sb[^1] == '\n')) sb.Remove(sb.Length - 1, 1);
         sb.AppendLine();

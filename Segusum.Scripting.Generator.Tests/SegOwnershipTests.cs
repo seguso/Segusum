@@ -124,7 +124,7 @@ public sealed class SegOwnershipTests
             File.WriteAllText(runtimePath, "using Seg; public partial class World : WorldBase { public CycleElemId ownedCycle { get; set; } = new(); public NamedCutSceneId ownedScene = new(); public CycleElemId unused { get; set; } = new(); " + referenced + duplicate + " private bool migrated(int value) => true; private bool migrated(string value) => true; private void kept() { } " + (addActiveCaller && !callerInSecondPartial ? "private void caller() { migrated(1); }" : "") + " }");
             if (addActiveCaller && callerInSecondPartial)
                 File.WriteAllText(Path.Combine(directory, "World.Partial.cs"), "public partial class World { private void caller() { migrated(1); } }");
-            File.WriteAllText(legacyPath, "using Seg; public partial class World : WorldBase { public CycleElemId ownedCycle { get; set; } = new(); public NamedCutSceneId ownedScene = new(); public NamedCutSceneId referencedScene = new(); }");
+            File.WriteAllText(legacyPath, "using Seg; public partial class World : WorldBase { public CycleElemId ownedCycle { get; set; } = new(); public NamedCutSceneId ownedScene = new(); public NamedCutSceneId referencedScene = new(); private bool migrated(int value) => true; private bool migrated(string value) => true; private void kept() { } }");
             return SegOwnership.Analyze(segPath, Directory.EnumerateFiles(directory, "*.cs")
                 .Where(x => !string.Equals(x, legacyPath, StringComparison.OrdinalIgnoreCase)), legacyPath);
         }

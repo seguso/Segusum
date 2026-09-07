@@ -161,7 +161,7 @@ public static class DslParser
         private CycleElementDeclaration ParseCycleElement(SourceSpan span)
         { var cycleToken = WordToken(); var idToken = WordToken(); var cycle = cycleToken.Text; var id = idToken.Text; var important = Is("important"); if (important) Take(); var repeat = ParseRepeatModifier(); var x = ParseBlockWithClause("when"); return new(cycle, id, important, repeat, x.Condition, x.Body, span) { CycleSpan = cycleToken.Span, IdSpan = idToken.Span }; }
         private AddCycleElementStatement ParseAdd(SourceSpan span)
-        { var cycleToken = WordToken(); var idToken = WordToken(); var cycle = cycleToken.Text; var id = idToken.Text; var important = Is("important"); if (important) Take(); var repeat = ParseRepeatModifier(); var x = ParseBlockWithClause("when"); return new(cycle, id, important, repeat, x.Condition, x.Body, span) { CycleSpan = cycleToken.Span, IdSpan = idToken.Span }; }
+        { var cycleToken = WordToken(); var idToken = WordToken(); var cycle = cycleToken.Text; var id = idToken.Text; var important = Is("important"); if (important) Take(); var repeat = ParseRepeatModifier(); var x = ParseBlockWithClause("when", true); return new(cycle, id, important, repeat, x.Condition, x.Body, span) { CycleSpan = cycleToken.Span, IdSpan = idToken.Span }; }
         private string? ParseRepeatModifier()
         {
             if (Current.Kind != DslTokenKind.Identifier) return null;
@@ -170,12 +170,13 @@ public static class DslParser
             diagnostics.Add(new DslDiagnostic("SEGDSL102", $"Unknown Repeat modifier '{Current.Text}'. Expected 'once' or 'forever'.", Current.Span));
             return null;
         }
-        private (DslExpression? Condition, IReadOnlyList<DslStatement> Body) ParseBlockWithClause(string clause)
+        private (DslExpression? Condition, IReadOnlyList<DslStatement> Body) ParseBlockWithClause(string clause, bool implicitConsecutiveAdd = false)
         {
             SkipTerminators(); DslExpression? condition = null; var body = new List<DslStatement>();
-            while (!Is("end") && Current.Kind != DslTokenKind.EndOfFile)
+            while (!Is("end") && !(implicitConsecutiveAdd && Is("add")) && Current.Kind != DslTokenKind.EndOfFile)
             { var s = Current.Span; var w = Word(); if (w == clause) condition = Expression(); else body.Add(ParseStatement(w, s)); SkipTerminators(); }
-            Need("end"); return (condition, body);
+            if (Is("end")) Take();
+            return (condition, body);
         }
         private IReadOnlyList<DslStatement> ParseBody(bool colon)
         {
