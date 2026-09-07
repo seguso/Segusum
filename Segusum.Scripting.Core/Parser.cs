@@ -424,7 +424,11 @@ public static class DslParser
                 if (Current.Kind == DslTokenKind.Identifier && position + 2 < tokens.Count && tokens[position + 1].Kind == DslTokenKind.Colon && tokens[position + 2].Kind != DslTokenKind.NewLine && tokens[position + 2].Kind != DslTokenKind.EndOfFile)
                 {
                     profile.Count("named-arguments");
-                    var name = Take().Text; Take(); return new DslArgument(name, Expression(), span);
+                    var name = Take().Text; Take();
+                    var previousNamedArgumentMode = parsingCallArgument;
+                    parsingCallArgument = true;
+                    try { return new DslArgument(name, Expression(), span); }
+                    finally { parsingCallArgument = previousNamedArgumentMode; }
                 }
                 var previous = parsingCallArgument;
                 parsingCallArgument = true;
