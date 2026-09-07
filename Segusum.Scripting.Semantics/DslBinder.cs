@@ -245,7 +245,7 @@ public sealed class DslBinder
         activeDslSymbols.Clear(); foreach (var item in previous) activeDslSymbols[item.Key] = item.Value;
     }
     private void AddGlobal(string name, ITypeSymbol? type, SourceSpan span, BoundSymbolKind kind)
-    { if (kind == BoundSymbolKind.CycleElementId) { if (!Microsoft.CodeAnalysis.CSharp.SyntaxFacts.IsValidIdentifier(name) || name.Contains('-')) { Report("SEGDSL318", "CycleElementId must be a stable C# identifier and cannot contain '-'.", span); return; } if (cycleElementGlobals.ContainsKey(name)) { Report("SEGDSL314", $"Duplicate CycleElementId '{name}'.", span); return; } var existing = ResolveCSharpCandidates(name).FirstOrDefault(); if (existing != null) { var existingType = existing switch { IFieldSymbol field => field.Type, IPropertySymbol property => property.Type, _ => null }; if (existingType != null) cycleElementGlobals[name] = existingType; } else if (type != null) cycleElementGlobals[name] = type; AddDslIdentity(name, "cycle-element", span); model.References[name] = name; return; } var key = NormalizeKey(name); if (globals.ContainsKey(key)) Report(kind == BoundSymbolKind.NamedCutsceneId ? "SEGDSL324" : "SEGDSL304", $"Duplicate or normalized-colliding global '{name}'.", span); else if (type != null) { globals[key] = type; globalKinds[key] = kind; model.References[name] = Name(name); } }
+    { if (kind == BoundSymbolKind.CycleElementId) { if (!Microsoft.CodeAnalysis.CSharp.SyntaxFacts.IsValidIdentifier(name) || name.Contains('-')) { Report("SEGDSL318", "CycleElementId must be a stable C# identifier and cannot contain '-'.", span); return; } if (cycleElementGlobals.ContainsKey(name)) { model.References[name] = name; return; } var existing = ResolveCSharpCandidates(name).FirstOrDefault(); if (existing != null) { var existingType = existing switch { IFieldSymbol field => field.Type, IPropertySymbol property => property.Type, _ => null }; if (existingType != null) cycleElementGlobals[name] = existingType; } else if (type != null) cycleElementGlobals[name] = type; AddDslIdentity(name, "cycle-element", span); model.References[name] = name; return; } var key = NormalizeKey(name); if (globals.ContainsKey(key)) { if (globalKinds.TryGetValue(key, out var existingKind) && existingKind == kind) { model.References[name] = Name(name); return; } Report(kind == BoundSymbolKind.NamedCutsceneId ? "SEGDSL324" : "SEGDSL304", $"Duplicate or normalized-colliding global '{name}'.", span); } else if (type != null) { globals[key] = type; globalKinds[key] = kind; model.References[name] = Name(name); } }
     private void BindFunction(FunctionDeclaration f)
     { var scope = new Dictionary<string, ITypeSymbol>(StringComparer.Ordinal); currentParameters.Clear(); activeDslSymbols.Clear(); foreach (var p in f.Parameters) { scope[NormalizeKey(p.Name)] = TypeOf(p.Type)!; currentParameters.Add(NormalizeKey(p.Name)); AddLocalIdentity(p.Name, "parameter", f.Span); } BindStatements(f.Body, scope, f.ReturnType == null ? null : TypeOf(f.ReturnType)); currentParameters.Clear(); activeDslSymbols.Clear(); }
     private void BindHandler(HandlerDeclaration h)
@@ -378,7 +378,8 @@ public sealed class DslBinder
             model.References[statement.Id] = Name(statement.Id);
             return;
         }
-        if (namedCutsceneGlobals.ContainsKey(key) || globals.ContainsKey(key)) { Report("SEGDSL324", $"Duplicate named-cutscene id '{statement.Id}'.", statement.IdSpan); return; }
+        if (namedCutsceneGlobals.ContainsKey(key)) { model.References[statement.Id] = Name(statement.Id); return; }
+        if (globals.ContainsKey(key)) { Report("SEGDSL324", $"Duplicate named-cutscene id '{statement.Id}'.", statement.IdSpan); return; }
         if (namedCutsceneId != null) namedCutsceneGlobals[key] = namedCutsceneId;
         model.References[statement.Id] = Name(statement.Id);
     }
@@ -857,7 +858,6 @@ public sealed class DslBinder
                 foreach (var handler in handlers) Report("SEGDSL319", "Duplicate room-changed handler: the Room is already registered by C#.", handler.Span);
             }
         }
-        Console.Error.WriteLine($"binderCheckCSharpRoomChangedDuplicates trees={treeCount} invocations={invocationCount}");
     }
     private static IEnumerable<CycleElementDeclaration> FindNestedElements(DslDeclaration declaration) => declaration switch
     { HandlerDeclaration h => FindNested(h.Body), FunctionDeclaration f => FindNested(f.Body), _ => Enumerable.Empty<CycleElementDeclaration>() };
