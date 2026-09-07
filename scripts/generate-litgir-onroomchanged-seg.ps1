@@ -11,6 +11,8 @@ $migrationSource = Join-Path $litgirRoot 'docs\migration-inputs\worldOnRoomChang
 
 $worldObjectsSource = Join-Path $litgirRoot 'WebApiLitGir\worldObjects.cs'
 $tempWorldObjects = Join-Path $demoRoot 'worldObjects.cs'
+$legacySymbolsSource = Join-Path $litgirRoot 'docs\migration-inputs\worldOnRoomChanged.legacy-symbols.cs'
+$tempLegacySymbols = Join-Path $demoRoot 'worldOnRoomChanged.legacy-symbols.cs'
 
 $tempOutput = Join-Path $env:TEMP 'worldOnRoomChanged.generated.seg'
 $runtimeOutput = Join-Path $litgirRoot 'WebApiLitGir\Gameplay\OnRoomChanged.seg'
@@ -31,6 +33,12 @@ else {
 
 Copy-Item -LiteralPath $inputSource -Destination $tempSource -Force
 Copy-Item -LiteralPath $worldObjectsSource -Destination $tempWorldObjects -Force
+if (Test-Path -LiteralPath $legacySymbolsSource) {
+    # The archive is deliberately outside Litgir's project, but remains part
+    # of the migration corpus so the deterministic title/ID lookup can resolve
+    # metadata removed from the runtime C# after migration.
+    Copy-Item -LiteralPath $legacySymbolsSource -Destination $tempLegacySymbols -Force
+}
 
 Write-Host ""
 Write-Host "Source:"

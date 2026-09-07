@@ -151,7 +151,12 @@ public sealed class SegusumGenerator : IIncrementalGenerator
         EmitLine(sb, statement.Span);
         switch (statement)
         {
-            case VariableDeclaration v: sb.Append(indent).Append("var ").Append(Name(v.Name)).Append(" = ").Append(Emit(v.Initializer, model)).AppendLine(";"); break;
+            case VariableDeclaration v:
+                sb.Append(indent);
+                if (v.Type != null) sb.Append(v.Type).Append(' ');
+                else sb.Append("var ");
+                sb.Append(Name(v.Name)).Append(" = ").Append(Emit(v.Initializer, model)).AppendLine(";");
+                break;
             case AssignmentStatement a: sb.Append(indent).Append(a.Receiver == null ? Name(a.Name) : Emit(a.Receiver, model) + "." + Name(a.MemberName ?? a.Name)).Append(a.Operator).Append(Emit(a.Value, model)).AppendLine(";"); break;
             case IncrementStatement i: sb.Append(indent).Append(Name(i.Name)).AppendLine("++;"); break;
             case ReturnStatement r:

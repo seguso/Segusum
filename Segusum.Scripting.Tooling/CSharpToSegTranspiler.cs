@@ -505,6 +505,12 @@ public static class CSharpToSegTranspiler
                             if (v.Initializer?.Value is InvocationExpressionSyntax start && FindStartCycle(start) != null)
                                 EmitCycle(start, v.Identifier.ValueText, sb, diagnostics, level, partial);
                             else if (v.Initializer != null) sb.Append(indent).Append("var ").Append(v.Identifier.ValueText).Append(" = ").Append(Expression(v.Initializer.Value)).AppendLine();
+                            else
+                            {
+                                var type = MapCSharpType(x.Declaration.Type, diagnostics, x);
+                                if (type == null) throw new InvalidOperationException($"unsupported local variable type '{x.Declaration.Type}'");
+                                sb.Append(indent).Append("var ").Append(v.Identifier.ValueText).Append(": ").Append(type).Append(" = null").AppendLine();
+                            }
                         }
                         catch (InvalidOperationException ex) { Unsupported(v.Initializer ?? (SyntaxNode)v, diagnostics, ex.Message, partial, sb, level); }
                     }
@@ -531,6 +537,26 @@ public static class CSharpToSegTranspiler
             }
             catch (InvalidOperationException ex) { Unsupported(statement, diagnostics, ex.Message, partial, sb, level); }
         }
+    }
+
+    private static string? MapCSharpType(TypeSyntax type, List<MigrationDiagnostic> diagnostics, SyntaxNode source)
+    {
+        var mapped = type switch
+        {
+            PredefinedTypeSyntax predefined when predefined.Keyword.IsKind(SyntaxKind.BoolKeyword) => "bool",
+            PredefinedTypeSyntax predefined when predefined.Keyword.IsKind(SyntaxKind.IntKeyword) => "int",
+            PredefinedTypeSyntax predefined when predefined.Keyword.IsKind(SyntaxKind.StringKeyword) => "string",
+            PredefinedTypeSyntax predefined when predefined.Keyword.IsKind(SyntaxKind.DoubleKeyword) => "double",
+            PredefinedTypeSyntax predefined when predefined.Keyword.IsKind(SyntaxKind.FloatKeyword) => "float",
+            PredefinedTypeSyntax predefined when predefined.Keyword.IsKind(SyntaxKind.ObjectKeyword) => "object",
+            IdentifierNameSyntax identifier => identifier.Identifier.ValueText,
+            QualifiedNameSyntax qualified => qualified.ToString(),
+            _ => null
+        };
+        if (mapped != null) return mapped;
+        diagnostics.Add(new(MigrationUnitStatus.Unsupported, source.SyntaxTree?.FilePath ?? "<source>", StartLine(source),
+            $"local variable type '{type}' is not representable by the SEG type mapping"));
+        return null;
     }
 
     private static void EmitInvocation(InvocationExpressionSyntax invocation, StringBuilder sb, List<MigrationDiagnostic> diagnostics, int level, bool partial)

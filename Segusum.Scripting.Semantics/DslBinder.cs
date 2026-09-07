@@ -304,7 +304,10 @@ public sealed class DslBinder
             switch (statement)
             {
                 case VariableDeclaration v:
-                    var type = BindExpression(v.Initializer, scope); if (type != null) { scope[NormalizeKey(v.Name)] = type; AddLocalIdentity(v.Name, "local", v.Span); } break;
+                    var type = v.Type == null ? BindExpression(v.Initializer, scope) : TypeOf(v.Type);
+                    if (type != null) { scope[NormalizeKey(v.Name)] = type; AddLocalIdentity(v.Name, "local", v.Span); }
+                    if (v.Type != null && v.Initializer is LiteralExpression { Kind: "null" }) nullLiterals.Add(v.Initializer);
+                    break;
                 case AssignmentStatement a:
                     if (a.Receiver != null)
                     {

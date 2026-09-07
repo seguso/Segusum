@@ -44,7 +44,10 @@ public sealed record CycleElementDeclaration(string Cycle,string Id,bool Importa
 }
 public sealed record DslDocument(string? WorldId, IReadOnlyList<DslDeclaration> Declarations);
 public abstract record DslStatement(SourceSpan Span) : DslNode(Span);
-public sealed record VariableDeclaration(string Name,DslExpression Initializer,SourceSpan Span) : DslStatement(Span);
+public sealed record VariableDeclaration(string Name,DslExpression Initializer,SourceSpan Span) : DslStatement(Span)
+{
+    public string? Type { get; init; }
+}
 public sealed record AssignmentStatement(string Name,string Operator,DslExpression Value,SourceSpan Span) : DslStatement(Span)
 {
     public SourceSpan NameSpan { get; init; } = Span;

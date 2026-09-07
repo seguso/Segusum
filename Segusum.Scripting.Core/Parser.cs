@@ -207,7 +207,14 @@ public static class DslParser
             {
                 case "if": return ParseIf(span); case "ret": return new ReturnStatement(Is(DslTokenKind.NewLine) || Is(DslTokenKind.Semicolon) || Is(DslTokenKind.EndOfFile) ? null : Expression(), span); case "nar": if (Is(":")) Take(); return new NarStatement(RawTextAfterKeyword(), span);
                 case "nar-room": if (Is(":")) Take(); return new NarRoomStatement(RawTextAfterKeyword(), span); case "call": Error("The 'call' keyword is no longer part of the DSL syntax."); return new CallStatement(new IdentifierExpression("_error", span), span);
-                case "var": { var name = Word(); Need("="); return new VariableDeclaration(name, Expression(), span); }
+                case "var":
+                {
+                    var name = Word();
+                    string? type = null;
+                    if (Is(DslTokenKind.Colon)) { Take(); type = Word(); }
+                    Need("=");
+                    return new VariableDeclaration(name, Expression(), span) { Type = type };
+                }
                 case "next": return new NextCycleStatement(Expression(), span); case "add": return ParseAdd(span);
                 case "makes-no-sense": return new MakesNoSenseStatement(span); case "prevent-room-change": return new PreventRoomChangeStatement(span); case "mark-happened-once": return new MarkHappenedOnceStatement(Expression(), span); case "mark-happened": return new MarkHappenedStatement(Expression(), span); case "finish-game": return new FinishGameStatement(span); case "do-not-advance-time": return new DoNotAdvanceTimeStatement(span);
                 case "named-cutscene": return ParseNamedCutscene(span);
