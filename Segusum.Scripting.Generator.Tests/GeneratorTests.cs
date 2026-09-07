@@ -721,6 +721,14 @@ public NamedCutSceneId ncsMikeStalloneIlBenefattore = null!;
     }
 
     [Fact]
+    public void ParamsRuntimeMethodAcceptsVariableDslArguments()
+    {
+        var result = Run("def check ret bool:\n    ret noneOfThemWasSeenRecently 2 1 2\nend");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL"));
+        Assert.Contains("noneOfThemWasSeenRecently(2, 1, 2)", Generated(result), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void KebabCycleElementIdIsRejected()
     {
         var result = Run("var cyc = new-cycle\nadd cyc mike-spac-legn-livello24\nend");
