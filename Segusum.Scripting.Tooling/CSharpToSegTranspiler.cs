@@ -1221,12 +1221,6 @@ public static class CSharpToSegTranspiler
     private static string EmitCallExpression(InvocationExpressionSyntax invocation)
     {
         var name = invocation.Expression is MemberAccessExpressionSyntax member ? member.Name.Identifier.ValueText : invocation.Expression.ToString();
-        if (name == "translatable"
-            && invocation.ArgumentList.Arguments.Count == 0
-            && invocation.Expression is MemberAccessExpressionSyntax translatableMember
-            && translatableMember.Expression is LiteralExpressionSyntax translatableLiteral
-            && translatableLiteral.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.StringLiteralExpression))
-            return EmitLiteral(translatableLiteral);
         if (name == "Any" && invocation.ArgumentList.Arguments.Count == 1)
         {
             if (invocation.Expression is not MemberAccessExpressionSyntax anyMember
