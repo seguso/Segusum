@@ -1,32 +1,38 @@
 $ErrorActionPreference = 'Stop'
 
-$segusumRoot = Split-Path -Parent $PSScriptRoot
-$litgirRoot = Join-Path (Split-Path -Parent $segusumRoot) 'litgir'
+param(
+    [string]$LitgirRoot = (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'litgir'),
+    [string]$SegusumRoot = (Split-Path -Parent $PSScriptRoot)
+)
+
+$segusumRoot = (Resolve-Path $SegusumRoot).Path
+$litgirRoot = (Resolve-Path $LitgirRoot).Path
 
 $demoRoot = Join-Path $env:TEMP 'segusum-litgir-demo'
 
 $tempSource = Join-Path $demoRoot 'worldOnRoomChanged.cs'
-$liveSource = Join-Path $litgirRoot 'WebApiLitGir\worldOnRoomChanged.cs'
 $migrationSource = Join-Path $litgirRoot 'docs\migration-inputs\worldOnRoomChanged.cs'
+$liveSource = Join-Path $litgirRoot 'WebApiLitGir\worldOnRoomChanged.cs'
 
 $worldObjectsSource = Join-Path $litgirRoot 'WebApiLitGir\worldObjects.cs'
 $tempWorldObjects = Join-Path $demoRoot 'worldObjects.cs'
-$legacySymbolsSource = Join-Path $litgirRoot 'docs\migration-inputs\worldOnRoomChanged.legacy-symbols.cs'
-$tempLegacySymbols = Join-Path $demoRoot 'worldOnRoomChanged.legacy-symbols.cs'
-$legacyMethodsSource = Join-Path $litgirRoot 'docs\migration-inputs\worldOnRoomChanged.legacy-methods.cs'
 
 $tempOutput = Join-Path $env:TEMP 'worldOnRoomChanged.generated.seg'
 $runtimeOutput = Join-Path $litgirRoot 'WebApiLitGir\Gameplay\OnRoomChanged.seg'
 
 New-Item -ItemType Directory -Force $demoRoot | Out-Null
 
-# Preferisci il C# runtime se esiste ancora.
-# Dopo la migrazione usa la copia congelata sotto docs/migration-inputs.
-if (Test-Path -LiteralPath $liveSource) {
-    $inputSource = $liveSource
+# Il primo run congela il C# completo. Dopo quel momento il frozen source
+# è l'unica sorgente autorevole e il workflow è ripetibile/idempotente.
+if ((Test-Path -LiteralPath $liveSource) -and -not (Test-Path -LiteralPath $migrationSource)) {
+    New-Item -ItemType Directory -Force (Split-Path -Parent $migrationSource) | Out-Null
+    Copy-Item -LiteralPath $liveSource -Destination $migrationSource -Force
 }
-elseif (Test-Path -LiteralPath $migrationSource) {
+if (Test-Path -LiteralPath $migrationSource) {
     $inputSource = $migrationSource
+}
+elseif (Test-Path -LiteralPath $liveSource) {
+    $inputSource = $liveSource
 }
 else {
     throw "C# migration source not found. Expected either '$liveSource' or '$migrationSource'."
@@ -34,12 +40,6 @@ else {
 
 Copy-Item -LiteralPath $inputSource -Destination $tempSource -Force
 Copy-Item -LiteralPath $worldObjectsSource -Destination $tempWorldObjects -Force
-if (Test-Path -LiteralPath $legacySymbolsSource) {
-    # The archive is deliberately outside Litgir's project, but remains part
-    # of the migration corpus so the deterministic title/ID lookup can resolve
-    # metadata removed from the runtime C# after migration.
-    Copy-Item -LiteralPath $legacySymbolsSource -Destination $tempLegacySymbols -Force
-}
 
 Write-Host ""
 Write-Host "Source:"
@@ -92,14 +92,12 @@ Copy-Item -LiteralPath $tempOutput -Destination $runtimeOutput -Force
 # data-driven: declarations owned by SEG are removed from active C#, while
 # reference-only IDs remain there (or are recreated in a generated bridge if
 # a previous migration left them absent).
-$runtimeBridge = Join-Path $litgirRoot 'WebApiLitGir\worldOnRoomChangedRuntimeSymbols.generated.cs'
 $ownershipArgs = @(
     'run', '--project', (Join-Path $segusumRoot 'Segusum.Migration.Cli\Segusum.Migration.Cli.csproj'), '--no-restore', '--',
     'audit-ownership', $tempOutput,
     '--runtime-root', (Join-Path $litgirRoot 'WebApiLitGir'),
-    '--legacy', $legacySymbolsSource,
-    '--legacy-methods', $legacyMethodsSource,
-    '--apply', '--runtime-bridge', $runtimeBridge
+    '--history', $migrationSource,
+    '--apply'
 )
 $ownershipOutput = & dotnet @ownershipArgs 2>&1
 $ownershipExit = $LASTEXITCODE

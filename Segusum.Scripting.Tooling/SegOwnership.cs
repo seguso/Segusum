@@ -45,7 +45,7 @@ public sealed record SegOwnershipReport(
 /// </summary>
 public static class SegOwnership
 {
-    public static SegOwnershipReport Analyze(string segPath, IEnumerable<string> runtimeCSharpFiles, string? legacySymbolsPath = null)
+    public static SegOwnershipReport Analyze(string segPath, IEnumerable<string> runtimeCSharpFiles, string historicalSourcePath)
     {
         var source = new DslSource(segPath, File.ReadAllText(segPath));
         var parsed = DslParser.Parse(source);
@@ -55,14 +55,19 @@ public static class SegOwnership
         foreach (var declaration in parsed.Document.Declarations)
             WalkDeclaration(declaration, ownedCycles, ownedScenes, referenced);
 
-        var declarations = runtimeCSharpFiles
+        var runtimeFiles = runtimeCSharpFiles.Where(File.Exists).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var declarations = runtimeFiles
             .Where(File.Exists)
             .SelectMany(ReadRuntimeDeclarations)
             .ToArray();
-        var runtimeMethods = runtimeCSharpFiles
+        var runtimeMethods = runtimeFiles
             .Where(File.Exists)
             .SelectMany(ReadRuntimeMethods)
             .ToArray();
+        if (!File.Exists(historicalSourcePath))
+            throw new FileNotFoundException("Complete migration history source was not found.", historicalSourcePath);
+        var historicalDeclarations = ReadRuntimeDeclarations(historicalSourcePath).ToArray();
+        var historicalMethods = ReadRuntimeMethods(historicalSourcePath).ToArray();
         var segMethods = parsed.Document.Declarations.OfType<FunctionDeclaration>()
             .Select(x => new SegMethodDeclaration(x.Name, x.ReturnType ?? "void", x.Parameters, x.Span))
             .ToArray();
@@ -81,14 +86,12 @@ public static class SegOwnership
         var keep = declarations.Where(x => !owned.Contains(x.Name) && referenced.Contains(x.Name)).Select(x => x.Name).Distinct(StringComparer.Ordinal).OrderBy(x => x, StringComparer.Ordinal).ToArray();
         var unused = declarations.Where(x => !referenced.Contains(x.Name)).Select(x => x.Name).Distinct(StringComparer.Ordinal).OrderBy(x => x, StringComparer.Ordinal).ToArray();
 
-        var legacy = legacySymbolsPath != null && File.Exists(legacySymbolsPath)
-            ? ReadRuntimeDeclarations(legacySymbolsPath).Select(x => x.Name).ToHashSet(StringComparer.Ordinal)
-            : new HashSet<string>(StringComparer.Ordinal);
+        var historicalNames = historicalDeclarations.Select(x => x.Name).ToHashSet(StringComparer.Ordinal);
         var missingReferences = referenced
-            .Where(x => !owned.Contains(x) && !declared.Contains(x) && legacy.Contains(x))
+            .Where(x => !owned.Contains(x) && !declared.Contains(x) && historicalNames.Contains(x))
             .OrderBy(x => x, StringComparer.Ordinal)
             .ToArray();
-        var missingLegacy = owned.Where(x => !legacy.Contains(x)).OrderBy(x => x, StringComparer.Ordinal).ToArray();
+        var missingLegacy = owned.Where(x => !historicalNames.Contains(x)).OrderBy(x => x, StringComparer.Ordinal).ToArray();
         if (parsed.Diagnostics.Count != 0)
             ambiguities.AddRange(parsed.Diagnostics.Select(x => $"SEG parse diagnostic {x.Id} at {x.Span.Line}:{x.Span.Column}: {x.Message}"));
 
@@ -97,16 +100,29 @@ public static class SegOwnership
         var methodsWithoutMatch = new List<string>();
         foreach (var segMethod in segMethods)
         {
+            var historicalMatches = historicalMethods.Where(x => MethodMatches(segMethod, x)).ToArray();
+            if (historicalMatches.Length == 0)
+            {
+                methodsWithoutMatch.Add(MethodDisplay(segMethod));
+                continue;
+            }
+            if (historicalMatches.Length > 1)
+            {
+                ambiguities.Add($"SEG method '{MethodDisplay(segMethod)}' matches multiple historical methods: {string.Join(", ", historicalMatches.Select(x => x.Path))}");
+                continue;
+            }
+
+            // The historical match proves ownership. The active match is
+            // optional because a previous workflow run may have removed it.
             var matches = runtimeMethods.Where(x => MethodMatches(segMethod, x)).ToArray();
             if (matches.Length == 1) methodsToRemove.Add(matches[0]);
-            else if (matches.Length == 0) methodsWithoutMatch.Add(MethodDisplay(segMethod));
-            else
+            else if (matches.Length > 1)
             {
                 ambiguousMethods.AddRange(matches);
-                ambiguities.Add($"SEG method '{MethodDisplay(segMethod)}' matches multiple runtime methods: {string.Join(", ", matches.Select(x => x.Path))}");
+                ambiguities.Add($"SEG method '{MethodDisplay(segMethod)}' matches multiple active runtime methods: {string.Join(", ", matches.Select(x => x.Path))}");
             }
         }
-        var referencedMethods = FindActiveCSharpReferences(runtimeCSharpFiles, methodsToRemove);
+        var referencedMethods = FindActiveCSharpReferences(runtimeFiles, methodsToRemove);
         // A semantic SEG definition owns the exact matching legacy method even
         // when active C# callers still reference it.  The source generator adds
         // the generated partial World to this same compilation, so those calls
@@ -122,89 +138,23 @@ public static class SegOwnership
     {
         if (!report.IsUnambiguous) throw new InvalidOperationException(string.Join(Environment.NewLine, report.Ambiguities));
         var owned = report.OwnedCycleElementIds.Concat(report.OwnedNamedCutSceneIds).ToHashSet(StringComparer.Ordinal);
-        var changes = report.RuntimeDeclarations.Where(x => owned.Contains(x.Name)).GroupBy(x => x.Path, StringComparer.OrdinalIgnoreCase);
+        var idChanges = report.RuntimeDeclarations.Where(x => owned.Contains(x.Name));
+        var allChanges = idChanges.Select(x => (x.Path, x.Span))
+            .Concat(report.MethodsToRemove.Select(x => (x.Path, x.Span)))
+            .GroupBy(x => x.Path, StringComparer.OrdinalIgnoreCase);
         var changed = new List<string>();
-        foreach (var file in changes)
+        foreach (var file in allChanges)
         {
             var text = File.ReadAllText(file.Key);
-            foreach (var declaration in file.OrderByDescending(x => x.Span.Start))
+            foreach (var declaration in file
+                .GroupBy(x => (x.Span.Start, x.Span.Length))
+                .Select(x => x.First())
+                .OrderByDescending(x => x.Span.Start))
                 text = text.Remove(declaration.Span.Start, declaration.Span.Length);
             File.WriteAllText(file.Key, text, new UTF8Encoding(false));
             changed.Add(file.Key);
         }
-        var methodChanges = report.MethodsToRemove.GroupBy(x => x.Path, StringComparer.OrdinalIgnoreCase);
-        foreach (var file in methodChanges)
-        {
-            var text = File.ReadAllText(file.Key);
-            foreach (var method in file.OrderByDescending(x => x.Span.Start))
-                text = text.Remove(method.Span.Start, method.Span.Length);
-            File.WriteAllText(file.Key, text, new UTF8Encoding(false));
-            if (!changed.Contains(file.Key, StringComparer.OrdinalIgnoreCase)) changed.Add(file.Key);
-        }
         return changed;
-    }
-
-    public static IReadOnlyList<string> EnsureLegacyMethods(SegOwnershipReport report, string legacyMethodsPath)
-    {
-        if (!report.IsUnambiguous) throw new InvalidOperationException(string.Join(Environment.NewLine, report.Ambiguities));
-        var existing = File.Exists(legacyMethodsPath) ? File.ReadAllText(legacyMethodsPath) : "";
-        var additions = report.MethodsToRemove.Where(x => !existing.Contains(x.Text, StringComparison.Ordinal)).ToArray();
-        if (additions.Length == 0) return Array.Empty<string>();
-        var sb = new StringBuilder();
-        if (string.IsNullOrEmpty(existing))
-        {
-            sb.AppendLine("// Archived methods superseded by SEG OnRoomChanged; not compiled.");
-            sb.AppendLine("namespace WebApiLitGir { public partial class World : WorldBase {");
-            sb.AppendLine(existing);
-        }
-        else sb.Append(existing.TrimEnd()).AppendLine();
-        foreach (var method in additions) sb.AppendLine(method.Text.Trim()).AppendLine();
-        if (string.IsNullOrEmpty(existing)) sb.AppendLine("} }");
-        File.WriteAllText(legacyMethodsPath, sb.ToString(), new UTF8Encoding(false));
-        return additions.Select(x => MethodDisplay(x)).ToArray();
-    }
-
-    public static string? EnsureReferenceOnlyBridge(SegOwnershipReport report, string legacySymbolsPath, string bridgePath)
-    {
-        if (!report.IsUnambiguous) throw new InvalidOperationException(string.Join(Environment.NewLine, report.Ambiguities));
-        var legacy = ReadRuntimeDeclarations(legacySymbolsPath).ToDictionary(x => x.Name, StringComparer.Ordinal);
-        var missing = report.MissingReferenceOnlyRuntimeSymbols.Where(legacy.ContainsKey).OrderBy(x => x, StringComparer.Ordinal).ToArray();
-        if (missing.Length == 0)
-        {
-            if (File.Exists(bridgePath)) File.Delete(bridgePath);
-            return null;
-        }
-        var sb = new StringBuilder();
-        sb.AppendLine("using Seg;");
-        sb.AppendLine("namespace WebApiLitGir;");
-        sb.AppendLine("public partial class World : WorldBase");
-        sb.AppendLine("{");
-        foreach (var name in missing) sb.Append("    ").AppendLine(legacy[name].Text.Trim());
-        sb.AppendLine("}");
-        File.WriteAllText(bridgePath, sb.ToString(), new UTF8Encoding(false));
-        return bridgePath;
-    }
-
-    public static IReadOnlyList<string> EnsureLegacySymbols(SegOwnershipReport report, string legacySymbolsPath)
-    {
-        if (!report.IsUnambiguous) throw new InvalidOperationException(string.Join(Environment.NewLine, report.Ambiguities));
-        var existing = ReadRuntimeDeclarations(legacySymbolsPath).Select(x => x.Name).ToHashSet(StringComparer.Ordinal);
-        var additions = report.RuntimeDeclarations
-            .Where(x => report.OwnedCycleElementIds.Contains(x.Name) || report.OwnedNamedCutSceneIds.Contains(x.Name))
-            .Where(x => !existing.Contains(x.Name))
-            .GroupBy(x => x.Name, StringComparer.Ordinal)
-            .Select(x => x.First())
-            .OrderBy(x => x.Name, StringComparer.Ordinal)
-            .ToArray();
-        if (additions.Length == 0) return Array.Empty<string>();
-        var text = File.ReadAllText(legacySymbolsPath);
-        var close = text.LastIndexOf('}');
-        if (close < 0) throw new InvalidOperationException($"Legacy symbol archive has no closing brace: {legacySymbolsPath}");
-        var block = new StringBuilder().AppendLine();
-        foreach (var declaration in additions)
-            block.AppendLine("        " + declaration.Text.Trim().Replace("\r\n", "\n").Replace("\n", "\n        "));
-        File.WriteAllText(legacySymbolsPath, text.Insert(close, block.ToString()), new UTF8Encoding(false));
-        return additions.Select(x => x.Name).ToArray();
     }
 
     private static IEnumerable<RuntimeIdDeclaration> ReadRuntimeDeclarations(string path)
