@@ -531,8 +531,11 @@ public sealed class DslBinder
         if (call.Name == "not-seen-recently") { if (call.Arguments.Count == 2) { var receiver = call.Arguments[0].Expression; Require(BindExpression(receiver, scope, contextualIt), dateTimeNullable, call.Arguments[0].Span, "not-seen-recently receiver must be DateTime?."); Require(BindExpression(call.Arguments[1].Expression, scope), compilation.GetSpecialType(SpecialType.System_Int32), call.Arguments[1].Span, "cooldown must be numeric."); model.DomainOperations[call] = new BoundDomainOperation(BoundDomainOperationKind.NotSeenRecently, receiver, call.Arguments[1].Expression, null); } return compilation.GetSpecialType(SpecialType.System_Boolean); }
         if (call.Name == "was-seen-at-least-once") { if (call.Arguments.Count == 1) { var receiver = call.Arguments[0].Expression; var t = BindExpression(receiver, scope); Require(t, cycleElementId, call.Arguments[0].Span, "was-seen-at-least-once requires CycleElemId."); model.DomainOperations[call] = new BoundDomainOperation(BoundDomainOperationKind.WasSeenAtLeastOnce, receiver, null, null); } return compilation.GetSpecialType(SpecialType.System_Boolean); }
         if (functions.TryGetValue(NormalizeKey(call.Name), out var function)) { var result = BindArgumentList(call, function.Parameters.Select(p => new ParameterInfo(p.Name, TypeOf(p.Type), false)).ToArray(), scope, contextualIt); if (result.Call == null) { ReportFailure(call, new[] { result }); return null; } RecordDslReference(call.Name, call.NameSpan, BoundSymbolKind.Function, function.Name, "invocation"); model.Calls[call] = new BoundCall(null, Name(function.Name), result.Call.Arguments, TypeOf(function.ReturnType ?? "void")); return TypeOf(function.ReturnType ?? "void"); }
-        var receiverType = call.Receiver == null ? null : BindExpression(call.Receiver, scope, contextualIt);
-        var exactMethods = (receiverType == null ? AllMembers(call.Name) : MembersOf(receiverType, call.Name).Where(x => Accessible(x, receiverType))).OfType<IMethodSymbol>().ToArray();
+        var staticReceiver = call.Receiver is IdentifierExpression staticName && TryGetTypeBySimpleNameAndMember(staticName.Name, call.Name, out var staticType) ? staticType : null;
+        var receiverType = staticReceiver != null ? staticReceiver : call.Receiver == null ? null : BindExpression(call.Receiver, scope, contextualIt);
+        var exactMethods = staticReceiver != null
+            ? staticReceiver.GetMembers(call.Name).OfType<IMethodSymbol>().Where(x => x.IsStatic).ToArray()
+            : (receiverType == null ? AllMembers(call.Name) : MembersOf(receiverType, call.Name).Where(x => Accessible(x, receiverType))).OfType<IMethodSymbol>().ToArray();
         var fallbackMembers = receiverType == null ? DslNames.Candidates(call.Name).Skip(1).SelectMany(AllMembers) : MembersOf(receiverType).Where(x => Accessible(x, receiverType) && NormalizeKey(x.Name) == NormalizeKey(call.Name));
         var extensionMethods = receiverType == null ? Enumerable.Empty<IMethodSymbol>() : ExtensionMethodsOf(receiverType, call.Name);
         var methods = (exactMethods.Length != 0 ? exactMethods : fallbackMembers.OfType<IMethodSymbol>().Concat(extensionMethods)).Where(m => NormalizeKey(m.Name) == NormalizeKey(call.Name)).GroupBy(m => m.ToDisplayString()).Select(g => g.First()).ToArray();
@@ -542,7 +545,7 @@ public sealed class DslBinder
         if (applicable.Length == 0) { ReportFailure(call, results); return null; }
         var bestScore = applicable[0].Score; var best = applicable.Where(x => x.Score == bestScore).ToArray();
         if (best.Length != 1) { Report("SEGDSL306", $"Call to '{call.Name}' is ambiguous.", call.Span); return null; }
-        var boundCall = best[0].Call! with { Receiver = best[0].Call!.Method?.IsExtensionMethod == true ? null : call.Receiver };
+        var boundCall = best[0].Call! with { Receiver = best[0].Call!.Method?.IsExtensionMethod == true || staticReceiver != null ? null : call.Receiver };
         RecordReference(call.Name, call.NameSpan, BoundSymbolKind.CSharpMethod, boundCall.Method, null, "invocation");
         model.Calls[call] = boundCall; return boundCall.ReturnType;
     }
