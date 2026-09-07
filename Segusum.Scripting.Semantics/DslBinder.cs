@@ -574,7 +574,7 @@ public sealed class DslBinder
                             IPropertySymbol property => property.IsStatic,
                             IMethodSymbol method => method.IsStatic,
                             _ => false
-                        } && Accessible(x));
+                        } && IsAccessibleStaticMember(x, staticType));
                     if (staticMember != null)
                     {
                         RecordReference(m.MemberName, m.MemberSpan, staticMember is IMethodSymbol ? BoundSymbolKind.CSharpMethod : BoundSymbolKind.CSharpProperty, staticMember, null, "member-name");
@@ -796,6 +796,18 @@ public sealed class DslBinder
         return resolved;
     }
     private static ITypeSymbol? MemberType(ISymbol symbol) => symbol switch { IFieldSymbol f => f.Type, IPropertySymbol p => p.Type, IMethodSymbol m => m.ReturnType, _ => null };
+
+    private bool IsAccessibleStaticMember(ISymbol member, INamedTypeSymbol receiverType)
+    {
+        if (Accessible(member)) return true;
+        // Public members of a public referenced enum/type are valid static
+        // accesses even when Roslyn's source-based accessibility check is
+        // evaluated against a generated partial World context.
+        return receiverType.DeclaredAccessibility == Accessibility.Public
+            && member.DeclaredAccessibility == Accessibility.Public
+            && !SegusumGeneratedSource.IsGenerated(receiverType)
+            && !SegusumGeneratedSource.IsGenerated(member);
+    }
 
     private ITypeSymbol? FindCommonAssignableType(IReadOnlyList<ITypeSymbol?> types)
     {
