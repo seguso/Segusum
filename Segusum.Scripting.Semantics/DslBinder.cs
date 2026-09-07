@@ -469,8 +469,6 @@ public sealed class DslBinder
     {
         if (cycleElementGlobals.ContainsKey(id)) return;
         var existing = ResolveCSharpMembers(id).FirstOrDefault();
-        if (existing != null)
-            Report("SEGDSL304", $"CycleElementId '{id}' collides with an existing World member.", span);
         var existingType = existing switch { IFieldSymbol field => field.Type, IPropertySymbol property => property.Type, _ => null };
         cycleElementGlobals[id] = existingType ?? cycleElementId!;
         AddDslIdentity(id, "cycle-element", span);
