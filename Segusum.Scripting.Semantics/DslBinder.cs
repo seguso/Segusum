@@ -818,9 +818,15 @@ public sealed class DslBinder
         if (compatible.Length == 0) return null;
         // Prefer the most specific common type; never use object merely as a
         // fallback when a meaningful shared base/interface exists.
+        // Prefer the most specific common type.  A candidate is more
+        // specific when values of that type can still be assigned to every
+        // other compatible candidate (for example LogicObj is more specific
+        // than its base Mentionable).  The previous predicate tested the
+        // inverse relation and therefore widened homogeneous LogicObj lists
+        // to Mentionable[] unnecessarily.
         return compatible.FirstOrDefault(candidate => compatible.All(other =>
             SymbolEqualityComparer.Default.Equals(candidate, other)
-            || !Compatible(candidate, other))) ?? compatible[0];
+            || Compatible(candidate, other))) ?? compatible[0];
     }
     private IEnumerable<IMethodSymbol> ExtensionMethodsOf(ITypeSymbol receiverType, string name)
         => profile.MeasureEnumerable("ExtensionMethodsOf", ExtensionMethodsOfCore(receiverType, name));

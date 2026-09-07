@@ -1325,6 +1325,15 @@ public NamedCutSceneId ncsMikeStalloneIlBenefattore = null!;
     }
 
     [Fact]
+    public void ListOfLogicObjectsBindsToEnumerableOfLogicObjects()
+    {
+        var result = Run("use thing here:\n    var objects = [a, b, c]\n    countObjects objects character\nend", "public LogicObj thing = null!; public LogicObj a = null!; public LogicObj b = null!; public LogicObj c = null!; public Character character = null!; private static int countObjects(System.Collections.Generic.IEnumerable<LogicObj> objects, Character character) => 0;");
+
+        Assert.DoesNotContain(result.Diagnostics, d => d.GetMessage().Contains("incompatible", StringComparison.Ordinal));
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
     public void SubmitTextInputIsRequiredForInputContext()
     {
         var result = Run("def bad:\n    var spl = input.wordsLower\nend");
