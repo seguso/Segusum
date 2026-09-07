@@ -75,12 +75,12 @@ public sealed class SegOwnershipTests
     }
 
     [Fact]
-    public void SegDefinedMethodStillReferencedByActiveCSharpIsNotSafeToRemove()
+    public void SegDefinedMethodStillReferencedByActiveCSharpIsStillOwnedBySeg()
     {
         using var fixture = new OwnershipFixture(addActiveCaller: true);
         var report = fixture.Analyze("world game\ndef migrated value: int ret bool:\n    ret true\nend\n");
 
-        Assert.DoesNotContain(report.MethodsToRemove, x => x.Name == "migrated");
+        Assert.Contains(report.MethodsToRemove, x => x.Name == "migrated");
         Assert.Contains(report.MethodsReferencedByActiveCSharp, x => x.Name == "migrated");
     }
 
@@ -91,7 +91,7 @@ public sealed class SegOwnershipTests
         var report = fixture.Analyze("world game\ndef migrated value: int ret bool:\n    ret true\nend\n");
 
         Assert.Contains(report.MethodsReferencedByActiveCSharp, x => x.Name == "migrated");
-        Assert.DoesNotContain(report.MethodsToRemove, x => x.Name == "migrated");
+        Assert.Contains(report.MethodsToRemove, x => x.Name == "migrated");
     }
 
     private sealed class OwnershipFixture : IDisposable

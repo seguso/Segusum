@@ -107,12 +107,15 @@ public static class SegOwnership
             }
         }
         var referencedMethods = FindActiveCSharpReferences(runtimeCSharpFiles, methodsToRemove);
-        var referencedMethodKeys = referencedMethods.Select(MethodKey).ToHashSet(StringComparer.Ordinal);
-        var safeToRemove = methodsToRemove.Where(x => !referencedMethodKeys.Contains(MethodKey(x))).ToArray();
-        var ownedMethodKeys = safeToRemove.Select(MethodKey).ToHashSet(StringComparer.Ordinal);
+        // A semantic SEG definition owns the exact matching legacy method even
+        // when active C# callers still reference it.  The source generator adds
+        // the generated partial World to this same compilation, so those calls
+        // bind to the generated method after the legacy implementation is gone.
+        // References remain in MethodsReferencedByActiveCSharp for diagnostics.
+        var ownedMethodKeys = methodsToRemove.Select(MethodKey).ToHashSet(StringComparer.Ordinal);
         var keptMethods = runtimeMethods.Where(x => !ownedMethodKeys.Contains(MethodKey(x))).ToArray();
         return new(ownedCycles, ownedScenes, declarations, remove, keep, missingReferences, unused, missingLegacy, ambiguities,
-            segMethods, runtimeMethods, safeToRemove, keptMethods, referencedMethods, ambiguousMethods, methodsWithoutMatch);
+            segMethods, runtimeMethods, methodsToRemove, keptMethods, referencedMethods, ambiguousMethods, methodsWithoutMatch);
     }
 
     public static IReadOnlyList<string> ApplyRemoval(SegOwnershipReport report)
