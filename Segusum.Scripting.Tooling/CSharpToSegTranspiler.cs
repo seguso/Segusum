@@ -565,7 +565,7 @@ public static class CSharpToSegTranspiler
         if (CallName(invocation) == "addToCycle") { EmitCycleChain(invocation, sb, diagnostics, level, partial); return; }
         if (CallName(invocation) == "execNextInCycle") { sb.Append(indent).Append("next ").AppendLine(Arg(invocation.ArgumentList.Arguments, 0)); return; }
         if (CallName(invocation) == "startCycle") { Unsupported(invocation, diagnostics, "startCycle must be assigned to a cycle variable", partial, sb, level); return; }
-        if (name is "dial" or "nar" or "narText" or "narRoom" or "narImg")
+        if (name is "dial" or "nar" or "narText")
         {
             if (name == "dial")
             {
@@ -850,11 +850,19 @@ public static class CSharpToSegTranspiler
             : name;
         return invocation.ArgumentList.Arguments.Count == 0
             ? receiver
-            : receiver + " " + string.Join(" ", invocation.ArgumentList.Arguments.Select(x => ExpressionForCallArgument(x.Expression)));
+            : receiver + " " + string.Join(" ", invocation.ArgumentList.Arguments.Select(ExpressionForCallArgument));
     }
 
-    private static string ExpressionForCallArgument(ExpressionSyntax expression)
-        => expression is ConditionalExpressionSyntax ? "(" + Expression(expression) + ")" : Expression(expression);
+    private static string ExpressionForCallArgument(ArgumentSyntax argument)
+    {
+        var expression = argument.Expression;
+        var value = expression is InvocationExpressionSyntax or ConditionalExpressionSyntax
+            ? "(" + Expression(expression) + ")"
+            : Expression(expression);
+        return argument.NameColon is null
+            ? value
+            : argument.NameColon.Name.Identifier.ValueText + ": " + value;
+    }
 
     private static string EmitAnyQuery(ExpressionSyntax collection, LambdaExpressionSyntax lambda)
     {

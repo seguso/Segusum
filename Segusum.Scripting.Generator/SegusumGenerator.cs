@@ -131,7 +131,8 @@ public sealed class SegusumGenerator : IIncrementalGenerator
         else if (handler.Explanation != null && handler.Kind == "combine") sb.Append(", explanation: ").Append(Emit(handler.Explanation, model));
         else if (handler.Explanation != null) sp.ReportDiagnostic(Diagnostic.Create(Error, ToLocation(handler.Explanation.Span), "Explanation is not supported by the use-here runtime API."));
         if (handler.Kind == "use-here" && handler.Phrase != null) sb.Append(", ").Append(Emit(handler.Phrase, model));
-        sb.Append(", handler: e => {\n"); EmitDefaultLine(sb); foreach (var statement in handler.Body) EmitStatement(sb, statement, "   ", "e", model); sb.Append("#line hidden\n  }");
+        var handlerInputName = handler.Kind == "room-changed" ? "i" : "e";
+        sb.Append(", handler: ").Append(handlerInputName).Append(" => {\n"); EmitDefaultLine(sb); foreach (var statement in handler.Body) EmitStatement(sb, statement, "   ", handlerInputName, model); sb.Append("#line hidden\n  }");
         if (handler.Condition != null) { sb.Append(", isPossibleNow: () =>\n"); EmitLine(sb, handler.Condition.Span); sb.Append(Emit(handler.Condition, model)).AppendLine(); EmitDefaultLine(sb); }
         sb.AppendLine(");"); EmitDefaultLine(sb);
     }
@@ -207,7 +208,7 @@ public sealed class SegusumGenerator : IIncrementalGenerator
         IdentifierExpression i => model.Values.TryGetValue(i, out var value) ? (value.Kind is BoundSymbolKind.CSharpMethod or BoundSymbolKind.Function ? value.CSharpName + "()" : value.CSharpName) : Name(i.Name),
         ThisExpression => "this",
         LiteralExpression l => l.Kind == "cycle" ? "new Cycle()" : l.Kind == "raw-string" ? "\"" + EscapeString(l.Value) + "\"" : l.Value,
-        ListExpression l => "new[] { " + string.Join(", ", l.Elements.Select(x => Emit(x, model))) + " }",
+        ListExpression l => EmitList(l, model),
         ParenthesizedExpression p => "(" + Emit(p.Expression, model) + ")", UnaryExpression u => EmitUnary(u, model),
         ConditionalExpression c => "(" + Emit(c.Condition, model) + " ? " + Emit(c.WhenTrue, model) + " : " + Emit(c.WhenFalse, model) + ")",
         BinaryExpression b => Emit(b.Left, model) + " " + (b.Operator == "and" ? "&&" : b.Operator == "or" ? "||" : b.Operator) + " " + Emit(b.Right, model),
@@ -222,6 +223,16 @@ public sealed class SegusumGenerator : IIncrementalGenerator
         CallExpression c when model.Calls.TryGetValue(c, out var bound) => (bound.Receiver == null ? bound.TargetName : Emit(bound.Receiver, model) + "." + bound.TargetName) + "(" + string.Join(", ", bound.Arguments.Select(a => (a.Source.Name == null ? "" : Name(a.ParameterName) + ": ") + Emit(a.Source.Expression, model))) + ")",
         _ => "default"
     };
+    private static string EmitList(ListExpression list, BoundModel model)
+    {
+        var elementType = model.ExpressionTypes.TryGetValue(list, out var type) && type is IArrayTypeSymbol array
+            ? array.ElementType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)
+            : null;
+        var elements = string.Join(", ", list.Elements.Select(x => Emit(x, model)));
+        return elementType == null
+            ? "new[] { " + elements + " }"
+            : "new " + elementType + "[] { " + elements + " }";
+    }
     private static string EmitUnary(UnaryExpression expression, BoundModel model)
     {
         var operand = Emit(expression.Operand, model);

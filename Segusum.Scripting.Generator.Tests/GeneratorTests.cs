@@ -24,6 +24,31 @@ public sealed class GeneratorTests
     }
 
     [Fact]
+    public void RoomChangedContextResolvesThreeLevelMemberChains()
+    {
+        var result = Run("room-changed roomA:\n    if isEvenRandomInput i.randomInputs.rnd2:\n        ret\n    end\nend", "public Room roomA = null!; public bool isEvenRandomInput(int value) => true;");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL", StringComparison.Ordinal));
+        Assert.Contains("isEvenRandomInput(i.randomInputs.rnd2)", Generated(result), StringComparison.Ordinal);
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
+    public void ListLiteralInfersTheMostSpecificCommonBaseType()
+    {
+        var result = Run("def main:\n    var items = [logic, objective]\nend", "public class ChildLogic : LogicObj { } public class ChildObjective : Objective { } public ChildLogic logic = null!; public ChildObjective objective = null!;");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL", StringComparison.Ordinal));
+        Assert.Contains("new Mentionable[] { logic, objective }", Generated(result), StringComparison.Ordinal);
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
+    public void TrulyIncompatibleListLiteralIsRejected()
+    {
+        var result = Run("def main:\n    var items = [logic, roomA]\nend", "public LogicObj logic = null!; public Room roomA = null!;");
+        Assert.Contains(result.Diagnostics, d => d.GetMessage().Contains("List elements must have a compatible type", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void ApplicationParsingIsLeftAssociativeAndParenthesizedCallsNest()
     {
         var result = Run("def direct ret bool:\n    ret foo a b\nend\ndef nested ret bool:\n    ret foo (bar a) b\nend\ndef deeplyNested ret bool:\n    ret foo (bar (baz a)) b\nend\ndef infix ret bool:\n    ret foo a b and c\nend\ndef groupedInfix ret bool:\n    ret foo a (b and c)\nend", "public bool a; public bool b; public bool c; public bool foo(bool x, bool y) => x && y; public bool bar(bool x) => x; public bool baz(bool x) => x;");

@@ -83,6 +83,7 @@ public sealed class DslBinderProfile
 public sealed class BoundModel
 {
     public Dictionary<DslExpression, BoundValue> Values { get; } = new(ReferenceComparer<DslExpression>.Instance);
+    public Dictionary<DslExpression, ITypeSymbol?> ExpressionTypes { get; } = new(ReferenceComparer<DslExpression>.Instance);
     public Dictionary<DslExpression, BoundCall> Calls { get; } = new(ReferenceComparer<DslExpression>.Instance);
     public Dictionary<DslExpression, BoundDomainOperation> DomainOperations { get; } = new(ReferenceComparer<DslExpression>.Instance);
     public Dictionary<string, string> References { get; } = new(StringComparer.Ordinal);
@@ -124,6 +125,7 @@ public sealed class DslBinder
     private readonly INamedTypeSymbol? room;
     private readonly INamedTypeSymbol? explanation;
     private readonly ITypeSymbol? beforeRoomChangeInput;
+    private readonly ITypeSymbol? roomChangedInput;
     private readonly ITypeSymbol? actionContext;
     private readonly ITypeSymbol? cutScene;
     private readonly ITypeSymbol? walkPath;
@@ -156,7 +158,7 @@ public sealed class DslBinder
         this.semanticIndexes = semanticIndexes;
         this.compilation = compilation; this.world = world; this.report = report;
         cycle = GetTypeByMetadataName("Seg.Cycle"); cycleElementId = GetTypeByMetadataName("Seg.CycleElemId"); namedCutsceneId = GetTypeByMetadataName("Seg.NamedCutSceneId");
-        logicObj = GetTypeByMetadataName("Seg.LogicObj"); objective = GetTypeByMetadataName("Seg.Objective"); room = GetTypeByMetadataName("Seg.Room"); explanation = GetTypeByMetadataName("Seg.Explanation"); beforeRoomChangeInput = GetTypeByMetadataName("Seg.BeforeRoomChangeInput"); walkPath = GetTypeByMetadataName("Seg.WalkPath"); actionContext = GetTypeByMetadataName("Seg.ActionContext"); cutScene = GetTypeByMetadataName("Seg.CutScene");
+        logicObj = GetTypeByMetadataName("Seg.LogicObj"); objective = GetTypeByMetadataName("Seg.Objective"); room = GetTypeByMetadataName("Seg.Room"); explanation = GetTypeByMetadataName("Seg.Explanation"); beforeRoomChangeInput = GetTypeByMetadataName("Seg.BeforeRoomChangeInput"); roomChangedInput = GetTypeByMetadataName("Seg.RoomChangedInput"); walkPath = GetTypeByMetadataName("Seg.WalkPath"); actionContext = GetTypeByMetadataName("Seg.ActionContext"); cutScene = GetTypeByMetadataName("Seg.CutScene");
         dateTime = compilation.GetSpecialType(SpecialType.System_DateTime); dateTimeNullable = compilation.GetSpecialType(SpecialType.System_Nullable_T).Construct(dateTime); textHandlerInput = GetTypeByMetadataName("Seg.TextHandlerInput");
     }
     public void Bind(IReadOnlyList<DslDeclaration> declarations)
@@ -340,7 +342,15 @@ public sealed class DslBinder
         var previousInputType = inputType;
         inputType = h.Kind == "submit-text-input" ? textHandlerInput : GetTypeByMetadataName("Seg.HandlerInput");
         inputContextAllowed = h.Kind == "submit-text-input";
-        BindStatements(h.Body, new(), null);
+        var handlerScope = new Dictionary<string, ITypeSymbol>(StringComparer.Ordinal);
+        if (h.Kind == "room-changed" && roomChangedInput != null)
+        {
+            handlerScope[NormalizeKey("i")] = roomChangedInput;
+            handlerScope[NormalizeKey("e")] = roomChangedInput;
+            AddLocalIdentity("i", "contextual", h.Span);
+            AddLocalIdentity("e", "contextual", h.Span);
+        }
+        BindStatements(h.Body, handlerScope, null);
         inputType = previousInputType;
         inputContextAllowed = false;
     }
@@ -486,7 +496,11 @@ public sealed class DslBinder
         namedCutsceneMetadata[key] = title.Value;
     }
     private ITypeSymbol? BindExpression(DslExpression expression, Dictionary<string, ITypeSymbol> scope, ITypeSymbol? contextualIt = null)
-        => profile.Measure("BindExpression", () => BindExpressionCore(expression, scope, contextualIt));
+    {
+        var type = profile.Measure("BindExpression", () => BindExpressionCore(expression, scope, contextualIt));
+        model.ExpressionTypes[expression] = type;
+        return type;
+    }
     private ITypeSymbol? BindExpressionCore(DslExpression expression, Dictionary<string, ITypeSymbol> scope, ITypeSymbol? contextualIt = null)
     {
         switch (expression)
@@ -495,10 +509,16 @@ public sealed class DslBinder
             case ListExpression list:
             {
                 if (list.Elements.Count == 0) { Report("SEGDSL313", "List literals must contain at least one element.", list.Span); return null; }
-                var listElementType = BindExpression(list.Elements[0], scope, contextualIt);
-                if (listElementType == null) return null;
-                foreach (var element in list.Elements.Skip(1))
-                    RequireExpression(element, BindExpression(element, scope, contextualIt), listElementType, "List elements must have a compatible type.");
+                var elementTypes = list.Elements
+                    .Select(element => BindExpression(element, scope, contextualIt))
+                    .ToArray();
+                var listElementType = FindCommonAssignableType(elementTypes);
+                if (listElementType == null)
+                {
+                    foreach (var element in list.Elements)
+                        Report("SEGDSL309", "List elements must have a compatible type.", element.Span);
+                    return null;
+                }
                 return compilation.CreateArrayTypeSymbol(listElementType);
             }
             case IdentifierExpression i:
@@ -742,6 +762,32 @@ public sealed class DslBinder
         return resolved;
     }
     private static ITypeSymbol? MemberType(ISymbol symbol) => symbol switch { IFieldSymbol f => f.Type, IPropertySymbol p => p.Type, IMethodSymbol m => m.ReturnType, _ => null };
+
+    private ITypeSymbol? FindCommonAssignableType(IReadOnlyList<ITypeSymbol?> types)
+    {
+        if (types.Count == 0 || types.Any(x => x == null)) return null;
+        var concrete = types.Cast<ITypeSymbol>().ToArray();
+        var candidates = new List<ITypeSymbol>();
+        foreach (var type in concrete)
+        {
+            candidates.Add(type);
+            for (var baseType = type.BaseType; baseType != null; baseType = baseType.BaseType)
+                candidates.Add(baseType);
+            candidates.AddRange(type.AllInterfaces);
+        }
+        var compatible = candidates
+            .Distinct(SymbolEqualityComparer.Default)
+            .OfType<ITypeSymbol>()
+            .Where(candidate => candidate.SpecialType != SpecialType.System_Object)
+            .Where(candidate => concrete.All(type => Compatible(type, candidate)))
+            .ToArray();
+        if (compatible.Length == 0) return null;
+        // Prefer the most specific common type; never use object merely as a
+        // fallback when a meaningful shared base/interface exists.
+        return compatible.FirstOrDefault(candidate => compatible.All(other =>
+            SymbolEqualityComparer.Default.Equals(candidate, other)
+            || !Compatible(candidate, other))) ?? compatible[0];
+    }
     private IEnumerable<IMethodSymbol> ExtensionMethodsOf(ITypeSymbol receiverType, string name)
         => profile.MeasureEnumerable("ExtensionMethodsOf", ExtensionMethodsOfCore(receiverType, name));
     private IEnumerable<IMethodSymbol> ExtensionMethodsOfCore(ITypeSymbol receiverType, string name)

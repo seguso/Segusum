@@ -24,6 +24,23 @@ public sealed class CSharpToSegTranspilerTests
     }
 
     [Fact]
+    public void NestedCallArgumentsAreParenthesizedForMlApplication()
+    {
+        var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { void M() { addHandlerUseHere(a, handler: i => { outer(inner(a)); outer(inner(a), b); }); } }");
+        Assert.Contains("outer (inner a)", result.Text, StringComparison.Ordinal);
+        Assert.Contains("outer (inner a) b", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(result.Diagnostics, x => x.Status == MigrationUnitStatus.Unsupported);
+    }
+
+    [Fact]
+    public void RuntimeNarrationCallsKeepAllArgumentsOnTheNormalCallPath()
+    {
+        var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { void M() { addRoomChangedHandler(roomA, i => { narRoom(\"...\", roomCamilla, false, alsoShowGraphicsInTextMode: true); narImg(\"...\", \"img/a.png\", alsoShowGraphicsInTextMode: true); }); } }");
+        Assert.Contains("narRoom \"...\" roomCamilla false alsoShowGraphicsInTextMode: true", result.Text, StringComparison.Ordinal);
+        Assert.Contains("narImg \"...\" \"img/a.png\" alsoShowGraphicsInTextMode: true", result.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ConditionalExpressionIsEmittedAsSegExpression()
     {
         var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { void M() { addHandlerUseHere(a, handler: i => { var protag = camilla.isInCurParty() ? camilla : olivia; protag = ifReady ? camilla : olivia; foo(camilla.isInCurParty() ? camilla : olivia); }); } }");
