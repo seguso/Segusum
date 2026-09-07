@@ -433,7 +433,7 @@ public sealed class DslBinder
                 case PreventRoomChangeStatement p:
                     if (beforeRoomChangeInput == null || inputType != beforeRoomChangeInput) Report("SEGDSL333", "prevent-room-change is only valid inside before-room-change.", p.Span);
                     break;
-                case NamedCutsceneStatement n: BindNamedCutscene(n, scope); break;
+                case NamedCutsceneStatement n: BindNamedCutscene(n, scope, returnType); break;
                 case MarkHappenedOnceStatement mark:
                     if (mark.Target is not IdentifierExpression)
                     {
@@ -455,7 +455,7 @@ public sealed class DslBinder
     }
     private ITypeSymbol? inputType;
     private bool inputContextAllowed;
-    private void BindNamedCutscene(NamedCutsceneStatement statement, Dictionary<string, ITypeSymbol>? scope = null)
+    private void BindNamedCutscene(NamedCutsceneStatement statement, Dictionary<string, ITypeSymbol>? scope = null, ITypeSymbol? returnType = null)
     {
         var idType = BindName(statement.Id, statement.IdSpan, scope);
         Require(idType, namedCutsceneId, statement.IdSpan, "named-cutscene id must be a declared NamedCutSceneId.");
@@ -464,7 +464,7 @@ public sealed class DslBinder
         else
             Require(BindExpression(statement.Title, scope ?? new()), compilation.GetSpecialType(SpecialType.System_String), statement.Title.Span, "named-cutscene title must be a string literal.");
         foreach (var argument in statement.Arguments) BindExpression(argument, scope ?? new());
-        BindStatements(statement.Body, scope == null ? new() : new(scope), null);
+        BindStatements(statement.Body, scope == null ? new() : new(scope), returnType);
     }
     private void AddNamedCutsceneGlobal(NamedCutsceneStatement statement)
     {
@@ -945,6 +945,13 @@ public sealed class DslBinder
     }
     private IEnumerable<ISymbol> MembersOfCore(ITypeSymbol type, string? name = null)
     {
+        if (type is IArrayTypeSymbol)
+        {
+            var arrayType = GetTypeByMetadataName("System.Array");
+            if (arrayType != null)
+                foreach (var member in profile.MeasureEnumerable("Roslyn.GetMembers", name == null ? arrayType.GetMembers() : arrayType.GetMembers(name))) yield return member;
+            yield break;
+        }
         for (var t = type as INamedTypeSymbol; t != null; t = t.BaseType)
             foreach (var member in profile.MeasureEnumerable("Roslyn.GetMembers", name == null ? t.GetMembers() : t.GetMembers(name))) yield return member;
     }

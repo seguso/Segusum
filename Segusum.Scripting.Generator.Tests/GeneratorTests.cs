@@ -105,6 +105,34 @@ public sealed class GeneratorTests
     }
 
     [Fact]
+    public void ArrayAndStringLengthBindAsInt()
+    {
+        var result = Run("def arrayLength xs: LogicObj[] ret int:\n    ret xs.Length\nend\ndef stringLength value: string ret int:\n    ret value.Length\nend");
+
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL", StringComparison.Ordinal));
+        Assert.Contains("return xs.Length", Generated(result), StringComparison.Ordinal);
+        Assert.Contains("return value.Length", Generated(result), StringComparison.Ordinal);
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
+    public void NamedCutsceneInheritsEnclosingFunctionReturnType()
+    {
+        var result = Run("def foo ret bool:\n    named-cutscene ncsFoo \"Titolo\":\n        ret false\n    end\nend", "public NamedCutSceneId ncsFoo = new();");
+
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL", StringComparison.Ordinal));
+        Assert.Contains("return false", Generated(result), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NestedNamedCutsceneStillRejectsReturnTypeMismatch()
+    {
+        var result = Run("def foo ret int:\n    named-cutscene ncsFoo \"Titolo\":\n        ret false\n    end\nend", "public NamedCutSceneId ncsFoo = new();");
+
+        Assert.Contains(result.Diagnostics, d => d.GetMessage().Contains("return type mismatch", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void StaticCallReceiversArePreservedInGeneratedCSharp()
     {
         var result = Run("def main:\n    Debug.Assert (ready)\n    CycleMemory.wouldSaySomethingNewAndImportant cyc this cid\nend", "public bool ready; public Cycle cyc = null!; public CycleElemId cid = null!;");
