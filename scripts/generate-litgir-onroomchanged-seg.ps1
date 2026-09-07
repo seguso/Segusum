@@ -17,8 +17,8 @@ $runtimeOutput = Join-Path $litgirRoot 'WebApiLitGir\Gameplay\OnRoomChanged.seg'
 
 New-Item -ItemType Directory -Force $demoRoot | Out-Null
 
-# Prefer the live C# source while it still exists.
-# After the real migration, use the frozen migration input.
+# Preferisci il C# runtime se esiste ancora.
+# Dopo la migrazione usa la copia congelata sotto docs/migration-inputs.
 if (Test-Path -LiteralPath $liveSource) {
     $inputSource = $liveSource
 }
@@ -60,33 +60,45 @@ $ErrorActionPreference = $previousErrorActionPreference
 
 $cliOutput | ForEach-Object { Write-Host $_ }
 
-if ($cliExit -ne 0) {
-    throw "Migration CLI failed with exit code $cliExit. Runtime SEG was NOT updated."
+# La CLI usa anche exit code 1 per generazione con diagnostiche.
+# Consideriamo fallimento vero solo > 1.
+if ($cliExit -gt 1) {
+    throw "Migration CLI failed with exit code $cliExit."
 }
 
 if (-not (Test-Path -LiteralPath $tempOutput)) {
     throw "Generated SEG file not found: $tempOutput"
 }
 
-$manualMarkers = Select-String `
-    -LiteralPath $tempOutput `
-    -Pattern 'C2SEG-MANUAL' `
-    -SimpleMatch
-
-if ($manualMarkers.Count -gt 0) {
-    throw "Generated SEG still contains $($manualMarkers.Count) C2SEG-MANUAL marker(s). Runtime SEG was NOT updated."
-}
-
 $runtimeDirectory = Split-Path -Parent $runtimeOutput
 New-Item -ItemType Directory -Force $runtimeDirectory | Out-Null
 
+# In questa fase di review vogliamo SEMPRE vedere l'ultimo SEG generato,
+# anche se la CLI ha emesso diagnostiche.
 Copy-Item -LiteralPath $tempOutput -Destination $runtimeOutput -Force
+
+$manualMarkers = @(
+    Select-String `
+        -LiteralPath $tempOutput `
+        -Pattern 'C2SEG-MANUAL' `
+        -SimpleMatch
+)
 
 Write-Host ""
 Write-Host "Generated temp:"
 Write-Host $tempOutput
+
 Write-Host ""
 Write-Host "Updated runtime:"
 Write-Host $runtimeOutput
+
 Write-Host ""
-Write-Host "C2SEG-MANUAL: 0"
+Write-Host "CLI exit code:"
+Write-Host $cliExit
+
+Write-Host ""
+Write-Host "C2SEG-MANUAL:"
+Write-Host $manualMarkers.Count
+
+Write-Host ""
+Write-Host "Done."
