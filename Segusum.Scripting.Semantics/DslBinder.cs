@@ -626,7 +626,9 @@ public sealed class DslBinder
         if (applicable.Length == 0) { ReportFailure(call, results); return null; }
         var bestScore = applicable[0].Score; var best = applicable.Where(x => x.Score == bestScore).ToArray();
         if (best.Length != 1) { Report("SEGDSL306", $"Call to '{call.Name}' is ambiguous.", call.Span); return null; }
-        var boundCall = best[0].Call! with { Receiver = best[0].Call!.Method?.IsExtensionMethod == true || staticReceiver != null ? null : call.Receiver };
+        // Preserve a static type receiver (Debug.Assert, CycleMemory.foo, ...)
+        // so the C# generator cannot accidentally emit only the member name.
+        var boundCall = best[0].Call! with { Receiver = best[0].Call!.Method?.IsExtensionMethod == true ? null : call.Receiver };
         RecordReference(call.Name, call.NameSpan, BoundSymbolKind.CSharpMethod, boundCall.Method, null, "invocation");
         model.Calls[call] = boundCall; return boundCall.ReturnType;
     }

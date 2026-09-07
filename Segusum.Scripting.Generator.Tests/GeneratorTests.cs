@@ -33,6 +33,27 @@ public sealed class GeneratorTests
     }
 
     [Fact]
+    public void StaticCallReceiversArePreservedInGeneratedCSharp()
+    {
+        var result = Run("def main:\n    Debug.Assert (ready)\n    CycleMemory.wouldSaySomethingNewAndImportant cyc this cid\nend", "public bool ready; public Cycle cyc = null!; public CycleElemId cid = null!;");
+
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL", StringComparison.Ordinal));
+        var generated = Generated(result);
+        Assert.Contains("global::System.Diagnostics.Debug.Assert((ready))", generated, StringComparison.Ordinal);
+        Assert.Contains("global::Seg.CycleMemory.wouldSaySomethingNewAndImportant(cyc, this, cid)", generated, StringComparison.Ordinal);
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
+    public void CyclePredicateAndBodyGenerateAsValidCSharp()
+    {
+        var result = Run("var cyc = new-cycle\nadd cyc first when guard and other\n    Debug.Assert ready\nend", "public CycleElemId first = null!; public bool guard; public bool other; public bool ready;");
+
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL", StringComparison.Ordinal));
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
     public void ListLiteralInfersTheMostSpecificCommonBaseType()
     {
         var result = Run("def main:\n    var items = [logic, objective]\nend", "public class ChildLogic : LogicObj { } public class ChildObjective : Objective { } public ChildLogic logic = null!; public ChildObjective objective = null!;");

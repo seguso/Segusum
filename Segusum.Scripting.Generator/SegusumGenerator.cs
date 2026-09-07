@@ -144,7 +144,7 @@ public sealed class SegusumGenerator : IIncrementalGenerator
         sb.Append(indent).Append(EmitIdentifier(cycle, model)).Append(".addToCycle(").Append(EmitIdentifier(id, model));
         if (important) sb.Append(", Importance.Important");
         if (repeat is "once" or "forever") sb.Append(", Repeat.").Append(repeat == "once" ? "OnlyOnce" : "Forever");
-        if (condition != null) { sb.Append(", x =>\n"); EmitLine(sb, condition.Span); sb.Append(Emit(condition, model)).AppendLine(); EmitDefaultLine(sb); }
+        if (condition != null) { sb.Append(", x =>\n"); EmitLine(sb, condition.Span); sb.AppendLine("("); sb.Append(Emit(condition, model)).AppendLine(")"); EmitDefaultLine(sb); }
         sb.Append(", x => {\n"); EmitDefaultLine(sb); foreach (var statement in body) EmitStatement(sb, statement, indent + "  ", null, model); sb.Append("#line hidden\n").Append(indent).AppendLine("});"); EmitDefaultLine(sb);
     }
     private static void EmitStatement(StringBuilder sb, DslStatement statement, string indent, string? input, BoundModel model)
@@ -220,7 +220,7 @@ public sealed class SegusumGenerator : IIncrementalGenerator
         MemberAccessExpression m when model.Values.TryGetValue(m, out var staticProperty) && staticProperty.Symbol is IPropertySymbol { IsStatic: true } => staticProperty.CSharpName,
         MemberAccessExpression m when model.Values.TryGetValue(m, out var member) && member.Kind == BoundSymbolKind.CSharpMethod => Emit(m.Receiver, model) + "." + member.CSharpName + "()",
         MemberAccessExpression m when model.Values.TryGetValue(m, out var property) => Emit(m.Receiver, model) + "." + property.CSharpName,
-        CallExpression c when model.Calls.TryGetValue(c, out var bound) => (bound.Receiver == null ? bound.TargetName : Emit(bound.Receiver, model) + "." + bound.TargetName) + "(" + string.Join(", ", bound.Arguments.Select(a => (a.Source.Name == null ? "" : Name(a.ParameterName) + ": ") + Emit(a.Source.Expression, model))) + ")",
+        CallExpression c when model.Calls.TryGetValue(c, out var bound) => (bound.Receiver == null ? bound.TargetName : bound.Method?.IsStatic == true ? bound.Method.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) + "." + bound.TargetName : Emit(bound.Receiver, model) + "." + bound.TargetName) + "(" + string.Join(", ", bound.Arguments.Select(a => (a.Source.Name == null ? "" : Name(a.ParameterName) + ": ") + Emit(a.Source.Expression, model))) + ")",
         _ => "default"
     };
     private static string EmitList(ListExpression list, BoundModel model)
