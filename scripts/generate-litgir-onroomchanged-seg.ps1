@@ -87,6 +87,23 @@ New-Item -ItemType Directory -Force $runtimeDirectory | Out-Null
 # anche se la CLI ha emesso diagnostiche.
 Copy-Item -LiteralPath $tempOutput -Destination $runtimeOutput -Force
 
+# Derive C#/SEG symbol ownership from the parsed SEG AST. This is intentionally
+# data-driven: declarations owned by SEG are removed from active C#, while
+# reference-only IDs remain there (or are recreated in a generated bridge if
+# a previous migration left them absent).
+$runtimeBridge = Join-Path $litgirRoot 'WebApiLitGir\worldOnRoomChangedRuntimeSymbols.generated.cs'
+$ownershipArgs = @(
+    'run', '--project', (Join-Path $segusumRoot 'Segusum.Migration.Cli\Segusum.Migration.Cli.csproj'), '--no-restore', '--',
+    'audit-ownership', $tempOutput,
+    '--runtime-root', (Join-Path $litgirRoot 'WebApiLitGir'),
+    '--legacy', $legacySymbolsSource,
+    '--apply', '--runtime-bridge', $runtimeBridge
+)
+$ownershipOutput = & dotnet @ownershipArgs 2>&1
+$ownershipExit = $LASTEXITCODE
+$ownershipOutput | ForEach-Object { Write-Host $_ }
+if ($ownershipExit -ne 0) { throw "SEG/C# ownership synchronization failed with exit code $ownershipExit." }
+
 $manualMarkers = @(
     Select-String `
         -LiteralPath $tempOutput `
