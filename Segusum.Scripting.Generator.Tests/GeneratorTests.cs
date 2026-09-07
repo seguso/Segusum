@@ -30,8 +30,8 @@ public sealed class GeneratorTests
         Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL", StringComparison.Ordinal));
         var generated = Generated(result);
         Assert.Contains("return foo(a, b);", generated, StringComparison.Ordinal);
-        Assert.Contains("return foo(bar(a), b);", generated, StringComparison.Ordinal);
-        Assert.Contains("return foo(bar(baz(a)), b);", generated, StringComparison.Ordinal);
+        Assert.Contains("return foo((bar(a)), b);", generated, StringComparison.Ordinal);
+        Assert.Contains("return foo((bar((baz(a)))), b);", generated, StringComparison.Ordinal);
         Assert.Contains("return foo(a, b) && c;", generated, StringComparison.Ordinal);
         Assert.Contains("return foo(a, b && c);", generated, StringComparison.Ordinal);
     }
