@@ -415,6 +415,58 @@ public sealed class CSharpToSegTranspilerTests
     }
 
     [Fact]
+    public void NamedCutsceneTitleCanBeResolvedFromSegContext()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "segusum-c2seg-seg-context-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            File.WriteAllText(Path.Combine(directory, "objects.seg"), "world game\ndef existing:\n    named-cutscene ncsFromSeg \"SEG title[[x]]\" roomA:\n    end\nend\n");
+            var result = CSharpToSegTranspiler.Transpile(Path.Combine(directory, "handlers.cs"),
+                "class W { void M() { addHandlerUseHere(a, handler: i => { using (namedCutScene(ncsFromSeg, roomA)) { dial(camilla, \"A\"); } }); } }",
+                true, null, "game", directory);
+            Assert.Contains("named-cutscene ncsFromSeg \"SEG title[[x]]\" roomA", result.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain(result.Diagnostics, x => x.Reason.Contains("title cannot be resolved", StringComparison.Ordinal));
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    [Fact]
+    public void NamedCutsceneTitleSameInCSharpAndSegContextIsAccepted()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "segusum-c2seg-seg-same-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            File.WriteAllText(Path.Combine(directory, "objects.cs"), "class W { NamedCutSceneId ncs = new() { titleUntranslated = \"Same title\".translatable() }; }");
+            File.WriteAllText(Path.Combine(directory, "objects.seg"), "world game\ndef existing:\n    named-cutscene ncs \"Same title\" roomA:\n    end\nend\n");
+            var result = CSharpToSegTranspiler.Transpile(Path.Combine(directory, "handlers.cs"),
+                "class W { void M() { addHandlerUseHere(a, handler: i => { using (namedCutScene(ncs, roomA)) { dial(camilla, \"A\"); } }); } }",
+                true, null, "game", directory);
+            Assert.DoesNotContain(result.Diagnostics, x => x.Reason.Contains("title conflict", StringComparison.Ordinal));
+            Assert.Contains("named-cutscene ncs \"Same title\" roomA", result.Text, StringComparison.Ordinal);
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    [Fact]
+    public void NamedCutsceneTitleConflictBetweenCSharpAndSegIsDiagnostic()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "segusum-c2seg-seg-conflict-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            File.WriteAllText(Path.Combine(directory, "objects.cs"), "class W { NamedCutSceneId ncs = new() { titleUntranslated = \"CSharp title\".translatable() }; }");
+            File.WriteAllText(Path.Combine(directory, "objects.seg"), "world game\ndef existing:\n    named-cutscene ncs \"SEG title\" roomA:\n    end\nend\n");
+            var result = CSharpToSegTranspiler.Transpile(Path.Combine(directory, "handlers.cs"),
+                "class W { void M() { addHandlerUseHere(a, handler: i => { using (namedCutScene(ncs, roomA)) { dial(camilla, \"A\"); } }); } }",
+                true, null, "game", directory);
+            Assert.Contains(result.Diagnostics, x => x.Reason.Contains("title conflict", StringComparison.Ordinal));
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    [Fact]
     public void NewCycleExpressionEmitsExistingSegCycleLiteral()
     {
         var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { void M() { addHandlerUseHere(a, handler: i => { var cyc = new Cycle(); execNextInCycle(cyc); }); } }", true);

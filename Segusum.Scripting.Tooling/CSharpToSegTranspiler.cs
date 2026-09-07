@@ -27,7 +27,8 @@ public sealed record MigrationOutput(string Text, IReadOnlyList<MigrationDiagnos
 /// <summary>Deterministic Roslyn-based first-pass C# to SEG emitter.</summary>
 public static class CSharpToSegTranspiler
 {
-    private static readonly Dictionary<string, IReadOnlyDictionary<string, string?>> NamedCutsceneIndexCache = new(StringComparer.OrdinalIgnoreCase);
+    private sealed record NamedCutsceneContextValue(string? Title, bool Conflict);
+    private static readonly Dictionary<string, IReadOnlyDictionary<string, NamedCutsceneContextValue>> NamedCutsceneIndexCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly object NamedCutsceneIndexLock = new();
 
     private static string Indent(int level) => new(' ', level * 4);
@@ -763,8 +764,11 @@ public static class CSharpToSegTranspiler
     {
         var indent = Indent(level);
         var id = Arg(invocation.ArgumentList.Arguments, 0);
-        var title = NamedCutsceneTitle(invocation, id, contextRoot);
-        if (title is null) Unsupported(invocation, diagnostics, "NamedCutSceneId title cannot be resolved structurally", partial, sb, level);
+        var title = NamedCutsceneTitle(invocation, id, contextRoot, out var conflict);
+        if (conflict)
+            Unsupported(invocation, diagnostics, $"NamedCutSceneId title conflict for '{id}' in migration context", partial, sb, level);
+        else if (title is null)
+            Unsupported(invocation, diagnostics, "NamedCutSceneId title cannot be resolved structurally", partial, sb, level);
         sb.Append(indent).Append("named-cutscene ").Append(id).Append(' ').Append(title ?? "\"\"");
         foreach (var arg in invocation.ArgumentList.Arguments.Skip(1)) sb.Append(' ').Append(Expression(arg.Expression));
         sb.AppendLine(":");
@@ -772,8 +776,9 @@ public static class CSharpToSegTranspiler
         sb.Append(indent).AppendLine("end");
     }
 
-    private static string? NamedCutsceneTitle(InvocationExpressionSyntax invocation, string id, string? contextRoot = null)
+    private static string? NamedCutsceneTitle(InvocationExpressionSyntax invocation, string id, string? contextRoot, out bool conflict)
     {
+        conflict = false;
         var sourcePath = invocation.SyntaxTree.FilePath;
         var directory = !string.IsNullOrWhiteSpace(contextRoot)
             ? Path.GetFullPath(contextRoot)
@@ -783,12 +788,23 @@ public static class CSharpToSegTranspiler
             return FindNamedCutsceneTitle(invocation.SyntaxTree.GetRoot(), id);
         }
         var cacheKey = directory + (string.IsNullOrWhiteSpace(contextRoot) ? "|top-directory" : "|all-directories");
-        IReadOnlyDictionary<string, string?> index;
+        IReadOnlyDictionary<string, NamedCutsceneContextValue> index;
         lock (NamedCutsceneIndexLock)
         {
             if (!NamedCutsceneIndexCache.TryGetValue(cacheKey, out index!))
             {
-                var map = new Dictionary<string, string?>(StringComparer.Ordinal);
+                var map = new Dictionary<string, NamedCutsceneContextValue>(StringComparer.Ordinal);
+                static void Add(Dictionary<string, NamedCutsceneContextValue> target, string id, string? title)
+                {
+                    if (!target.TryGetValue(id, out var previous))
+                    {
+                        target[id] = new(title, false);
+                        return;
+                    }
+                    if (previous.Conflict) return;
+                    if (!string.Equals(previous.Title, title, StringComparison.Ordinal))
+                        target[id] = new(null, true);
+                }
                 var searchOption = !string.IsNullOrWhiteSpace(contextRoot) ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
                 foreach (var candidatePath in Directory.EnumerateFiles(directory, "*.cs", searchOption))
                 {
@@ -800,17 +816,59 @@ public static class CSharpToSegTranspiler
                             var identifier = DeclarationIdentifier(declaration);
                             if (identifier is null) continue;
                             var title = NamedCutsceneTitleFromDeclaration(declaration);
-                            if (map.ContainsKey(identifier)) map[identifier] = null;
-                            else map[identifier] = title;
+                            Add(map, identifier, title);
                         }
+                    }
+                    catch (IOException) { }
+                }
+                foreach (var candidatePath in Directory.EnumerateFiles(directory, "*.seg", searchOption))
+                {
+                    try
+                    {
+                        var source = new DslSource(candidatePath, File.ReadAllText(candidatePath));
+                        var parsed = DslParser.Parse(source);
+                        foreach (var named in FindNamedCutscenes(parsed.Document.Declarations))
+                            Add(map, named.Id, DslNamedCutsceneTitle(named));
                     }
                     catch (IOException) { }
                 }
                 NamedCutsceneIndexCache[cacheKey] = index = map;
             }
         }
-        return index.TryGetValue(id, out var result) ? result : FindNamedCutsceneTitle(invocation.SyntaxTree.GetRoot(), id);
+        if (index.TryGetValue(id, out var result))
+        {
+            if (result.Conflict)
+            {
+                conflict = true;
+                return null;
+            }
+            return result.Title;
+        }
+        return FindNamedCutsceneTitle(invocation.SyntaxTree.GetRoot(), id);
     }
+
+    private static IEnumerable<NamedCutsceneStatement> FindNamedCutscenes(IEnumerable<DslDeclaration> declarations)
+        => declarations.SelectMany(declaration => declaration switch
+        {
+            HandlerDeclaration handler => FindNamedCutscenes(handler.Body),
+            FunctionDeclaration function => FindNamedCutscenes(function.Body),
+            BeforeRoomChangeDeclaration before => FindNamedCutscenes(before.Body),
+            AfterActionExecutedDeclaration after => FindNamedCutscenes(after.Body),
+            CycleElementDeclaration cycle => FindNamedCutscenes(cycle.Body),
+            _ => Enumerable.Empty<NamedCutsceneStatement>()
+        });
+
+    private static IEnumerable<NamedCutsceneStatement> FindNamedCutscenes(IEnumerable<DslStatement> statements)
+        => statements.SelectMany(statement => statement switch
+        {
+            NamedCutsceneStatement named => new[] { named }.Concat(FindNamedCutscenes(named.Body)),
+            IfStatement conditional => conditional.Branches.SelectMany(x => FindNamedCutscenes(x.Body)).Concat(conditional.ElseBody is null ? Enumerable.Empty<NamedCutsceneStatement>() : FindNamedCutscenes(conditional.ElseBody)),
+            AddCycleElementStatement add => FindNamedCutscenes(add.Body),
+            _ => Enumerable.Empty<NamedCutsceneStatement>()
+        });
+
+    private static string? DslNamedCutsceneTitle(NamedCutsceneStatement statement)
+        => statement.Title is LiteralExpression literal && literal.Kind is "string" or "raw-string" ? literal.Value : null;
 
     private static IEnumerable<SyntaxNode> FindNamedCutsceneDeclarations(SyntaxNode root)
     {
