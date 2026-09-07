@@ -17,6 +17,17 @@ public sealed class CSharpToSegTranspilerTests
     }
 
     [Fact]
+    public void HandlerInputParameterNamesAreNormalizedToCanonicalSegInput()
+    {
+        var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { void M() { addHandlerUseHere(a, handler: i => { useInput(i); var keep = i.chosenText; }); } } ");
+
+        Assert.Contains("useInput e", result.Text, StringComparison.Ordinal);
+        Assert.Contains("var keep = e.chosenText", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("useInput i", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(result.Diagnostics, x => x.Status == MigrationUnitStatus.Unsupported);
+    }
+
+    [Fact]
     public void AnyPredicateUsesExistingExistsQuerySyntax()
     {
         var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { void M() { addHandlerUseHere(a, handler: i => { if (values.Any(x => x.notSeenRecently(30))) { foo(); } }); } }");

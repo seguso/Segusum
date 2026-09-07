@@ -497,6 +497,20 @@ public static class CSharpToSegTranspiler
         var handler = args.Select(x => x.Expression).OfType<AnonymousFunctionExpressionSyntax>().LastOrDefault();
         if (handler?.Body is BlockSyntax block)
         {
+            // Handler input has a canonical SEG name.  C# callers are free to
+            // choose any lambda parameter name (often `i`), but the generated
+            // C# handler lambda uses `i` only for room-changed and `e` for all
+            // other handlers.  Normalize references structurally here so the
+            // emitted SEG does not depend on the incidental C# parameter name.
+            var parameterName = handler switch
+            {
+                SimpleLambdaExpressionSyntax simple => simple.Parameter.Identifier.ValueText,
+                ParenthesizedLambdaExpressionSyntax parenthesized => parenthesized.ParameterList.Parameters.FirstOrDefault()?.Identifier.ValueText,
+                _ => null
+            };
+            var canonicalName = kind == "room-changed" ? "i" : "e";
+            if (!string.IsNullOrEmpty(parameterName) && !string.Equals(parameterName, canonicalName, StringComparison.Ordinal))
+                block = (BlockSyntax)new HandlerParameterRewriter(parameterName!, canonicalName).Visit(block)!;
             EmitTriviaComments(block.OpenBraceToken.TrailingTrivia, sb, 1);
             EmitStatements(block.Statements, sb, diagnostics, 1, partial, true, contextRoot);
             EmitTriviaComments(block.CloseBraceToken.LeadingTrivia, sb, 1);
@@ -925,6 +939,28 @@ public static class CSharpToSegTranspiler
         {
             if (node.Identifier.ValueText == parameter && !(node.Parent is MemberAccessExpressionSyntax member && member.Name == node))
                 return SyntaxFactory.IdentifierName("it").WithTriviaFrom(node);
+            return base.VisitIdentifierName(node);
+        }
+    }
+
+    private sealed class HandlerParameterRewriter : CSharpSyntaxRewriter
+    {
+        private readonly string parameter;
+        private readonly string canonicalName;
+
+        public HandlerParameterRewriter(string parameter, string canonicalName)
+        {
+            this.parameter = parameter;
+            this.canonicalName = canonicalName;
+        }
+
+        public override SyntaxNode? VisitIdentifierName(IdentifierNameSyntax node)
+        {
+            // Do not rewrite a member name (`obj.parameter`) or a declaration
+            // of a nested local that shadows the handler parameter.
+            if (node.Identifier.ValueText == parameter
+                && !(node.Parent is MemberAccessExpressionSyntax member && member.Name == node))
+                return SyntaxFactory.IdentifierName(canonicalName).WithTriviaFrom(node);
             return base.VisitIdentifierName(node);
         }
     }
