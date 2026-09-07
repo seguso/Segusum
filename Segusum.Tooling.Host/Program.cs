@@ -14,6 +14,7 @@ internal sealed class ToolingHost
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     private readonly ConcurrentDictionary<int, CancellationTokenSource> requests = new();
     private readonly SemaphoreSlim outputLock = new(1, 1);
+    private readonly SemaphoreSlim lifecycleGate = new(1, 1);
     private MsBuildWorkspaceContext? context;
     private string? projectPath;
     private INamedTypeSymbol? world;
@@ -92,26 +93,59 @@ internal sealed class ToolingHost
 
     private async Task InitializeAsync(string? requestedProject, CancellationToken cancellationToken)
     {
-        var initializeTimer = Stopwatch.StartNew();
-        projectPath = requestedProject ?? DiscoverProject(Environment.CurrentDirectory);
-        if (projectPath == null) throw new InvalidOperationException("No .csproj containing .seg files was found.");
-        var openStarted = initializeTimer.Elapsed;
-        context?.Dispose();
-        context = await MsBuildWorkspaceContext.OpenProjectAsync(projectPath, cancellationToken);
-        parseCache = new DslParseCache();
-        var openMs = (initializeTimer.Elapsed - openStarted).TotalMilliseconds;
-        var generatedTrees = context.Compilation.SyntaxTrees
-            .Where(x => SegusumGeneratedSource.IsGenerated(x))
-            .Select(x => x.FilePath ?? "<generated>")
-            .ToArray();
-        var mikeGenerated = context.Compilation.SyntaxTrees.Any(x => SegusumGeneratedSource.IsGenerated(x) && x.GetText().ToString().Contains("creaCicloMikeNonRipete", StringComparison.Ordinal));
-        await RebuildAsync(cancellationToken);
-        BuildWorldIndex(context.Compilation);
-        // Sources (including world directives) must be loaded before selecting the
-        // default world; otherwise a multi-world project leaves this cache key null.
-        world = FindWorld(context.Compilation, null);
-        Console.Error.WriteLine($"initialize project={projectPath} openProject={openMs:0}ms generatedSegusumTrees={generatedTrees.Length} mikeHelper={mikeGenerated} total={initializeTimer.Elapsed.TotalMilliseconds:0}ms");
-        foreach (var tree in generatedTrees) Console.Error.WriteLine($"generatedSegusumTree={tree}");
+        await lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var initializeTimer = Stopwatch.StartNew();
+            projectPath = requestedProject ?? DiscoverProject(Environment.CurrentDirectory);
+            if (projectPath == null) throw new InvalidOperationException("No .csproj containing .seg files was found.");
+
+            // Drop every object graph rooted in the previous compilation before
+            // opening the replacement project. MSBuildWorkspace.Dispose() alone
+            // does not clear the host's semantic caches or symbol references.
+            var oldContext = context;
+            context = null;
+            world = null;
+            semanticTarget = null;
+            semantic = null;
+            overlaySemantic = null;
+            overlayTarget = null;
+            overlayPath = null;
+            overlayText = null;
+            sources = Array.Empty<DslSource>();
+            sourcesByPath = new Dictionary<string, DslSource>(StringComparer.OrdinalIgnoreCase);
+            worldsById = new Dictionary<string, INamedTypeSymbol?>(StringComparer.Ordinal);
+            worldIdBySegPath = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+            parseCache = new DslParseCache();
+            oldContext?.Dispose();
+            if (oldContext != null)
+            {
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
+            }
+
+            var openStarted = initializeTimer.Elapsed;
+            var newContext = await MsBuildWorkspaceContext.OpenProjectAsync(projectPath, cancellationToken).ConfigureAwait(false);
+            context = newContext;
+            var openMs = (initializeTimer.Elapsed - openStarted).TotalMilliseconds;
+            var generatedTrees = context.Compilation.SyntaxTrees
+                .Where(x => SegusumGeneratedSource.IsGenerated(x))
+                .Select(x => x.FilePath ?? "<generated>")
+                .ToArray();
+            var mikeGenerated = context.Compilation.SyntaxTrees.Any(x => SegusumGeneratedSource.IsGenerated(x) && x.GetText().ToString().Contains("creaCicloMikeNonRipete", StringComparison.Ordinal));
+            await RebuildAsync(cancellationToken);
+            BuildWorldIndex(context.Compilation);
+            // Sources (including world directives) must be loaded before selecting the
+            // default world; otherwise a multi-world project leaves this cache key null.
+            world = FindWorld(context.Compilation, null);
+            Console.Error.WriteLine($"initialize project={projectPath} openProject={openMs:0}ms generatedSegusumTrees={generatedTrees.Length} mikeHelper={mikeGenerated} total={initializeTimer.Elapsed.TotalMilliseconds:0}ms");
+            foreach (var tree in generatedTrees) Console.Error.WriteLine($"generatedSegusumTree={tree}");
+        }
+        finally
+        {
+            lifecycleGate.Release();
+        }
     }
 
     private async Task RebuildAsync(CancellationToken cancellationToken)
