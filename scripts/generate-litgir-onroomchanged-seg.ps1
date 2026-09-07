@@ -90,8 +90,8 @@ Copy-Item -LiteralPath $tempOutput -Destination $runtimeOutput -Force
 
 # Derive C#/SEG symbol ownership from the parsed SEG AST. This is intentionally
 # data-driven: declarations owned by SEG are removed from active C#, while
-# reference-only IDs remain there (or are recreated in a generated bridge if
-# a previous migration left them absent).
+# reference-only IDs remain in the active C# source. The frozen complete
+# source is used only as history and is never modified by this step.
 $ownershipArgs = @(
     'run', '--project', (Join-Path $segusumRoot 'Segusum.Migration.Cli\Segusum.Migration.Cli.csproj'), '--no-restore', '--',
     'audit-ownership', $tempOutput,
