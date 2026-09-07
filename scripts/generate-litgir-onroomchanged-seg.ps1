@@ -13,6 +13,7 @@ $worldObjectsSource = Join-Path $litgirRoot 'WebApiLitGir\worldObjects.cs'
 $tempWorldObjects = Join-Path $demoRoot 'worldObjects.cs'
 $legacySymbolsSource = Join-Path $litgirRoot 'docs\migration-inputs\worldOnRoomChanged.legacy-symbols.cs'
 $tempLegacySymbols = Join-Path $demoRoot 'worldOnRoomChanged.legacy-symbols.cs'
+$legacyMethodsSource = Join-Path $litgirRoot 'docs\migration-inputs\worldOnRoomChanged.legacy-methods.cs'
 
 $tempOutput = Join-Path $env:TEMP 'worldOnRoomChanged.generated.seg'
 $runtimeOutput = Join-Path $litgirRoot 'WebApiLitGir\Gameplay\OnRoomChanged.seg'
@@ -97,6 +98,7 @@ $ownershipArgs = @(
     'audit-ownership', $tempOutput,
     '--runtime-root', (Join-Path $litgirRoot 'WebApiLitGir'),
     '--legacy', $legacySymbolsSource,
+    '--legacy-methods', $legacyMethodsSource,
     '--apply', '--runtime-bridge', $runtimeBridge
 )
 $ownershipOutput = & dotnet @ownershipArgs 2>&1

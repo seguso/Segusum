@@ -6,6 +6,7 @@ using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.FindSymbols;
 using Microsoft.CodeAnalysis.Text;
 using Segusum.Scripting.Core;
 
@@ -14,6 +15,8 @@ namespace Segusum.Scripting.Tooling;
 public enum RuntimeIdKind { CycleElement, NamedCutScene }
 
 public sealed record RuntimeIdDeclaration(string Name, RuntimeIdKind Kind, string Path, TextSpan Span, string Text);
+public sealed record RuntimeMethodDeclaration(string Name, string ReturnType, IReadOnlyList<string> ParameterTypes, string ContainingType, bool IsStatic, string Path, TextSpan Span, string Text);
+public sealed record SegMethodDeclaration(string Name, string ReturnType, IReadOnlyList<(string Name, string Type)> Parameters, SourceSpan Span);
 
 public sealed record SegOwnershipReport(
     IReadOnlySet<string> OwnedCycleElementIds,
@@ -24,7 +27,14 @@ public sealed record SegOwnershipReport(
     IReadOnlyList<string> MissingReferenceOnlyRuntimeSymbols,
     IReadOnlyList<string> CSharpSymbolsNotUsedBySeg,
     IReadOnlyList<string> SegOwnedWithoutMatchingLegacy,
-    IReadOnlyList<string> Ambiguities)
+    IReadOnlyList<string> Ambiguities,
+    IReadOnlyList<SegMethodDeclaration> SegMethods,
+    IReadOnlyList<RuntimeMethodDeclaration> RuntimeMethods,
+    IReadOnlyList<RuntimeMethodDeclaration> MethodsToRemove,
+    IReadOnlyList<RuntimeMethodDeclaration> MethodsKept,
+    IReadOnlyList<RuntimeMethodDeclaration> MethodsReferencedByActiveCSharp,
+    IReadOnlyList<RuntimeMethodDeclaration> AmbiguousMethodMatches,
+    IReadOnlyList<string> SegMethodsWithoutMatchingLegacy)
 {
     public bool IsUnambiguous => Ambiguities.Count == 0;
 }
@@ -48,6 +58,13 @@ public static class SegOwnership
         var declarations = runtimeCSharpFiles
             .Where(File.Exists)
             .SelectMany(ReadRuntimeDeclarations)
+            .ToArray();
+        var runtimeMethods = runtimeCSharpFiles
+            .Where(File.Exists)
+            .SelectMany(ReadRuntimeMethods)
+            .ToArray();
+        var segMethods = parsed.Document.Declarations.OfType<FunctionDeclaration>()
+            .Select(x => new SegMethodDeclaration(x.Name, x.ReturnType ?? "void", x.Parameters, x.Span))
             .ToArray();
         var ambiguities = declarations.GroupBy(x => x.Name, StringComparer.Ordinal)
             .Where(x => x.Count() > 1)
@@ -75,7 +92,27 @@ public static class SegOwnership
         if (parsed.Diagnostics.Count != 0)
             ambiguities.AddRange(parsed.Diagnostics.Select(x => $"SEG parse diagnostic {x.Id} at {x.Span.Line}:{x.Span.Column}: {x.Message}"));
 
-        return new(ownedCycles, ownedScenes, declarations, remove, keep, missingReferences, unused, missingLegacy, ambiguities);
+        var methodsToRemove = new List<RuntimeMethodDeclaration>();
+        var ambiguousMethods = new List<RuntimeMethodDeclaration>();
+        var methodsWithoutMatch = new List<string>();
+        foreach (var segMethod in segMethods)
+        {
+            var matches = runtimeMethods.Where(x => MethodMatches(segMethod, x)).ToArray();
+            if (matches.Length == 1) methodsToRemove.Add(matches[0]);
+            else if (matches.Length == 0) methodsWithoutMatch.Add(MethodDisplay(segMethod));
+            else
+            {
+                ambiguousMethods.AddRange(matches);
+                ambiguities.Add($"SEG method '{MethodDisplay(segMethod)}' matches multiple runtime methods: {string.Join(", ", matches.Select(x => x.Path))}");
+            }
+        }
+        var referencedMethods = FindActiveCSharpReferences(runtimeCSharpFiles, methodsToRemove);
+        var referencedMethodKeys = referencedMethods.Select(MethodKey).ToHashSet(StringComparer.Ordinal);
+        var safeToRemove = methodsToRemove.Where(x => !referencedMethodKeys.Contains(MethodKey(x))).ToArray();
+        var ownedMethodKeys = safeToRemove.Select(MethodKey).ToHashSet(StringComparer.Ordinal);
+        var keptMethods = runtimeMethods.Where(x => !ownedMethodKeys.Contains(MethodKey(x))).ToArray();
+        return new(ownedCycles, ownedScenes, declarations, remove, keep, missingReferences, unused, missingLegacy, ambiguities,
+            segMethods, runtimeMethods, safeToRemove, keptMethods, referencedMethods, ambiguousMethods, methodsWithoutMatch);
     }
 
     public static IReadOnlyList<string> ApplyRemoval(SegOwnershipReport report)
@@ -92,7 +129,36 @@ public static class SegOwnership
             File.WriteAllText(file.Key, text, new UTF8Encoding(false));
             changed.Add(file.Key);
         }
+        var methodChanges = report.MethodsToRemove.GroupBy(x => x.Path, StringComparer.OrdinalIgnoreCase);
+        foreach (var file in methodChanges)
+        {
+            var text = File.ReadAllText(file.Key);
+            foreach (var method in file.OrderByDescending(x => x.Span.Start))
+                text = text.Remove(method.Span.Start, method.Span.Length);
+            File.WriteAllText(file.Key, text, new UTF8Encoding(false));
+            if (!changed.Contains(file.Key, StringComparer.OrdinalIgnoreCase)) changed.Add(file.Key);
+        }
         return changed;
+    }
+
+    public static IReadOnlyList<string> EnsureLegacyMethods(SegOwnershipReport report, string legacyMethodsPath)
+    {
+        if (!report.IsUnambiguous) throw new InvalidOperationException(string.Join(Environment.NewLine, report.Ambiguities));
+        var existing = File.Exists(legacyMethodsPath) ? File.ReadAllText(legacyMethodsPath) : "";
+        var additions = report.MethodsToRemove.Where(x => !existing.Contains(x.Text, StringComparison.Ordinal)).ToArray();
+        if (additions.Length == 0) return Array.Empty<string>();
+        var sb = new StringBuilder();
+        if (string.IsNullOrEmpty(existing))
+        {
+            sb.AppendLine("// Archived methods superseded by SEG OnRoomChanged; not compiled.");
+            sb.AppendLine("namespace WebApiLitGir { public partial class World : WorldBase {");
+            sb.AppendLine(existing);
+        }
+        else sb.Append(existing.TrimEnd()).AppendLine();
+        foreach (var method in additions) sb.AppendLine(method.Text.Trim()).AppendLine();
+        if (string.IsNullOrEmpty(existing)) sb.AppendLine("} }");
+        File.WriteAllText(legacyMethodsPath, sb.ToString(), new UTF8Encoding(false));
+        return additions.Select(x => MethodDisplay(x)).ToArray();
     }
 
     public static string? EnsureReferenceOnlyBridge(SegOwnershipReport report, string legacySymbolsPath, string bridgePath)
@@ -156,6 +222,116 @@ public static class SegOwnership
                 yield return new(property.Identifier.ValueText, kind.Value, path, property.Span, property.ToFullString());
         }
     }
+
+    private static IEnumerable<RuntimeMethodDeclaration> ReadRuntimeMethods(string path)
+    {
+        var root = CSharpSyntaxTree.ParseText(File.ReadAllText(path), path: path).GetRoot();
+        foreach (var method in root.DescendantNodes().OfType<MethodDeclarationSyntax>())
+        {
+            var containing = method.Ancestors().OfType<ClassDeclarationSyntax>().FirstOrDefault()?.Identifier.ValueText ?? "";
+            yield return new(method.Identifier.ValueText, method.ReturnType.ToString(), method.ParameterList.Parameters.Select(x => x.Type?.ToString() ?? "").ToArray(), containing,
+                method.Modifiers.Any(SyntaxKind.StaticKeyword), path, method.Span, method.ToFullString());
+        }
+    }
+
+    private static bool MethodMatches(SegMethodDeclaration seg, RuntimeMethodDeclaration runtime)
+        => string.Equals(seg.Name, runtime.Name, StringComparison.Ordinal)
+            && TypeEquals(seg.ReturnType, runtime.ReturnType)
+            && seg.Parameters.Count == runtime.ParameterTypes.Count
+            && seg.Parameters.Zip(runtime.ParameterTypes, (a, b) => TypeEquals(a.Type, b)).All(x => x)
+            && !runtime.IsStatic;
+
+    private static IReadOnlyList<RuntimeMethodDeclaration> FindActiveCSharpReferences(
+        IEnumerable<string> runtimeCSharpFiles,
+        IReadOnlyList<RuntimeMethodDeclaration> candidates)
+    {
+        if (candidates.Count == 0) return Array.Empty<RuntimeMethodDeclaration>();
+
+        var paths = runtimeCSharpFiles.Where(File.Exists).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        using var workspace = new AdhocWorkspace();
+        var projectId = ProjectId.CreateNewId("SegOwnership");
+        var solution = workspace.CurrentSolution.AddProject(ProjectInfo.Create(
+            projectId,
+            VersionStamp.Create(),
+            "SegOwnership",
+            "SegOwnership",
+            LanguageNames.CSharp,
+            parseOptions: new CSharpParseOptions(LanguageVersion.Latest),
+            compilationOptions: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)));
+
+        var trustedAssemblies = (AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string ?? "")
+            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries);
+        foreach (var assembly in trustedAssemblies)
+            solution = solution.AddMetadataReference(projectId, MetadataReference.CreateFromFile(assembly));
+
+        foreach (var path in paths)
+            solution = solution.AddDocument(DocumentId.CreateNewId(projectId), Path.GetFileName(path), File.ReadAllText(path), filePath: path);
+
+        var project = solution.GetProject(projectId);
+        if (project == null) return candidates;
+
+        var compilation = project.GetCompilationAsync().GetAwaiter().GetResult();
+        if (compilation == null) return candidates;
+
+        var referenced = new List<RuntimeMethodDeclaration>();
+        var migratedMethodKeys = candidates.Select(MethodKey).ToHashSet(StringComparer.Ordinal);
+        var declarationsByPath = candidates.GroupBy(x => x.Path, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(x => x.Key, x => x.ToArray(), StringComparer.OrdinalIgnoreCase);
+        foreach (var candidate in candidates)
+        {
+            var tree = compilation.SyntaxTrees.FirstOrDefault(x =>
+                string.Equals(Path.GetFullPath(x.FilePath ?? ""), Path.GetFullPath(candidate.Path), StringComparison.OrdinalIgnoreCase));
+            if (tree == null) { referenced.Add(candidate); continue; }
+
+            var root = tree.GetRoot();
+            var methodNode = root.DescendantNodes().OfType<MethodDeclarationSyntax>()
+                .FirstOrDefault(x => x.Span == candidate.Span);
+            if (methodNode == null) { referenced.Add(candidate); continue; }
+
+            var model = compilation.GetSemanticModel(tree);
+            var symbol = model.GetDeclaredSymbol(methodNode);
+            if (symbol == null) { referenced.Add(candidate); continue; }
+
+            var references = SymbolFinder.FindReferencesAsync(symbol, project.Solution).GetAwaiter().GetResult();
+            var hasActiveReference = references
+                .SelectMany(x => x.Locations)
+                .Any(x => IsActiveCSharpReference(x, candidate, declarationsByPath, migratedMethodKeys));
+            if (hasActiveReference) referenced.Add(candidate);
+        }
+        return referenced;
+    }
+
+    private static bool IsActiveCSharpReference(
+        ReferenceLocation reference,
+        RuntimeMethodDeclaration candidate,
+        IReadOnlyDictionary<string, RuntimeMethodDeclaration[]> declarationsByPath,
+        IReadOnlySet<string> migratedMethodKeys)
+    {
+        var path = reference.Document.FilePath;
+        if (string.IsNullOrWhiteSpace(path)) return true;
+        var fullPath = Path.GetFullPath(path);
+        if (string.Equals(fullPath, Path.GetFullPath(candidate.Path), StringComparison.OrdinalIgnoreCase)
+            && reference.Location.SourceSpan == candidate.Span)
+            return false;
+
+        if (!declarationsByPath.TryGetValue(fullPath, out var declarations)) return true;
+        var containing = declarations.FirstOrDefault(x => x.Span.Contains(reference.Location.SourceSpan.Start));
+        return containing == null || !migratedMethodKeys.Contains(MethodKey(containing));
+    }
+
+    private static bool TypeEquals(string left, string right)
+    {
+        static string Normalize(string value)
+        {
+            var result = value.Replace("global::", "", StringComparison.Ordinal).Replace("System.", "", StringComparison.Ordinal).Replace(" ", "", StringComparison.Ordinal);
+            return result switch { "Boolean" => "bool", "Int32" => "int", "String" => "string", "Double" => "double", "Single" => "float", "CycleElementId" => "CycleElemId", _ => result };
+        }
+        return string.Equals(Normalize(left), Normalize(right), StringComparison.Ordinal);
+    }
+
+    private static string MethodKey(RuntimeMethodDeclaration method) => method.ContainingType + "." + method.Name + "(" + string.Join(",", method.ParameterTypes.Select(x => x.Trim())) + "):" + method.ReturnType.Trim();
+    private static string MethodDisplay(SegMethodDeclaration method) => method.Name + "(" + string.Join(", ", method.Parameters.Select(x => x.Type)) + "): " + method.ReturnType;
+    private static string MethodDisplay(RuntimeMethodDeclaration method) => method.Name + "(" + string.Join(", ", method.ParameterTypes) + "): " + method.ReturnType;
 
     private static RuntimeIdKind? KindOf(string type) => type switch
     {

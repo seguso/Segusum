@@ -3,18 +3,19 @@ using Segusum.Scripting.Tooling;
 if (args.Length == 0 || args[0] is "--help" or "-h")
 {
     Console.WriteLine("segusum migrate-csharp <file.cs> --world WORLD [--output FILE] [--audit] [--emit-partial] [--method NAME] [--dry-run]");
-    Console.WriteLine("segusum audit-ownership <file.seg> --runtime-root DIR --legacy FILE [--apply] [--runtime-bridge FILE]");
+    Console.WriteLine("segusum audit-ownership <file.seg> --runtime-root DIR --legacy FILE [--legacy-methods FILE] [--apply] [--runtime-bridge FILE]");
     return 0;
 }
 if (string.Equals(args[0], "audit-ownership", StringComparison.OrdinalIgnoreCase))
 {
-    if (args.Length < 2) { Console.Error.WriteLine("Usage: audit-ownership <file.seg> --runtime-root DIR --legacy FILE [--apply] [--runtime-bridge FILE]"); return 2; }
-    var segPath = Path.GetFullPath(args[1]); string? runtimeRoot = null; string? legacy = null; string? bridge = null; var apply = false;
+    if (args.Length < 2) { Console.Error.WriteLine("Usage: audit-ownership <file.seg> --runtime-root DIR --legacy FILE [--legacy-methods FILE] [--apply] [--runtime-bridge FILE]"); return 2; }
+    var segPath = Path.GetFullPath(args[1]); string? runtimeRoot = null; string? legacy = null; string? legacyMethods = null; string? bridge = null; var apply = false;
     for (var i = 2; i < args.Length; i++)
         switch (args[i])
         {
             case "--runtime-root": runtimeRoot = Path.GetFullPath(args[++i]); break;
             case "--legacy": legacy = Path.GetFullPath(args[++i]); break;
+            case "--legacy-methods": legacyMethods = Path.GetFullPath(args[++i]); break;
             case "--runtime-bridge": bridge = Path.GetFullPath(args[++i]); break;
             case "--apply": apply = true; break;
             default: Console.Error.WriteLine($"Unknown option: {args[i]}"); return 2;
@@ -29,11 +30,19 @@ if (string.Equals(args[0], "audit-ownership", StringComparison.OrdinalIgnoreCase
     Console.WriteLine("REFERENCE-ONLY SYMBOLS MISSING FROM ACTIVE C#:"); foreach (var x in report.MissingReferenceOnlyRuntimeSymbols) Console.WriteLine("  " + x);
     Console.WriteLine("C# SYMBOLS NOT USED BY THIS SEG:"); foreach (var x in report.CSharpSymbolsNotUsedBySeg) Console.WriteLine("  " + x);
     Console.WriteLine("SEG OWNED SYMBOL WITHOUT MATCHING LEGACY C#:"); foreach (var x in report.SegOwnedWithoutMatchingLegacy) Console.WriteLine("  " + x);
+    Console.WriteLine("SEG-OWNED SAFE TO REMOVE:"); foreach (var x in report.MethodsToRemove) Console.WriteLine("  " + x.Name + "(" + string.Join(", ", x.ParameterTypes) + "): " + x.ReturnType + " [" + x.Path + "]");
+    Console.WriteLine("SEG-DEFINED BUT REFERENCED BY ACTIVE C#:"); foreach (var x in report.MethodsReferencedByActiveCSharp) Console.WriteLine("  " + x.Name + "(" + string.Join(", ", x.ParameterTypes) + "): " + x.ReturnType + " [" + x.Path + "]");
+    Console.WriteLine("C#-OWNED / REFERENCE-ONLY:"); foreach (var x in report.MethodsKept.Where(x => report.SegMethods.All(s => !string.Equals(s.Name, x.Name, StringComparison.Ordinal)))) Console.WriteLine("  " + x.Name + "(" + string.Join(", ", x.ParameterTypes) + "): " + x.ReturnType);
+    Console.WriteLine("AMBIGUOUS METHOD MATCHES:"); foreach (var x in report.AmbiguousMethodMatches) Console.WriteLine("  " + x.Name + "(" + string.Join(", ", x.ParameterTypes) + "): " + x.ReturnType + " [" + x.Path + "]");
+    Console.WriteLine("SEG METHODS WITHOUT LEGACY MATCH:"); foreach (var x in report.SegMethodsWithoutMatchingLegacy) Console.WriteLine("  " + x);
     if (report.Ambiguities.Count != 0) { Console.WriteLine("AMBIGUITIES:"); foreach (var x in report.Ambiguities) Console.WriteLine("  " + x); return 3; }
     if (apply)
     {
         var archived = SegOwnership.EnsureLegacySymbols(report, legacy);
         Console.WriteLine("ARCHIVED OWNED SYMBOLS: " + (archived.Count == 0 ? "none" : string.Join(", ", archived)));
+        if (legacyMethods == null) { Console.Error.WriteLine("--legacy-methods is required with --apply."); return 2; }
+        var archivedMethods = SegOwnership.EnsureLegacyMethods(report, legacyMethods);
+        Console.WriteLine("ARCHIVED OWNED METHODS: " + (archivedMethods.Count == 0 ? "none" : string.Join(", ", archivedMethods)));
         foreach (var file in SegOwnership.ApplyRemoval(report)) Console.WriteLine("UPDATED: " + file);
         if (bridge == null) { Console.Error.WriteLine("--runtime-bridge is required with --apply."); return 2; }
         var bridgeFile = SegOwnership.EnsureReferenceOnlyBridge(report, legacy, bridge);

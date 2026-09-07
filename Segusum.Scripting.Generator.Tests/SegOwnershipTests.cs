@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using Segusum.Scripting.Tooling;
 
 namespace Segusum.Scripting.Generator.Tests;
@@ -53,18 +54,62 @@ public sealed class SegOwnershipTests
         Assert.Contains("referencedScene", remaining, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void MethodsDeclaredBySegAreOwnedButReferencedHelpersRemain()
+    {
+        using var fixture = new OwnershipFixture();
+        var report = fixture.Analyze("world game\ndef migrated value: int ret bool:\n    ret true\nend\ndef caller:\n    kept\nend\n");
+
+        Assert.Contains(report.MethodsToRemove, x => x.Name == "migrated" && x.ParameterTypes.SequenceEqual(new[] { "int" }));
+        Assert.Contains(report.MethodsKept, x => x.Name == "kept");
+    }
+
+    [Fact]
+    public void MethodOwnershipMatchesOnlyTheCorrectOverload()
+    {
+        using var fixture = new OwnershipFixture();
+        var report = fixture.Analyze("world game\ndef migrated value: int ret bool:\n    ret true\nend\n");
+
+        Assert.Single(report.MethodsToRemove.Where(x => x.Name == "migrated"));
+        Assert.Contains(report.MethodsKept, x => x.Name == "migrated" && x.ParameterTypes.SequenceEqual(new[] { "string" }));
+    }
+
+    [Fact]
+    public void SegDefinedMethodStillReferencedByActiveCSharpIsNotSafeToRemove()
+    {
+        using var fixture = new OwnershipFixture(addActiveCaller: true);
+        var report = fixture.Analyze("world game\ndef migrated value: int ret bool:\n    ret true\nend\n");
+
+        Assert.DoesNotContain(report.MethodsToRemove, x => x.Name == "migrated");
+        Assert.Contains(report.MethodsReferencedByActiveCSharp, x => x.Name == "migrated");
+    }
+
+    [Fact]
+    public void ReferencesAcrossPartialWorldFilesAreFoundSemantically()
+    {
+        using var fixture = new OwnershipFixture(addActiveCaller: true, callerInSecondPartial: true);
+        var report = fixture.Analyze("world game\ndef migrated value: int ret bool:\n    ret true\nend\n");
+
+        Assert.Contains(report.MethodsReferencedByActiveCSharp, x => x.Name == "migrated");
+        Assert.DoesNotContain(report.MethodsToRemove, x => x.Name == "migrated");
+    }
+
     private sealed class OwnershipFixture : IDisposable
     {
         private readonly string directory = Path.Combine(Path.GetTempPath(), "seg-ownership-" + Guid.NewGuid().ToString("N"));
         private readonly bool includeReferencedRuntimeSymbol;
         private readonly bool duplicateOwnedSymbol;
+        private readonly bool addActiveCaller;
+        private readonly bool callerInSecondPartial;
 
         public string directoryForTest => directory;
 
-        public OwnershipFixture(bool includeReferencedRuntimeSymbol = true, bool duplicateOwnedSymbol = false)
+        public OwnershipFixture(bool includeReferencedRuntimeSymbol = true, bool duplicateOwnedSymbol = false, bool addActiveCaller = false, bool callerInSecondPartial = false)
         {
             this.includeReferencedRuntimeSymbol = includeReferencedRuntimeSymbol;
             this.duplicateOwnedSymbol = duplicateOwnedSymbol;
+            this.addActiveCaller = addActiveCaller;
+            this.callerInSecondPartial = callerInSecondPartial;
             Directory.CreateDirectory(directory);
         }
 
@@ -76,9 +121,12 @@ public sealed class SegOwnershipTests
             File.WriteAllText(segPath, seg);
             var referenced = includeReferencedRuntimeSymbol ? "public NamedCutSceneId referencedScene = new();" : "";
             var duplicate = duplicateOwnedSymbol ? "public CycleElemId ownedCycle = new();" : "";
-            File.WriteAllText(runtimePath, "using Seg; public partial class World : WorldBase { public CycleElemId ownedCycle { get; set; } = new(); public NamedCutSceneId ownedScene = new(); public CycleElemId unused { get; set; } = new(); " + referenced + duplicate + " }");
+            File.WriteAllText(runtimePath, "using Seg; public partial class World : WorldBase { public CycleElemId ownedCycle { get; set; } = new(); public NamedCutSceneId ownedScene = new(); public CycleElemId unused { get; set; } = new(); " + referenced + duplicate + " private bool migrated(int value) => true; private bool migrated(string value) => true; private void kept() { } " + (addActiveCaller && !callerInSecondPartial ? "private void caller() { migrated(1); }" : "") + " }");
+            if (addActiveCaller && callerInSecondPartial)
+                File.WriteAllText(Path.Combine(directory, "World.Partial.cs"), "public partial class World { private void caller() { migrated(1); } }");
             File.WriteAllText(legacyPath, "using Seg; public partial class World : WorldBase { public CycleElemId ownedCycle { get; set; } = new(); public NamedCutSceneId ownedScene = new(); public NamedCutSceneId referencedScene = new(); }");
-            return SegOwnership.Analyze(segPath, new[] { runtimePath }, legacyPath);
+            return SegOwnership.Analyze(segPath, Directory.EnumerateFiles(directory, "*.cs")
+                .Where(x => !string.Equals(x, legacyPath, StringComparison.OrdinalIgnoreCase)), legacyPath);
         }
 
         public void Dispose() { try { Directory.Delete(directory, recursive: true); } catch { } }
