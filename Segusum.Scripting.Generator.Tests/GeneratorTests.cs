@@ -1314,7 +1314,7 @@ public NamedCutSceneId ncsMikeStalloneIlBenefattore = null!;
     [Fact]
     public void StaticEnumAndMemberAccessResolveThroughGeneralTypeLookup()
     {
-        var result = Run("def enumValue ret NarSize:\n    ret NarSize.Medium\nend\ndef staticValue ret int:\n    ret World.StaticValue\nend", "public static int StaticValue => 3;");
+        var result = Run("def enumValue ret NarSize:\n    ret NarSize.Medium\nend\ndef staticValue ret int:\n    ret World.StaticValue\nend\nuse thing here:\n    narImg \"x\" \"img.png\" size: NarSize.Medium\nend", "public static int StaticValue => 3; public LogicObj thing = null!;");
 
         Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL", StringComparison.Ordinal));
         var generated = Generated(result);

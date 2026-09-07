@@ -946,6 +946,18 @@ public sealed class DslBinder
     }
     private bool TryGetTypeBySimpleNameAndMember(string name, string memberName, out INamedTypeSymbol type)
     {
+        // Prefer an unambiguous metadata lookup when the receiver is written
+        // as a type name.  This avoids losing enum/static members in a large
+        // compilation where the simple-name candidate index contains more
+        // context than the current source file requires.
+        var direct = GetTypeByMetadataName(name)
+            ?? GetTypeByMetadataName("Seg." + name)
+            ?? GetTypeByMetadataName("System." + name);
+        if (direct != null && direct.GetMembers(memberName).Length != 0)
+        {
+            type = direct;
+            return true;
+        }
         EnsureTypeCandidates();
         if (typeCandidatesBySimpleName.TryGetValue(name, out var candidates))
         {
