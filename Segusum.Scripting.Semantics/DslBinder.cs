@@ -135,6 +135,8 @@ public sealed class DslBinder
     private readonly HashSet<ISymbol> dslRoomChangedTargets = new(SymbolEqualityComparer.Default);
     private readonly HashSet<DslExpression> nullLiterals = new(ReferenceComparer<DslExpression>.Instance);
     private readonly Dictionary<string, INamedTypeSymbol?> typesBySimpleName = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, List<INamedTypeSymbol>> typeCandidatesBySimpleName = new(StringComparer.Ordinal);
+    private bool typeCandidatesBuilt;
     private readonly Dictionary<string, IReadOnlyList<ISymbol>> worldMembersByName = new(StringComparer.Ordinal);
     private readonly object worldMembersGate = new();
     private readonly Dictionary<string, IReadOnlyList<ISymbol>> resolvedCSharpMembersByName = new(StringComparer.Ordinal);
@@ -467,7 +469,7 @@ public sealed class DslBinder
                 if (b.Operator is "and" or "or") { Require(lt, compilation.GetSpecialType(SpecialType.System_Boolean), b.Left.Span, "logical operand must be bool."); Require(rt, compilation.GetSpecialType(SpecialType.System_Boolean), b.Right.Span, "logical operand must be bool."); return compilation.GetSpecialType(SpecialType.System_Boolean); }
                 return b.Operator is "==" or "!=" or ">" or ">=" or "<" or "<=" ? compilation.GetSpecialType(SpecialType.System_Boolean) : lt;
             case MemberAccessExpression m:
-                if (m.Receiver is IdentifierExpression typeName && TryGetTypeBySimpleName(typeName.Name, out var staticType))
+                if (m.Receiver is IdentifierExpression typeName && TryGetTypeBySimpleNameAndMember(typeName.Name, m.MemberName, out var staticType))
                 {
                     var staticMember = profile.MeasureEnumerable("Roslyn.GetMembers", staticType.GetMembers(m.MemberName))
                         .FirstOrDefault(x => x switch
@@ -798,6 +800,36 @@ public sealed class DslBinder
         }
         finally { profile.Add("TryGetTypeBySimpleName", Stopwatch.GetTimestamp() - started); }
     }
+    private bool TryGetTypeBySimpleNameAndMember(string name, string memberName, out INamedTypeSymbol type)
+    {
+        EnsureTypeCandidates();
+        if (typeCandidatesBySimpleName.TryGetValue(name, out var candidates))
+        {
+            var matching = candidates.Where(x => x.GetMembers(memberName).Length != 0).ToArray();
+            if (matching.Length == 1) { type = matching[0]; return true; }
+        }
+        return TryGetTypeBySimpleName(name, out type);
+    }
+    private void EnsureTypeCandidates()
+    {
+        if (typeCandidatesBuilt) return;
+        typeCandidatesBuilt = true;
+        VisitAllTypesForCandidates(compilation.GlobalNamespace);
+    }
+    private void VisitAllTypesForCandidates(INamespaceSymbol current)
+    {
+        foreach (var member in current.GetMembers())
+        {
+            if (member is INamespaceSymbol child) VisitAllTypesForCandidates(child);
+            else if (member is INamedTypeSymbol type) VisitTypeForCandidates(type);
+        }
+    }
+    private void VisitTypeForCandidates(INamedTypeSymbol type)
+    {
+        if (!typeCandidatesBySimpleName.TryGetValue(type.Name, out var list)) typeCandidatesBySimpleName[type.Name] = list = new();
+        if (!list.Any(x => SymbolEqualityComparer.Default.Equals(x, type))) list.Add(type);
+        foreach (var nested in type.GetTypeMembers()) VisitTypeForCandidates(nested);
+    }
     private void EnsureTypeIndex()
     {
         profile.Count("EnsureTypeIndex");
@@ -827,6 +859,8 @@ public sealed class DslBinder
     private void VisitType(INamedTypeSymbol type)
     {
         profile.Count("VisitType");
+        if (!typeCandidatesBySimpleName.TryGetValue(type.Name, out var candidates)) typeCandidatesBySimpleName[type.Name] = candidates = new();
+        if (!candidates.Any(x => SymbolEqualityComparer.Default.Equals(x, type))) candidates.Add(type);
         if (Accessible(type))
         {
             if (!typesBySimpleName.TryGetValue(type.Name, out var existing)) typesBySimpleName[type.Name] = type;
