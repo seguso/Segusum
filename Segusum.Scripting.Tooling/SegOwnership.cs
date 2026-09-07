@@ -191,8 +191,7 @@ public static class SegOwnership
         => string.Equals(seg.Name, runtime.Name, StringComparison.Ordinal)
             && TypeEquals(seg.ReturnType, runtime.ReturnType)
             && seg.Parameters.Count == runtime.ParameterTypes.Count
-            && seg.Parameters.Zip(runtime.ParameterTypes, (a, b) => TypeEquals(a.Type, b)).All(x => x)
-            && !runtime.IsStatic;
+            && seg.Parameters.Zip(runtime.ParameterTypes, (a, b) => TypeEquals(a.Type, b)).All(x => x);
 
     private static IReadOnlyList<RuntimeMethodDeclaration> FindActiveCSharpReferences(
         IEnumerable<string> runtimeCSharpFiles,

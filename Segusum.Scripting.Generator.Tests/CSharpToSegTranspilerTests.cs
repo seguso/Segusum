@@ -61,6 +61,29 @@ public sealed class CSharpToSegTranspilerTests
     }
 
     [Fact]
+    public void UninitializedPrimitiveLocalsUseSafeSegDefaults()
+    {
+        const string source = "class W { void M() { addHandlerUseHere(a, handler: e => { bool ready; int count; string text; foo(ready, count, text); }); } }";
+        var result = CSharpToSegTranspiler.Transpile("x.cs", source);
+        Assert.Contains("var ready: bool = false", result.Text, StringComparison.Ordinal);
+        Assert.Contains("var count: int = 0", result.Text, StringComparison.Ordinal);
+        Assert.Contains("var text: string = null", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("var ready: bool = null", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("var count: int = null", result.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CombineExplanationDoesNotBecomePhrase()
+    {
+        const string source = "class W { void M() { addHandlerCombine(a, b, explanation: ex, fullSentenceUntransl: \"use a on b\".translatable(), handler: e => { foo(); }); } }";
+        var result = CSharpToSegTranspiler.Transpile("x.cs", source);
+        Assert.Contains("phrase \"use a on b\"", result.Text, StringComparison.Ordinal);
+        Assert.Contains("exp ex", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("phrase ex", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(result.Diagnostics, x => x.Status == MigrationUnitStatus.Unsupported);
+    }
+
+    [Fact]
     public void NarTextUsesColonSyntaxAndNarrativeLayout()
     {
         const string source = "class W { void M() { addRoomChangedHandler(roomA, i => { foo(); narText(\"Un'ora dopo...\"); narRoom(\"La stanza\", roomA, false); narImg(\"Testo\", \"img/a.png\", alsoShowGraphicsInTextMode: true); bar(); }); } }";

@@ -486,7 +486,10 @@ public static class CSharpToSegTranspiler
             _ => throw new InvalidOperationException(kind)
         };
         sb.AppendLine(header + ":");
-        var phrase = kind == "combine" ? args.ElementAtOrDefault(2)?.Expression : null;
+        var phrase = kind == "combine"
+            ? args.FirstOrDefault(x => x.NameColon?.Name.Identifier.ValueText == "fullSentenceUntransl")?.Expression
+                ?? (args.ElementAtOrDefault(2) is { NameColon: null } positionalPhrase ? positionalPhrase.Expression : null)
+            : null;
         if (phrase is not null && phrase is not AnonymousFunctionExpressionSyntax) sb.Append("  phrase ").AppendLine(LiteralOrExpression(phrase));
         var explanation = args.FirstOrDefault(x => x.NameColon?.Name.Identifier.ValueText == "explanation")?.Expression ?? (kind == "use-for" ? args.ElementAtOrDefault(2)?.Expression : null);
         if (explanation is not null && explanation is not AnonymousFunctionExpressionSyntax) sb.Append("  exp ").AppendLine(LiteralOrExpression(explanation));
@@ -609,7 +612,7 @@ public static class CSharpToSegTranspiler
                             {
                                 var type = MapCSharpType(x.Declaration.Type, diagnostics, x);
                                 if (type == null) throw new InvalidOperationException($"unsupported local variable type '{x.Declaration.Type}'");
-                                sb.Append(indent).Append("var ").Append(v.Identifier.ValueText).Append(": ").Append(type).Append(" = null").AppendLine();
+                                sb.Append(indent).Append("var ").Append(v.Identifier.ValueText).Append(": ").Append(type).Append(" = ").Append(DefaultLocalValue(x.Declaration.Type, type)).AppendLine();
                             }
                         }
                         catch (InvalidOperationException ex) { Unsupported(v.Initializer ?? (SyntaxNode)v, diagnostics, ex.Message, partial, sb, level); }
@@ -656,6 +659,21 @@ public static class CSharpToSegTranspiler
         diagnostics.Add(new(MigrationUnitStatus.Unsupported, source.SyntaxTree?.FilePath ?? "<source>", StartLine(source),
             $"local variable type '{type}' is not representable by the SEG type mapping"));
         return null;
+    }
+
+    private static string DefaultLocalValue(TypeSyntax sourceType, string mappedType)
+    {
+        if (sourceType is NullableTypeSyntax || mappedType.EndsWith("?", StringComparison.Ordinal)) return "null";
+        if (sourceType is PredefinedTypeSyntax predefined)
+        {
+            if (predefined.Keyword.IsKind(SyntaxKind.BoolKeyword)) return "false";
+            if (predefined.Keyword.IsKind(SyntaxKind.IntKeyword)) return "0";
+            if (predefined.Keyword.IsKind(SyntaxKind.DoubleKeyword)) return "0.0";
+            if (predefined.Keyword.IsKind(SyntaxKind.FloatKeyword)) return "0.0";
+        }
+        // Nominal types, strings, arrays and generic collections are reference
+        // types in the migration corpus and retain C#'s null default.
+        return "null";
     }
 
     private static void EmitInvocation(InvocationExpressionSyntax invocation, StringBuilder sb, List<MigrationDiagnostic> diagnostics, int level, bool partial, bool omitConsecutiveCycleEnd = false, string? contextRoot = null)
@@ -1203,6 +1221,12 @@ public static class CSharpToSegTranspiler
     private static string EmitCallExpression(InvocationExpressionSyntax invocation)
     {
         var name = invocation.Expression is MemberAccessExpressionSyntax member ? member.Name.Identifier.ValueText : invocation.Expression.ToString();
+        if (name == "translatable"
+            && invocation.ArgumentList.Arguments.Count == 0
+            && invocation.Expression is MemberAccessExpressionSyntax translatableMember
+            && translatableMember.Expression is LiteralExpressionSyntax translatableLiteral
+            && translatableLiteral.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.StringLiteralExpression))
+            return EmitLiteral(translatableLiteral);
         if (name == "Any" && invocation.ArgumentList.Arguments.Count == 1)
         {
             if (invocation.Expression is not MemberAccessExpressionSyntax anyMember
