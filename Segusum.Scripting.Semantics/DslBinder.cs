@@ -162,6 +162,23 @@ public sealed class DslBinder
     public void Bind(IReadOnlyList<DslDeclaration> declarations)
     {
         var phase = Stopwatch.GetTimestamp();
+        // Register every cycle-element symbol before binding any predicate.
+        // Predicates may refer to a sibling declared later in the document;
+        // binding declarations one by one would otherwise give that forward
+        // reference an unknown type and produce cascading bool/argument
+        // diagnostics.
+        foreach (var declaration in declarations)
+        {
+            if (declaration is CycleElementDeclaration cycleElement)
+            {
+                EnsureCycleElementGlobal(cycleElement.Id, cycleElement.IdSpan);
+                PredeclareCycleElements(cycleElement.Body);
+            }
+            else
+            {
+                PredeclareCycleElements(DeclarationBody(declaration));
+            }
+        }
         foreach (var declaration in declarations)
         {
             switch (declaration)
@@ -206,6 +223,36 @@ public sealed class DslBinder
         profile.MeasureAction("CheckCSharpRoomChangedDuplicates", () => CheckCSharpRoomChangedDuplicates(declarations));
         profile.MeasureAction("CheckDuplicateBeforeRoomChange", () => CheckDuplicateBeforeRoomChange(declarations));
         profile.MeasureAction("CheckDuplicateAfterActionExecuted", () => CheckDuplicateAfterActionExecuted(declarations));
+    }
+
+    private static IReadOnlyList<DslStatement> DeclarationBody(DslDeclaration declaration) => declaration switch
+    {
+        FunctionDeclaration f => f.Body,
+        HandlerDeclaration h => h.Body,
+        BeforeRoomChangeDeclaration b => b.Body,
+        AfterActionExecutedDeclaration a => a.Body,
+        _ => Array.Empty<DslStatement>()
+    };
+
+    private void PredeclareCycleElements(IEnumerable<DslStatement> statements)
+    {
+        foreach (var statement in statements)
+        {
+            switch (statement)
+            {
+                case AddCycleElementStatement add:
+                    EnsureCycleElementGlobal(add.Id, add.IdSpan);
+                    PredeclareCycleElements(add.Body);
+                    break;
+                case IfStatement conditional:
+                    foreach (var branch in conditional.Branches) PredeclareCycleElements(branch.Body);
+                    if (conditional.ElseBody != null) PredeclareCycleElements(conditional.ElseBody);
+                    break;
+                case NamedCutsceneStatement cutscene:
+                    PredeclareCycleElements(cutscene.Body);
+                    break;
+            }
+        }
     }
     private void BindBeforeRoomChange(BeforeRoomChangeDeclaration declaration)
     {
@@ -301,6 +348,11 @@ public sealed class DslBinder
     { scope ??= new(); if (elementId != null) EnsureCycleElementGlobal(elementId, span); Require(BindName(cycleName, span, scope), cycle, span, "add requires a Cycle."); if (repeat != null && repeat is not ("once" or "forever")) Report("SEGDSL316", $"Unknown Repeat modifier '{repeat}'.", span); if (condition != null) Require(BindExpression(condition, scope, dateTimeNullable), compilation.GetSpecialType(SpecialType.System_Boolean), condition.Span, "when must be bool."); BindStatements(body, new(scope), null); }
     private void BindStatements(IEnumerable<DslStatement> statements, Dictionary<string, ITypeSymbol> scope, ITypeSymbol? returnType)
     {
+        // Cycle predicates may refer to a later sibling (for example the
+        // predicate of cielo1 mentions cielo2). Intern all sibling IDs before
+        // binding any predicate so forward references retain CycleElemId type.
+        foreach (var element in statements.OfType<AddCycleElementStatement>())
+            EnsureCycleElementGlobal(element.Id, element.IdSpan);
         foreach (var statement in statements)
         {
             switch (statement)
@@ -417,6 +469,8 @@ public sealed class DslBinder
     {
         if (cycleElementGlobals.ContainsKey(id)) return;
         var existing = ResolveCSharpMembers(id).FirstOrDefault();
+        if (existing != null)
+            Report("SEGDSL304", $"CycleElementId '{id}' collides with an existing World member.", span);
         var existingType = existing switch { IFieldSymbol field => field.Type, IPropertySymbol property => property.Type, _ => null };
         cycleElementGlobals[id] = existingType ?? cycleElementId!;
         AddDslIdentity(id, "cycle-element", span);

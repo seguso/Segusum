@@ -85,6 +85,7 @@ public static class DslParser
         private readonly string sourceText;
         private readonly DslParserProfile profile;
         private int position;
+        private bool parsingCallArgument;
         public Parser(IReadOnlyList<DslToken> tokens, List<DslDiagnostic> diagnostics, string sourceText, DslParserProfile profile) { this.tokens = tokens; this.diagnostics = diagnostics; this.sourceText = sourceText; this.profile = profile; }
         private DslToken Current => tokens[position];
         private bool Is(string text) { profile.Count("Is"); return Current.Text == text; }
@@ -374,7 +375,10 @@ public static class DslParser
                     profile.Count("named-arguments");
                     var name = Take().Text; Take(); return new DslArgument(name, Expression(), span);
                 }
-                return new DslArgument(null, Prefix(), span);
+                var previous = parsingCallArgument;
+                parsingCallArgument = true;
+                try { return new DslArgument(null, Prefix(), span); }
+                finally { parsingCallArgument = previous; }
             }
             finally { profile.Add("ParseArgument", Stopwatch.GetTimestamp() - started, 0); }
         }
@@ -456,7 +460,7 @@ public static class DslParser
             while (Is("."))
             {
                 Take(); var memberToken = WordToken();
-                if (CanStartArgument())
+                if (!parsingCallArgument && CanStartArgument())
                 {
                     profile.Count("member-calls");
                     var args = new List<DslArgument>(); while (CanStartArgument()) args.Add(ParseArgument());
@@ -469,7 +473,7 @@ public static class DslParser
             if (identifier is null) return expression;
             if (Is("not-seen-recently")) { Take(); return new CallExpression("not-seen-recently", new[] { new DslArgument(null, identifier, span), new DslArgument(null, Prefix(), Current.Span) }, span); }
             if (Is("was-seen-at-least-once")) { Take(); return new CallExpression("was-seen-at-least-once", new[] { new DslArgument(null, identifier, span) }, span); }
-            if (CanStartArgument() && !IsNamedArgumentStart())
+            if (!parsingCallArgument && CanStartArgument() && !IsNamedArgumentStart())
             {
                 profile.Count("calls");
                 var args = new List<DslArgument>(); while (CanStartArgument()) args.Add(ParseArgument()); return new CallExpression(identifier.Name, args, span) { NameSpan = identifier.Span };

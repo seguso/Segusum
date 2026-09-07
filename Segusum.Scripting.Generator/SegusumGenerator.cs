@@ -219,7 +219,7 @@ public sealed class SegusumGenerator : IIncrementalGenerator
         MemberAccessExpression m when model.Values.TryGetValue(m, out var staticProperty) && staticProperty.Symbol is IPropertySymbol { IsStatic: true } => staticProperty.CSharpName,
         MemberAccessExpression m when model.Values.TryGetValue(m, out var member) && member.Kind == BoundSymbolKind.CSharpMethod => Emit(m.Receiver, model) + "." + member.CSharpName + "()",
         MemberAccessExpression m when model.Values.TryGetValue(m, out var property) => Emit(m.Receiver, model) + "." + property.CSharpName,
-        CallExpression c when model.Calls.TryGetValue(c, out var bound) => (bound.Receiver == null ? bound.TargetName : Emit(bound.Receiver, model) + "." + bound.TargetName) + "(" + string.Join(",", bound.Arguments.Select(a => (a.Source.Name == null ? "" : Name(a.ParameterName) + ": ") + Emit(a.Source.Expression, model))) + ")",
+        CallExpression c when model.Calls.TryGetValue(c, out var bound) => (bound.Receiver == null ? bound.TargetName : Emit(bound.Receiver, model) + "." + bound.TargetName) + "(" + string.Join(", ", bound.Arguments.Select(a => (a.Source.Name == null ? "" : Name(a.ParameterName) + ": ") + Emit(a.Source.Expression, model))) + ")",
         _ => "default"
     };
     private static string EmitUnary(UnaryExpression expression, BoundModel model)

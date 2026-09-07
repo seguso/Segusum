@@ -16,6 +16,14 @@ namespace Segusum.Scripting.Generator.Tests;
 public sealed class GeneratorTests
 {
     [Fact]
+    public void CyclePredicateCanReferenceLaterSiblingId()
+    {
+        var result = Run("var cyc = new-cycle\nadd cyc first when noneOfThemWasSeenRecently 5 first second\nend\nadd cyc second\nend", "public CycleElemId first = new(); public CycleElemId second = new(); public bool noneOfThemWasSeenRecently(double n, params object[] x) => true;");
+        Assert.DoesNotContain(result.Diagnostics, x => x.Id == "SEGDSL313" && x.GetMessage().Contains("logical operand", StringComparison.Ordinal));
+        Assert.DoesNotContain(result.Diagnostics, x => x.GetMessage().Contains("incompatible", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void BareRetParsesAndGeneratesVoidReturn()
     {
         var parsed = DslParser.Parse(new DslSource("bare-ret.seg", "world game\ndef helper:\n    ret\nend\n"));
