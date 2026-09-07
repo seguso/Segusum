@@ -243,7 +243,38 @@ public sealed class SegusumGenerator : IIncrementalGenerator
     }
     private static string Name(string name) { var x = name.Contains('-') ? DslNames.Camel(name) : name; return x is "object" or "string" or "int" or "bool" ? "@" + x : x; }
     private static string EscapeString(string value) => value.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", "\\r").Replace("\n", "\\n");
-    private static string Type(string type) => type == "int" ? "int" : type == "bool" ? "bool" : type == "string" ? "string" : type == "DateTime" ? "System.DateTime" : type;
+    private static string Type(string type)
+    {
+        type = type.Trim();
+        if (type.EndsWith("[]", StringComparison.Ordinal)) return Type(type.Substring(0, type.Length - 2)) + "[]";
+        if (type.EndsWith("?", StringComparison.Ordinal)) return Type(type.Substring(0, type.Length - 1)) + "?";
+        var open = type.IndexOf('<');
+        if (open >= 0 && type.EndsWith(">", StringComparison.Ordinal))
+        {
+            var head = type.Substring(0, open).Trim();
+            var args = SplitTypeArguments(type.Substring(open + 1, type.Length - open - 2)).Select(Type);
+            var qualified = head switch
+            {
+                "List" => "System.Collections.Generic.List",
+                "Dictionary" => "System.Collections.Generic.Dictionary",
+                "IEnumerable" => "System.Collections.Generic.IEnumerable",
+                _ => head
+            };
+            return qualified + "<" + string.Join(", ", args) + ">";
+        }
+        return type == "int" ? "int" : type == "bool" ? "bool" : type == "string" ? "string" : type == "DateTime" ? "System.DateTime" : type;
+    }
+    private static IEnumerable<string> SplitTypeArguments(string text)
+    {
+        var depth = 0; var start = 0;
+        for (var i = 0; i < text.Length; i++)
+        {
+            if (text[i] == '<') depth++;
+            else if (text[i] == '>') depth--;
+            else if (text[i] == ',' && depth == 0) { yield return text.Substring(start, i - start).Trim(); start = i + 1; }
+        }
+        yield return text.Substring(start).Trim();
+    }
     private static IEnumerable<CycleElementDeclaration> AllCycleElements(DslDeclaration declaration) => declaration switch
     {
         CycleElementDeclaration e => new[] { e }.Concat(FindNested(e.Body)),

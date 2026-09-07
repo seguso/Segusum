@@ -390,7 +390,7 @@ public sealed class DslBinder
                     {
                         if (returnType != null) Report("SEGDSL313", "A bare ret is only valid in a void function.", r.Span);
                     }
-                    else Require(BindExpression(r.Expression, scope), returnType, r.Span, "return type mismatch.");
+                    else RequireExpression(r.Expression, BindExpression(r.Expression, scope), returnType, "return type mismatch.");
                     break;
                 case CallStatement c: BindExpression(c.Expression, scope); break;
                 case NextCycleStatement n: Require(BindExpression(n.Cycle, scope), cycle, n.Span, "next requires a Cycle."); break;
@@ -1015,6 +1015,28 @@ public sealed class DslBinder
     private ITypeSymbol? TypeOf(string name)
     {
         var normalized = name.Trim();
+        if (normalized.EndsWith("[]", StringComparison.Ordinal))
+        {
+            var element = TypeOf(normalized.Substring(0, normalized.Length - 2));
+            return element == null ? null : compilation.CreateArrayTypeSymbol(element);
+        }
+        if (normalized.EndsWith("?", StringComparison.Ordinal))
+        {
+            var value = TypeOf(normalized.Substring(0, normalized.Length - 1));
+            var nullable = GetTypeByMetadataName("System.Nullable`1");
+            return value is { IsValueType: true } && nullable != null && value.NullableAnnotation != NullableAnnotation.Annotated
+                ? nullable.Construct(value)
+                : value;
+        }
+        if (TrySplitGenericType(normalized, out var genericName, out var arguments))
+        {
+            var definition = ResolveGenericDefinition(genericName, arguments.Count);
+            if (definition == null) return null;
+            var typeArguments = arguments.Select(TypeOf).ToArray();
+            if (typeArguments.Any(x => x == null) || typeArguments.Any(x => x is IErrorTypeSymbol)) return null;
+            try { return definition.Construct(typeArguments.Cast<ITypeSymbol>().ToArray()); }
+            catch (ArgumentException) { return null; }
+        }
         return normalized switch
         {
             "void" => compilation.GetSpecialType(SpecialType.System_Void),
@@ -1033,6 +1055,46 @@ public sealed class DslBinder
             "DateTime?" => dateTimeNullable,
             _ => ResolveNominalType(normalized)
         };
+    }
+    private static bool TrySplitGenericType(string text, out string name, out IReadOnlyList<string> arguments)
+    {
+        name = text; arguments = Array.Empty<string>();
+        var open = text.IndexOf('<');
+        if (open < 0) return false;
+        if (!text.EndsWith(">", StringComparison.Ordinal)) return false;
+        var depth = 0; var close = -1;
+        for (var i = open; i < text.Length; i++)
+        {
+            if (text[i] == '<') depth++;
+            else if (text[i] == '>' && --depth == 0) { close = i; break; }
+        }
+        if (close != text.Length - 1 || depth != 0) return false;
+        var parts = new List<string>(); var start = open + 1; depth = 0;
+        for (var i = open + 1; i < close; i++)
+        {
+            if (text[i] == '<') depth++;
+            else if (text[i] == '>') depth--;
+            else if (text[i] == ',' && depth == 0) { parts.Add(text.Substring(start, i - start).Trim()); start = i + 1; }
+        }
+        parts.Add(text.Substring(start, close - start).Trim());
+        if (parts.Any(string.IsNullOrWhiteSpace)) return false;
+        name = text.Substring(0, open).Trim(); arguments = parts;
+        return true;
+    }
+    private INamedTypeSymbol? ResolveGenericDefinition(string name, int arity)
+    {
+        var metadataName = name.Contains('.') ? name + "`" + arity : null;
+        var candidates = metadataName == null
+            ? new[] { "System.Collections.Generic." + name + "`" + arity, "System." + name + "`" + arity, "Seg." + name + "`" + arity, name + "`" + arity }
+            : new[] { metadataName };
+        foreach (var candidate in candidates)
+        {
+            var type = GetTypeByMetadataName(candidate);
+            if (type != null) return type;
+        }
+        // The fallback is deliberately on the bare generic name, never on the
+        // source spelling containing angle brackets.
+        return TryGetTypeBySimpleName(name, out var simple) && simple.Arity == arity ? simple : null;
     }
     private ITypeSymbol? ResolveNominalType(string name)
     {

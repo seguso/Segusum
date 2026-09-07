@@ -905,6 +905,36 @@ public NamedCutSceneId ncsMikeStalloneIlBenefattore = null!;
     }
 
     [Fact]
+    public void GenericAndArrayDefTypesBindStructurally()
+    {
+        const string text = "world game\n" +
+            "def strings ret List<string>:\n    ret null\nend\n" +
+            "def map ret Dictionary<string, int>:\n    ret null\nend\n" +
+            "def nested ret Dictionary<string, List<LogicObj>>:\n    ret null\nend\n" +
+            "def array ret List<string>[]:\n    ret null\nend\n";
+        var result = Run(text, "public LogicObj thing = null!;");
+
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL", StringComparison.Ordinal));
+        var generated = Generated(result);
+        Assert.Contains("System.Collections.Generic.List<string> strings()", generated, StringComparison.Ordinal);
+        Assert.Contains("System.Collections.Generic.Dictionary<string, int> map()", generated, StringComparison.Ordinal);
+        Assert.Contains("System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<LogicObj>> nested()", generated, StringComparison.Ordinal);
+        Assert.Contains("System.Collections.Generic.List<string>[] array()", generated, StringComparison.Ordinal);
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
+    public void GenericReturnTypeDoesNotExpandTheTypeIndex()
+    {
+        var result = Run("def splittaInputEFaiLower e: TextHandlerInput ret List<string>:\n    var chosenTextTrim = e.chosenText.Trim.ToLower\n    ret splitAndTrim chosenTextTrim\nend", "private static System.Collections.Generic.List<string> splitAndTrim(string value) => new();");
+
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL", StringComparison.Ordinal));
+        Assert.Contains("System.Collections.Generic.List<string> splittaInputEFaiLower", Generated(result), StringComparison.Ordinal);
+        Assert.Contains("splitAndTrim(chosenTextTrim)", Generated(result), StringComparison.Ordinal);
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
     public void MalformedGenericTypeTerminatesWithDiagnostic()
     {
         var parsed = DslParser.Parse(new DslSource("malformed-generic.seg", "world game\ndef broken ret List<\n"));
