@@ -24,6 +24,34 @@ public sealed class GeneratorTests
     }
 
     [Fact]
+    public void DuplicateCycleElementIdInTwoAddsIsRejected()
+    {
+        var result = Run("def main:\n    var first = new-cycle\n    add first cidShared\n    end\n    var second = new-cycle\n    add second cidShared\n    end\nend");
+        Assert.Contains(result.Diagnostics, d => d.GetMessage().Contains("Duplicate CycleElementId declaration 'cidShared'", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void DuplicateCycleElementIdInDifferentHandlersIsRejected()
+    {
+        var result = Run("room-changed roomA:\n    var cycA = new-cycle\n    add cycA cidShared\n    end\nend\nroom-changed roomB:\n    var cycB = new-cycle\n    add cycB cidShared\n    end\nend", "public Room roomA = null!; public Room roomB = null!;");
+        Assert.Contains(result.Diagnostics, d => d.GetMessage().Contains("Duplicate CycleElementId declaration 'cidShared'", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void DuplicateCycleElementIdAcrossSegFilesIsRejected()
+    {
+        var result = RunWithWorldFiles("[SegusumWorld(\"game\")] public abstract partial class Pinco : WorldBase { protected Pinco() : base(\"en\") { } public Room roomA = null!; public Room roomB = null!; }", ("a.seg", "world game\nroom-changed roomA:\n    var cycA = new-cycle\n    add cycA cidShared\n    end\nend\n"), ("b.seg", "world game\nroom-changed roomB:\n    var cycB = new-cycle\n    add cycB cidShared\n    end\nend\n"));
+        Assert.Contains(result.Diagnostics, d => d.GetMessage().Contains("Duplicate CycleElementId declaration 'cidShared'", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void CycleElementReferencesDoNotDeclareDuplicates()
+    {
+        var result = Run("def main ret bool:\n    var cyc = new-cycle\n    add cyc cidShared\n        when wasSeenAtLeastOnce cidShared\n    end\n    ret wasSeenAtLeastOnce cidShared\nend");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void CycleBlockMissingEndAtEofIsRejected()
     {
         var parsed = DslParser.Parse(new DslSource("missing-end.seg", "world game\ndef main:\n    var cyc = new-cycle\n"));

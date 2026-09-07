@@ -109,6 +109,8 @@ public sealed class DslBinder
     private readonly Action<DslDiagnostic> report;
     private readonly Dictionary<string, ITypeSymbol> globals = new(StringComparer.Ordinal);
     private readonly Dictionary<string, ITypeSymbol> cycleElementGlobals = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, SourceSpan> cycleElementDeclarationSpans = new(StringComparer.Ordinal);
+    private readonly HashSet<string> cycleElementDuplicateReports = new(StringComparer.Ordinal);
     private readonly Dictionary<string, ITypeSymbol> namedCutsceneGlobals = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> namedCutsceneMetadata = new(StringComparer.Ordinal);
     private readonly Dictionary<string, BoundSymbolKind> globalKinds = new(StringComparer.Ordinal);
@@ -355,14 +357,12 @@ public sealed class DslBinder
         inputContextAllowed = false;
     }
     private void BindCycle(string cycleName, string? elementId, string? repeat, DslExpression? condition, IReadOnlyList<DslStatement> body, SourceSpan span, Dictionary<string, ITypeSymbol>? scope = null)
-    { scope ??= new(); if (elementId != null) EnsureCycleElementGlobal(elementId, span); Require(BindName(cycleName, span, scope), cycle, span, "add requires a Cycle."); if (repeat != null && repeat is not ("once" or "forever")) Report("SEGDSL316", $"Unknown Repeat modifier '{repeat}'.", span); if (condition != null) Require(BindExpression(condition, scope, dateTimeNullable), compilation.GetSpecialType(SpecialType.System_Boolean), condition.Span, "when must be bool."); BindStatements(body, new(scope), null); }
+    { scope ??= new(); Require(BindName(cycleName, span, scope), cycle, span, "add requires a Cycle."); if (repeat != null && repeat is not ("once" or "forever")) Report("SEGDSL316", $"Unknown Repeat modifier '{repeat}'.", span); if (condition != null) Require(BindExpression(condition, scope, dateTimeNullable), compilation.GetSpecialType(SpecialType.System_Boolean), condition.Span, "when must be bool."); BindStatements(body, new(scope), null); }
     private void BindStatements(IEnumerable<DslStatement> statements, Dictionary<string, ITypeSymbol> scope, ITypeSymbol? returnType)
     {
         // Cycle predicates may refer to a later sibling (for example the
         // predicate of cielo1 mentions cielo2). Intern all sibling IDs before
         // binding any predicate so forward references retain CycleElemId type.
-        foreach (var element in statements.OfType<AddCycleElementStatement>())
-            EnsureCycleElementGlobal(element.Id, element.IdSpan);
         foreach (var statement in statements)
         {
             switch (statement)
@@ -477,10 +477,17 @@ public sealed class DslBinder
     }
     private void EnsureCycleElementGlobal(string id, SourceSpan span)
     {
-        if (cycleElementGlobals.ContainsKey(id)) return;
+        if (cycleElementGlobals.ContainsKey(id))
+        {
+            var location = $"{span.Path}\0{span.Start}";
+            if (cycleElementDeclarationSpans.TryGetValue(id, out var first) && (first.Path != span.Path || first.Start != span.Start) && cycleElementDuplicateReports.Add(location))
+                Report("SEGDSL336", $"Duplicate CycleElementId declaration '{id}'.", span);
+            return;
+        }
         var existing = ResolveCSharpMembers(id).FirstOrDefault();
         var existingType = existing switch { IFieldSymbol field => field.Type, IPropertySymbol property => property.Type, _ => null };
         cycleElementGlobals[id] = existingType ?? cycleElementId!;
+        cycleElementDeclarationSpans[id] = span;
         AddDslIdentity(id, "cycle-element", span);
         model.References[id] = id;
     }
