@@ -345,6 +345,14 @@ public sealed class DslBinder
         inputType = h.Kind == "submit-text-input" ? textHandlerInput : GetTypeByMetadataName("Seg.HandlerInput");
         inputContextAllowed = h.Kind == "submit-text-input";
         var handlerScope = new Dictionary<string, ITypeSymbol>(StringComparer.Ordinal);
+        // Every action handler receives its runtime input as the implicit
+        // `e` parameter.  Room-changed historically also exposes `i`; keep
+        // that alias only for that handler kind.
+        if (inputType != null)
+        {
+            handlerScope[NormalizeKey("e")] = inputType;
+            AddLocalIdentity("e", "contextual", h.Span);
+        }
         if (h.Kind == "room-changed" && roomChangedInput != null)
         {
             handlerScope[NormalizeKey("i")] = roomChangedInput;

@@ -1289,6 +1289,42 @@ public NamedCutSceneId ncsMikeStalloneIlBenefattore = null!;
     }
 
     [Fact]
+    public void NormalActionHandlersBindImplicitHandlerInputE()
+    {
+        var result = Run("use thing for objective:\n    someHelper e\nend", "public LogicObj thing = null!; public Objective objective = null!; public void someHelper(HandlerInput e) { }");
+
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL", StringComparison.Ordinal));
+        Assert.Contains("someHelper(e);", Generated(result), StringComparison.Ordinal);
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
+    public void SubmitTextInputBindsEAsTextHandlerInputAndPreservesLocalScope()
+    {
+        var result = Run("submit-text-input tiTest:\n    var x = e.chosenText\n    var spl = splitAndTrim x\n    if exists [from spl word where word.Contains \"x\"]:\n        solve\n    end\nend", "public TextInput tiTest = null!; public void solve() { } private static System.Collections.Generic.List<string> splitAndTrim(string value) => new();");
+
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL", StringComparison.Ordinal));
+        var generated = Generated(result);
+        Assert.Contains("var x = e.chosenText;", generated, StringComparison.Ordinal);
+        Assert.Contains("var spl = splitAndTrim(x);", generated, StringComparison.Ordinal);
+        Assert.Contains("System.Linq.Enumerable.Any(spl, word => word.Contains(\"x\"))", generated, StringComparison.Ordinal);
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
+    public void StaticEnumAndMemberAccessResolveThroughGeneralTypeLookup()
+    {
+        var result = Run("def enumValue ret NarSize:\n    ret NarSize.Medium\nend\ndef staticValue ret int:\n    ret World.StaticValue\nend", "public static int StaticValue => 3;");
+
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL", StringComparison.Ordinal));
+        var generated = Generated(result);
+        Assert.Contains("NarSize enumValue()", generated, StringComparison.Ordinal);
+        Assert.Contains("return NarSize.Medium;", generated, StringComparison.Ordinal);
+        Assert.Contains("return World.StaticValue;", generated, StringComparison.Ordinal);
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
     public void SubmitTextInputIsRequiredForInputContext()
     {
         var result = Run("def bad:\n    var spl = input.wordsLower\nend");
