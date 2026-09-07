@@ -80,6 +80,22 @@ public sealed class GeneratorTests
     }
 
     [Fact]
+    public void ListComprehensionParsesWithFilterAndProjection()
+    {
+        var parsed = DslParser.Parse(new DslSource("list-comprehension.seg", "world game\ndef main:\n    var filtered = [from items q where q.ready select q.target]\nend\n"));
+        Assert.DoesNotContain(parsed.Diagnostics, d => d.Id.StartsWith("SEGDSL", StringComparison.Ordinal));
+        Assert.Contains(parsed.Document.Declarations.OfType<FunctionDeclaration>().Single().Body, x => x is VariableDeclaration);
+    }
+
+    [Fact]
+    public void ListComprehensionBindsAndGeneratesWhereSelectArray()
+    {
+        var result = Run("def main:\n    var filtered = [from items q where q.ready select q.target]\nend", "public Item[] items = null!; public sealed class Item { public bool ready => true; public LogicObj target = null!; }");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL", StringComparison.Ordinal));
+        Assert.Contains("System.Linq.Enumerable.Select(System.Linq.Enumerable.Where(items", Generated(result), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RoomChangedContextResolvesThreeLevelMemberChains()
     {
         var result = Run("room-changed roomA:\n    if isEvenRandomInput i.randomInputs.rnd2:\n        ret\n    end\nend", "public Room roomA = null!; public bool isEvenRandomInput(int value) => true;");

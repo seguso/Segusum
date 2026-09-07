@@ -215,6 +215,7 @@ public sealed class SegusumGenerator : IIncrementalGenerator
         CallExpression c when model.DomainOperations.TryGetValue(c, out var domain) && domain.Kind == BoundDomainOperationKind.NotSeenRecently => Emit(domain.Receiver, model) + ".notSeenRecently(" + Emit(domain.Argument!, model) + ")",
         CallExpression c when model.DomainOperations.TryGetValue(c, out var seen) && seen.Kind == BoundDomainOperationKind.WasSeenAtLeastOnce => "wasSeenAtLeastOnce(" + Emit(seen.Receiver, model) + ")",
         ExistsExpression e => "System.Linq.Enumerable.Any(" + Emit(e.Collection, model) + ", " + Name(e.ItemName) + " => " + Emit(e.Predicate, model) + ")",
+        ListComprehensionExpression q => "System.Linq.Enumerable.Select(System.Linq.Enumerable.Where(" + Emit(q.Collection, model) + ", " + Name(q.ItemName) + " => " + Emit(q.Predicate, model) + "), " + Name(q.ItemName) + " => " + Emit(q.Selector, model) + ").ToArray()",
         MemberAccessExpression m when model.Values.TryGetValue(m, out var words) && words.CSharpName == "splittaInputEFaiLower(e)" => words.CSharpName,
         MemberAccessExpression m when model.Values.TryGetValue(m, out var staticField) && staticField.Symbol is IFieldSymbol { IsStatic: true } => staticField.CSharpName,
         MemberAccessExpression m when model.Values.TryGetValue(m, out var staticProperty) && staticProperty.Symbol is IPropertySymbol { IsStatic: true } => staticProperty.CSharpName,

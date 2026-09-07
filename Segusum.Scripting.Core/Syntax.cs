@@ -90,6 +90,10 @@ public sealed record ExistsExpression(DslExpression Collection,string ItemName,D
 {
     public SourceSpan ItemSpan { get; init; } = Span;
 }
+public sealed record ListComprehensionExpression(DslExpression Collection,string ItemName,DslExpression Predicate,DslExpression Selector,SourceSpan Span) : DslExpression(Span)
+{
+    public SourceSpan ItemSpan { get; init; } = Span;
+}
 public sealed record NarImgStatement(DslExpression ImagePath,string? Size,bool ShowInText,DslExpression Text,SourceSpan Span) : DslStatement(Span);
 public abstract record DslExpression(SourceSpan Span) : DslNode(Span);
 public sealed record IdentifierExpression(string Name,SourceSpan Span) : DslExpression(Span);

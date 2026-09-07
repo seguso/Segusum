@@ -609,6 +609,23 @@ public sealed class DslBinder
                 Require(BindExpression(e.Predicate, existsScope), compilation.GetSpecialType(SpecialType.System_Boolean), e.Predicate.Span, "exists predicate must be bool.");
                 if (hadExistingItem) activeDslSymbols[e.ItemName] = previousItem!; else activeDslSymbols.Remove(e.ItemName);
                 return compilation.GetSpecialType(SpecialType.System_Boolean);
+            case ListComprehensionExpression query:
+                var queryCollectionType = BindExpression(query.Collection, scope, contextualIt);
+                var queryElementType = queryCollectionType is INamedTypeSymbol queryNamed && queryNamed.IsGenericType && queryNamed.TypeArguments.Length == 1
+                    ? queryNamed.TypeArguments[0]
+                    : queryCollectionType is IArrayTypeSymbol queryArray ? queryArray.ElementType : null;
+                if (queryElementType == null)
+                {
+                    Report("SEGDSL332", "List comprehension requires a typed collection.", query.Collection.Span);
+                    return null;
+                }
+                var queryScope = new Dictionary<string, ITypeSymbol>(scope, StringComparer.Ordinal) { [NormalizeKey(query.ItemName)] = queryElementType };
+                var hadQueryItem = activeDslSymbols.TryGetValue(query.ItemName, out var previousQueryItem);
+                AddLocalIdentity(query.ItemName, "local", query.ItemSpan);
+                Require(BindExpression(query.Predicate, queryScope), compilation.GetSpecialType(SpecialType.System_Boolean), query.Predicate.Span, "list comprehension predicate must be bool.");
+                var selectorType = BindExpression(query.Selector, queryScope, contextualIt);
+                if (hadQueryItem) activeDslSymbols[query.ItemName] = previousQueryItem!; else activeDslSymbols.Remove(query.ItemName);
+                return selectorType == null ? null : compilation.CreateArrayTypeSymbol(selectorType);
             default: return null;
         }
     }

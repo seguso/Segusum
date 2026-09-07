@@ -404,6 +404,22 @@ public sealed class CSharpToSegTranspilerTests
     }
 
     [Fact]
+    public void NewCycleExpressionEmitsExistingSegCycleLiteral()
+    {
+        var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { void M() { addHandlerUseHere(a, handler: i => { var cyc = new Cycle(); execNextInCycle(cyc); }); } }", true);
+        Assert.Contains("var cyc = new-cycle", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(result.Text, "C2SEG-MANUAL", StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LinqWhereToListEmitsGeneralSegListComprehension()
+    {
+        var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { void M() { addHandlerUseHere(a, handler: i => { var xs = values.Where(x => x != blocked).ToList(); use(xs); }); } }", true);
+        Assert.Contains("[from values x where x != blocked select x]", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(result.Diagnostics, x => x.Reason.Contains("Unsupported C# call: Where", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void UnsupportedLinqIsNeverEmittedAsExecutableSeg()
     {
         var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { void M() { addHandlerUseHere(a, handler: i => { var n = values.Count(x => x > 0); }); } }");

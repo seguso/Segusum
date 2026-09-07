@@ -87,6 +87,7 @@ public static class DslParser
         private readonly int[] lineStarts;
         private int position;
         private bool parsingCallArgument;
+        private bool parsingListComprehensionClause;
         public Parser(IReadOnlyList<DslToken> tokens, List<DslDiagnostic> diagnostics, string sourceText, DslParserProfile profile)
         {
             this.tokens = tokens; this.diagnostics = diagnostics; this.sourceText = sourceText; this.profile = profile;
@@ -409,7 +410,9 @@ public static class DslParser
         private bool CanStartArgument()
         {
             profile.Count("CanStartArgument");
-            return (Current.Kind is DslTokenKind.Identifier or DslTokenKind.Number or DslTokenKind.String or DslTokenKind.LParen or DslTokenKind.LBracket) && Current.Text is not ("and" or "or" or "if" or "then" or "else" or "elif" or "end" or "when" or "with" or "for" or "here");
+            return (Current.Kind is DslTokenKind.Identifier or DslTokenKind.Number or DslTokenKind.String or DslTokenKind.LParen or DslTokenKind.LBracket)
+                && Current.Text is not ("and" or "or" or "if" or "then" or "else" or "elif" or "end" or "when" or "with" or "for" or "here")
+                && (!parsingListComprehensionClause || Current.Text != "select");
         }
         private DslArgument ParseArgument()
         {
@@ -500,6 +503,7 @@ public static class DslParser
             {
                 profile.Count("list-literals");
                 Take(); SkipTerminators();
+                if (Is("from")) return ParseListComprehension(span);
                 var elements = new List<DslExpression>();
                 while (!Is("]") && Current.Kind != DslTokenKind.EndOfFile)
                 {
@@ -563,6 +567,26 @@ public static class DslParser
             var item = WordToken(); SkipTerminators(); Need("where");
             var predicate = Expression(); SkipTerminators(); Need("]");
             return new ExistsExpression(collection, item.Text, predicate, span) { ItemSpan = item.Span };
+        }
+        private ListComprehensionExpression ParseListComprehension(SourceSpan span)
+        {
+            Need("from");
+            var collection = ParseCollectionExpression();
+            var item = WordToken();
+            SkipTerminators(); Need("where");
+            var previousClause = parsingListComprehensionClause;
+            parsingListComprehensionClause = true;
+            DslExpression predicate;
+            DslExpression selector;
+            try
+            {
+                predicate = Expression();
+                SkipTerminators(); Need("select");
+                selector = Expression();
+            }
+            finally { parsingListComprehensionClause = previousClause; }
+            SkipTerminators(); Need("]");
+            return new ListComprehensionExpression(collection, item.Text, predicate, selector, span) { ItemSpan = item.Span };
         }
         private DslExpression ParseCollectionExpression()
         {

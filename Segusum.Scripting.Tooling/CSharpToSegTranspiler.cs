@@ -577,7 +577,12 @@ public static class CSharpToSegTranspiler
                     {
                         try
                         {
-                            if (v.Initializer?.Value is InvocationExpressionSyntax start && FindStartCycle(start) != null)
+                            if (v.Initializer?.Value is ObjectCreationExpressionSyntax creation
+                                && creation.Type.ToString() == "Cycle"
+                                && creation.ArgumentList.Arguments.Count == 0
+                                && creation.Initializer is null)
+                                sb.Append(indent).Append("var ").Append(v.Identifier.ValueText).AppendLine(" = new-cycle");
+                            else if (v.Initializer?.Value is InvocationExpressionSyntax start && FindStartCycle(start) != null)
                                 EmitCycle(start, v.Identifier.ValueText, sb, diagnostics, level, partial, contextRoot);
                             else if (v.Initializer != null) AppendFormattedExpression(sb, indent + "var " + v.Identifier.ValueText + " = ", v.Initializer.Value, level);
                             else
@@ -958,6 +963,7 @@ public static class CSharpToSegTranspiler
             PrefixUnaryExpressionSyntax x when x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.UnaryPlusExpression) => "+" + Expression(x.Operand),
             BinaryExpressionSyntax x when TryEmitRandomModulo(x, out var random) => random,
             BinaryExpressionSyntax x => Expression(x.Left) + " " + BinaryOperator(x.Kind()) + " " + Expression(x.Right),
+            InvocationExpressionSyntax x when TryEmitListComprehension(x, out var comprehension) => comprehension,
             MemberAccessExpressionSyntax x => Expression(x.Expression) + "." + x.Name.Identifier.ValueText,
             InvocationExpressionSyntax x => EmitCallExpression(x),
             CollectionExpressionSyntax x => "[" + string.Join(", ", x.Elements.Select(EmitCollectionElement)) + "]",
@@ -967,6 +973,27 @@ public static class CSharpToSegTranspiler
             ArgumentSyntax x => (x.NameColon is null ? "" : x.NameColon.Name.Identifier.ValueText + ": ") + Expression(x.Expression),
             _ => throw new InvalidOperationException("Unsupported C# expression: " + node.Kind())
         };
+    }
+
+    private static bool TryEmitListComprehension(InvocationExpressionSyntax invocation, out string result)
+    {
+        result = "";
+        InvocationExpressionSyntax source = invocation;
+        if (CallName(source) == "ToList" && source.ArgumentList.Arguments.Count == 0
+            && source.Expression is MemberAccessExpressionSyntax toListMember
+            && toListMember.Expression is InvocationExpressionSyntax nested)
+            source = nested;
+
+        if (CallName(source) != "Where" || source.ArgumentList.Arguments.Count != 1
+            || source.Expression is not MemberAccessExpressionSyntax whereMember
+            || whereMember.Expression is not ExpressionSyntax collection
+            || source.ArgumentList.Arguments[0].Expression is not SimpleLambdaExpressionSyntax predicateLambda
+            || predicateLambda.Body is not ExpressionSyntax predicate)
+            return false;
+
+        var item = predicateLambda.Parameter.Identifier.ValueText;
+        result = "[from " + Expression(collection) + " " + item + " where " + Expression(predicate) + " select " + item + "]";
+        return true;
     }
 
     private static void AppendFormattedExpression(StringBuilder sb, string prefix, ExpressionSyntax expression, int level, bool appendNewline = true)
