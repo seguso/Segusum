@@ -267,8 +267,8 @@ public static class SegOwnership
         var lineStart = LineStart(text, position);
         while (lineStart > 0)
         {
-            var previousEnd = lineStart;
             var previousStart = LineStart(text, lineStart - 1);
+            var previousEnd = LineEnd(text, previousStart);
             if (!IsBlankLine(text, previousStart, previousEnd))
                 return IncludeLineBreak(text, previousEnd);
             lineStart = previousStart;
