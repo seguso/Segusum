@@ -6,6 +6,7 @@ if (args.Length == 0 || args[0] is "--help" or "-h")
     Console.WriteLine("segusum migrate-csharp <file.cs> --world WORLD [--output FILE] [--audit] [--emit-partial] [--method NAME] [--context-root DIR] [--dry-run]");
     Console.WriteLine("segusum audit-ownership <file.seg> --runtime-root DIR --history FILE [--apply]");
     Console.WriteLine("segusum parse-seg <file.seg>");
+    Console.WriteLine("segusum merge-seg <base.seg> <addition.seg>... --output FILE");
     return 0;
 }
 if (string.Equals(args[0], "parse-seg", StringComparison.OrdinalIgnoreCase))
@@ -22,6 +23,24 @@ if (string.Equals(args[0], "parse-seg", StringComparison.OrdinalIgnoreCase))
     Console.WriteLine($"managed-memory: {GC.GetTotalMemory(false)}");
     foreach (var diagnostic in parsed.Diagnostics) Console.WriteLine($"{diagnostic.Id}: {diagnostic.Span.Line}:{diagnostic.Span.Column}: {diagnostic.Message}");
     return parsed.Diagnostics.Count == 0 ? 0 : 1;
+}
+if (string.Equals(args[0], "merge-seg", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 4) { Console.Error.WriteLine("Usage: merge-seg <base.seg> <addition.seg>... --output FILE"); return 2; }
+    var basePath = Path.GetFullPath(args[1]); string? mergeOutput = null; var additions = new List<(string Path, string Text)>();
+    for (var i = 2; i < args.Length; i++)
+    {
+        if (args[i] == "--output") { mergeOutput = Path.GetFullPath(args[++i]); continue; }
+        var path = Path.GetFullPath(args[i]); additions.Add((path, File.ReadAllText(path)));
+    }
+    if (mergeOutput == null || additions.Count == 0) { Console.Error.WriteLine("Usage: merge-seg <base.seg> <addition.seg>... --output FILE"); return 2; }
+    var merged = SegDocumentMerger.Merge(basePath, File.ReadAllText(basePath), additions);
+    foreach (var diagnostic in merged.Diagnostics) Console.Error.WriteLine(diagnostic);
+    if (!merged.Succeeded) return 1;
+    Directory.CreateDirectory(Path.GetDirectoryName(mergeOutput)!);
+    File.WriteAllText(mergeOutput, merged.Text);
+    Console.WriteLine($"merged: {mergeOutput}");
+    return 0;
 }
 if (string.Equals(args[0], "audit-ownership", StringComparison.OrdinalIgnoreCase))
 {

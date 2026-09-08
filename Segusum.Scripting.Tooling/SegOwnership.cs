@@ -55,7 +55,7 @@ public static class SegOwnership
         foreach (var declaration in parsed.Document.Declarations)
             WalkDeclaration(declaration, ownedCycles, ownedScenes, referenced);
 
-        var runtimeFiles = runtimeCSharpFiles.Where(File.Exists).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var runtimeFiles = runtimeCSharpFiles.Where(File.Exists).Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         var declarations = runtimeFiles
             .Where(File.Exists)
             .SelectMany(ReadRuntimeDeclarations)
@@ -103,7 +103,18 @@ public static class SegOwnership
             var historicalMatches = historicalMethods.Where(x => MethodMatches(segMethod, x)).ToArray();
             if (historicalMatches.Length == 0)
             {
-                methodsWithoutMatch.Add(MethodDisplay(segMethod));
+                // A generated def may be reachable from a helper source file
+                // while its implementation lives in another active partial
+                // file.  The exact Roslyn-shaped signature in the active
+                // runtime is sufficient ownership evidence in that case.
+                var activeOnlyMatches = runtimeMethods.Where(x => MethodMatches(segMethod, x)).ToArray();
+                if (activeOnlyMatches.Length == 1) methodsToRemove.Add(activeOnlyMatches[0]);
+                else if (activeOnlyMatches.Length > 1)
+                {
+                    ambiguousMethods.AddRange(activeOnlyMatches);
+                    ambiguities.Add($"SEG method '{MethodDisplay(segMethod)}' matches multiple active runtime methods: {string.Join(", ", activeOnlyMatches.Select(x => x.Path))}");
+                }
+                else methodsWithoutMatch.Add(MethodDisplay(segMethod));
                 continue;
             }
             if (historicalMatches.Length > 1)
@@ -123,6 +134,10 @@ public static class SegOwnership
             }
         }
         AddOwnedSpecialHandlerMethods(parsed.Document.Declarations, historicalMethods, runtimeMethods, methodsToRemove, ambiguities);
+        methodsToRemove = methodsToRemove
+            .GroupBy(x => x.Path + "|" + MethodKey(x), StringComparer.OrdinalIgnoreCase)
+            .Select(x => x.First())
+            .ToList();
         var referencedMethods = FindActiveCSharpReferences(runtimeFiles, methodsToRemove);
         // A semantic SEG definition owns the exact matching legacy method even
         // when active C# callers still reference it.  The source generator adds
@@ -217,6 +232,32 @@ public static class SegOwnership
 
         if (leadingComments.Length != 0)
             start = LineStart(text, leadingComments.Min(x => x.SpanStart));
+        // Roslyn may attach documentation trivia to the containing member
+        // list rather than the method node. Recover only the immediately
+        // adjacent documentation block; unrelated history comments remain
+        // outside the removal span.
+        var cursor = LineStart(text, node.Span.Start);
+        while (cursor > 0)
+        {
+            var previousEnd = cursor;
+            var previousStart = LineStart(text, previousEnd - 1);
+            var line = text[previousStart..previousEnd].Trim();
+            if (line.Length == 0)
+            {
+                cursor = previousStart;
+                continue;
+            }
+            if (line.StartsWith("///", StringComparison.Ordinal)
+                || line.StartsWith("/**", StringComparison.Ordinal)
+                || line.StartsWith("*", StringComparison.Ordinal)
+                || line.StartsWith("*/", StringComparison.Ordinal))
+            {
+                start = Math.Min(start, previousStart);
+                cursor = previousStart;
+                continue;
+            }
+            break;
+        }
 
         var end = node.Span.End;
         var nodeLineStart = LineStart(text, node.Span.Start);
@@ -224,6 +265,7 @@ public static class SegOwnership
         if (string.IsNullOrWhiteSpace(text.Substring(nodeLineStart, node.Span.Start - nodeLineStart))
             && string.IsNullOrWhiteSpace(text.Substring(node.Span.End, nodeLineEnd - node.Span.End)))
         {
+            start = Math.Min(start, nodeLineStart);
             end = IncludeLineBreak(text, nodeLineEnd);
         }
 
