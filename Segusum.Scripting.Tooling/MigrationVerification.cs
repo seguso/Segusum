@@ -888,7 +888,8 @@ public static class MigrationVerifier
                 case VariableDeclaration variable: effects.Add("assign:" + variable.Name + "=" + CanonicalDslExpression(variable.Initializer)); break;
                 case IncrementStatement increment: effects.Add("increment:" + increment.Name); break;
                 case AssignmentStatement assignment:
-                    effects.Add("assign:" + (assignment.Receiver is null ? assignment.Name : CanonicalDslExpression(assignment.Receiver) + "." + assignment.MemberName) + assignment.Operator + CanonicalDslExpression(assignment.Value)); break;
+                    if (assignment.MemberName == "makesNoSenseAtThisTime" && assignment.Operator == "=" && assignment.Value is LiteralExpression { Kind: "bool", Value: "true" }) effects.Add("makes-no-sense");
+                    else effects.Add("assign:" + (assignment.Receiver is null ? assignment.Name : CanonicalDslExpression(assignment.Receiver) + "." + assignment.MemberName) + assignment.Operator + CanonicalDslExpression(assignment.Value)); break;
                 case DialogueStatement dialogue: effects.Add("dialogue:" + dialogue.Character + ":" + LiteralDslText(dialogue.Text)); break;
                 case NarStatement nar: effects.Add("narration-call:narText(s=" + QuoteCanonicalString(LiteralDslText(nar.Text)) + ")"); break;
                 case NarRoomStatement narRoom: effects.Add("narration-call:narRoom(s=" + QuoteCanonicalString(LiteralDslText(narRoom.Text)) + ")"); break;

@@ -1328,6 +1328,51 @@ public NamedCutSceneId ncsMikeStalloneIlBenefattore = null!;
     }
 
     [Fact]
+    public void HandlerInputCanBePassedToTypedDefAndWrittenThroughNormalPropertyAccess()
+    {
+        var result = Run("use thing for objective:\n    helper e\nend\ndef helper e: HandlerInput:\n    e.makesNoSenseAtThisTime = true\nend", "public LogicObj thing = null!; public Objective objective = null!;");
+
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL", StringComparison.Ordinal));
+        var generated = Generated(result);
+        Assert.Contains("helper(e);", generated, StringComparison.Ordinal);
+        Assert.Contains("private void helper(HandlerInput e)", generated, StringComparison.Ordinal);
+        Assert.True(generated.Contains("e.makesNoSenseAtThisTime=true;", StringComparison.Ordinal), $"Generated:\n{generated}");
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
+    public void TypedDefSupportsHandlerInputReadAndMultipleTypedParameters()
+    {
+        var result = Run("use thing for objective:\n    helper e 3\nend\ndef helper e: HandlerInput n: int ret bool:\n    var visible = e.makesNoSenseAtThisTime\n    ret visible == true and n == 3\nend", "public LogicObj thing = null!; public Objective objective = null!;");
+
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL", StringComparison.Ordinal));
+        var generated = Generated(result);
+        Assert.Contains("private bool helper(HandlerInput e,int n)", generated, StringComparison.Ordinal);
+        Assert.Contains("var visible = e.makesNoSenseAtThisTime;", generated, StringComparison.Ordinal);
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
+    public void TypedDefReportsAnUnresolvedParameterType()
+    {
+        var result = Run("def helper e: MissingHandlerInput:\n    ret e\nend", "public LogicObj thing = null!;");
+
+        Assert.Contains(result.Diagnostics, d => d.Id.StartsWith("SEGDSL", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void MakesNoSensePropertyAssignmentRemainsDistinctFromFalseAssignment()
+    {
+        var result = Run("use thing here:\n    e.makesNoSenseAtThisTime = true\n    e.makesNoSenseAtThisTime = false\nend", "public LogicObj thing = null!;");
+
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL", StringComparison.Ordinal));
+        var generated = Generated(result);
+        Assert.True(generated.Contains("e.makesNoSenseAtThisTime=true;", StringComparison.Ordinal), $"Generated:\n{generated}");
+        Assert.Contains("e.makesNoSenseAtThisTime=false;", generated, StringComparison.Ordinal);
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
     public void SubmitTextInputBindsEAsTextHandlerInputAndPreservesLocalScope()
     {
         var result = Run("submit-text-input tiTest:\n    var x = e.chosenText\n    var spl = splitAndTrim x\n    if exists [from spl word where word.Contains \"x\"]:\n        solve\n    end\nend", "public TextInput tiTest = null!; public void solve() { } private static System.Collections.Generic.List<string> splitAndTrim(string value) => new();");

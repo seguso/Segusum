@@ -279,6 +279,20 @@ public sealed class MigrationVerificationTests
     }
 
     [Fact]
+    public void HandlerInputPropertyAssignmentCanonicalizesWithLegacyMakesNoSenseButFalseDiffers()
+    {
+        const string csharp = "class W { void C() { addHandlerUseHere(a, handler: e => { e.makesNoSenseAtThisTime = true; }); } }";
+        const string equivalentDsl = "world game\nuse a here:\n    e.makesNoSenseAtThisTime = true\nend\n";
+        const string legacyDsl = "world game\nuse a here:\n    makes-no-sense\nend\n";
+
+        Assert.Equal(EquivalenceStatus.Pass, SingleRegistration(csharp, equivalentDsl).Overall);
+        Assert.Equal(EquivalenceStatus.Pass, SingleRegistration(csharp, legacyDsl).Overall);
+
+        const string falseDsl = "world game\nuse a here:\n    e.makesNoSenseAtThisTime = false\nend\n";
+        Assert.NotEqual(EquivalenceStatus.Pass, SingleRegistration(csharp, falseDsl).Overall);
+    }
+
+    [Fact]
     public void HandlerRegistrationReportsMetadataAndExplanationChanges()
     {
         const string csharp = "class W { void C() { addHandlerCombine(a, b, \"say\", isPossibleNow: () => A && B, handler: i => { }); addHandlerUseFor(item, objective, explanation, handler: e => { }); } }";

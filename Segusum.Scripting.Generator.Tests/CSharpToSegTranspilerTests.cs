@@ -28,6 +28,16 @@ public sealed class CSharpToSegTranspilerTests
     }
 
     [Fact]
+    public void MakesNoSenseIsEmittedAsOrdinaryHandlerInputPropertyAssignment()
+    {
+        var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { void M() { addHandlerUseHere(a, handler: e => { e.makesNoSenseAtThisTime = true; }); } } ");
+
+        Assert.Contains("e.makesNoSenseAtThisTime = true", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("makes-no-sense", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(result.Diagnostics, x => x.Status == MigrationUnitStatus.Unsupported);
+    }
+
+    [Fact]
     public void AnyPredicateUsesExistingExistsQuerySyntax()
     {
         var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { void M() { addHandlerUseHere(a, handler: i => { if (values.Any(x => x.notSeenRecently(30))) { foo(); } }); } }");

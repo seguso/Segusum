@@ -700,7 +700,6 @@ public static class CSharpToSegTranspiler
                     sb.Append(indent).AppendLine("end"); break;
                 case ExpressionStatementSyntax x when x.Expression is AssignmentExpressionSyntax a:
                     if (a.Right is InvocationExpressionSyntax add && CallName(add) == "addToCycle") EmitCycleChain(add, sb, diagnostics, level, partial, true, contextRoot);
-                    else if (a.Left.ToString().EndsWith("makesNoSenseAtThisTime", StringComparison.Ordinal) && a.Right.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.TrueLiteralExpression)) sb.Append(indent).AppendLine("makes-no-sense");
                     else if (a.Left.ToString().EndsWith("textInputToShow", StringComparison.Ordinal)) sb.Append(indent).Append("text-input ").AppendLine(Expression(a.Right));
                     else AppendFormattedExpression(sb, indent + Expression(a.Left) + " " + a.OperatorToken.Text + " ", a.Right, level); break;
                 case ExpressionStatementSyntax x when x.Expression is InvocationExpressionSyntax i:

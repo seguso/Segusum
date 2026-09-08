@@ -366,6 +366,8 @@ public static class GameplayMigrationVerifier
 
     private static IReadOnlyList<MigrationEffect> DslAssignmentEffects(AssignmentStatement assignment, string path, int line)
     {
+        if (assignment.MemberName == "makesNoSenseAtThisTime" && assignment.Operator == "=" && assignment.Value is LiteralExpression { Kind: "bool", Value: "true" })
+            return new[] { new MigrationEffect("makes-no-sense", "", path, line) };
         var receiver = assignment.Receiver is null ? assignment.Name : CanonicalDsl(assignment.Receiver) + "." + assignment.MemberName;
         var effects = new List<MigrationEffect> { new("assign", receiver + assignment.Operator + CanonicalDsl(assignment.Value), path, line) };
         if (assignment.Value is CallExpression call) effects.AddRange(DslCallEffect(call, path, line));
