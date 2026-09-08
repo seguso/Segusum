@@ -559,6 +559,48 @@ public sealed class MigrationVerificationTests
     }
 
     [Fact]
+    public void BeforeRoomChangeFingerprintTreatsStatementIncrementsAsEquivalentButKeepsTargetsDistinct()
+    {
+        const string csharpPostfix = "class W { void beforeRoomChangeManual(Room from, Room to, WalkPath segment, WalkPath path, BeforeRoomChangeInput e) { x++; } int x; }";
+        const string csharpPrefix = "class W { void beforeRoomChangeManual(Room from, Room to, WalkPath segment, WalkPath path, BeforeRoomChangeInput e) { ++x; } int x; }";
+        const string dsl = "world game\nbefore-room-change:\n    x++\nend\n";
+
+        var right = Assert.Single(MigrationVerifier.ExtractDslBeforeRoomChange(new DslSource("before.seg", dsl)));
+        Assert.Equal(EquivalenceStatus.Pass, MigrationVerifier.CompareBeforeRoomChange(
+            Assert.Single(MigrationVerifier.ExtractCSharpBeforeRoomChange("postfix.cs", csharpPostfix)), right).Status);
+        Assert.Equal(EquivalenceStatus.Pass, MigrationVerifier.CompareBeforeRoomChange(
+            Assert.Single(MigrationVerifier.ExtractCSharpBeforeRoomChange("prefix.cs", csharpPrefix)), right).Status);
+
+        const string different = "world game\nbefore-room-change:\n    y++\nend\n";
+        Assert.Equal(EquivalenceStatus.Fail, MigrationVerifier.CompareBeforeRoomChange(
+            Assert.Single(MigrationVerifier.ExtractCSharpBeforeRoomChange("postfix.cs", csharpPostfix)),
+            Assert.Single(MigrationVerifier.ExtractDslBeforeRoomChange(new DslSource("different.seg", different)))).Status);
+    }
+
+    [Fact]
+    public void OperationFingerprintKeepsIncrementTargetsDistinctIncludingMembers()
+    {
+        var (model, methods) = CompileMethods("class Obj { public int Count; } class C { Obj a = new(); Obj b = new(); void A() { a.Count++; } void B() { b.Count++; } }");
+        Assert.Equal(EquivalenceStatus.Fail, MigrationVerifier.CompareOperations(
+            model.GetOperation(methods.Single(x => x.Identifier.ValueText == "A").Body!),
+            model.GetOperation(methods.Single(x => x.Identifier.ValueText == "B").Body!)).Status);
+    }
+
+    [Fact]
+    public void BeforeRoomChangeFingerprintPreservesWhitespaceQuotesEscapesAndTranslations()
+    {
+        const string csharp = "class W { void beforeRoomChangeManual(Room from, Room to, WalkPath segment, WalkPath path, BeforeRoomChangeInput e) { dial(olivia, \"  leading and trailing  \\\"quote\\\" [[translation]]  \" ); } }";
+        const string dsl = "world game\nbefore-room-change:\n    olivia: \"  leading and trailing  \\\"quote\\\" [[translation]]  \"\nend\n";
+        var left = Assert.Single(MigrationVerifier.ExtractCSharpBeforeRoomChange("before.cs", csharp));
+        var right = Assert.Single(MigrationVerifier.ExtractDslBeforeRoomChange(new DslSource("before.seg", dsl)));
+        Assert.Equal(EquivalenceStatus.Pass, MigrationVerifier.CompareBeforeRoomChange(left, right).Status);
+
+        const string changed = "world game\nbefore-room-change:\n    olivia: \" leading and trailing  \\\"quote\\\" [[translation]]  \"\nend\n";
+        Assert.Equal(EquivalenceStatus.Fail, MigrationVerifier.CompareBeforeRoomChange(left,
+            Assert.Single(MigrationVerifier.ExtractDslBeforeRoomChange(new DslSource("changed.seg", changed)))).Status);
+    }
+
+    [Fact]
     public void NarrativeCallFingerprintIncludesAllNarRoomAndNarImgArguments()
     {
         const string csharp = "class W { void beforeRoomChangeManual(Room from, Room to, WalkPath segment, WalkPath path, BeforeRoomChangeInput e) { narRoom(\"Room text\", roomA, false, true); narImg(\"Image text\", \"img/a.png\", NarSize.Medium, false, true); } }";

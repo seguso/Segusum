@@ -740,6 +740,10 @@ public static class MigrationVerifier
                     && prefix.OperatorToken.IsKind(SyntaxKind.PlusPlusToken):
                     effects.Add("increment:" + prefix.Operand.ToString());
                     break;
+                case ExpressionStatementSyntax expression when expression.Expression is PostfixUnaryExpressionSyntax postfix
+                    && postfix.OperatorToken.IsKind(SyntaxKind.PlusPlusToken):
+                    effects.Add("increment:" + postfix.Operand.ToString());
+                    break;
                 case ExpressionStatementSyntax expression when expression.Expression is InvocationExpressionSyntax invocation:
                     if (InvocationName(invocation) == "addToCycle")
                         AddCSharpCycleElementEffects(invocation, effects);
@@ -1166,6 +1170,14 @@ public static class MigrationVerifier
                 case ExpressionStatementSyntax expression when expression.Expression is AssignmentExpressionSyntax assignment:
                     operations.Add("assign:" + CanonicalCSharpExpression(assignment.Left + assignment.OperatorToken.Text + assignment.Right));
                     break;
+                case ExpressionStatementSyntax expression when expression.Expression is PostfixUnaryExpressionSyntax postfix
+                    && postfix.OperatorToken.IsKind(SyntaxKind.PlusPlusToken):
+                    operations.Add("increment:" + postfix.Operand.ToString());
+                    break;
+                case ExpressionStatementSyntax expression when expression.Expression is PrefixUnaryExpressionSyntax prefix
+                    && prefix.OperatorToken.IsKind(SyntaxKind.PlusPlusToken):
+                    operations.Add("increment:" + prefix.Operand.ToString());
+                    break;
                 case BlockSyntax block:
                     CollectCSharpBeforeRoomChange(block.Statements, operations, strings);
                     break;
@@ -1299,13 +1311,13 @@ public static class MigrationVerifier
         => expression == null ? null : CSharpSyntaxTree.ParseText(expression).GetRoot().DescendantNodes().OfType<LiteralExpressionSyntax>().FirstOrDefault(x => x.IsKind(SyntaxKind.StringLiteralExpression))?.Token.ValueText ?? expression;
 
     private static string? StringValue(DslExpression? expression) => expression is LiteralExpression literal && literal.Kind is "string" or "raw-string"
-        ? literal.Value.Trim('"') : expression == null ? null : ExpressionText(expression);
+        ? DslLiteralSemantics.Decode(literal) : expression == null ? null : ExpressionText(expression);
 
     private static string? ExpressionText(DslExpression? expression) => expression switch
     {
         null => null,
         IdentifierExpression id => id.Name,
-        LiteralExpression literal => literal.Kind is "string" or "raw-string" ? literal.Value.Trim('"') : literal.Value,
+        LiteralExpression literal => literal.Kind is "string" or "raw-string" ? DslLiteralSemantics.Decode(literal) : literal.Value,
         UnaryExpression unary => unary.Operator + ExpressionText(unary.Operand),
         BinaryExpression binary => ExpressionText(binary.Left) + " " + binary.Operator + " " + ExpressionText(binary.Right),
         ExistsExpression exists => "exists[from " + ExpressionText(exists.Collection) + " " + exists.ItemName + " where " + ExpressionText(exists.Predicate) + "]",
@@ -1439,7 +1451,7 @@ public static class MigrationVerifier
             case IBinaryOperation binary: result.Add("binary:" + binary.OperatorKind); break;
             case ICompoundAssignmentOperation compound: result.Add("compound-assign:" + compound.OperatorKind); break;
             case IIncrementOrDecrementOperation increment:
-                result.Add("increment:" + (increment.Kind == OperationKind.Increment ? "increment" : "decrement") + ":" + (increment.IsPostfix ? "postfix" : "prefix"));
+                result.Add("increment:" + ReferencedSymbol(increment.Target) + ":" + (increment.Kind == OperationKind.Increment ? "increment" : "decrement") + ":" + (increment.IsPostfix ? "postfix" : "prefix"));
                 break;
             case ISimpleAssignmentOperation assignment:
                 result.Add("assign-target:" + ReferencedSymbol(assignment.Target));

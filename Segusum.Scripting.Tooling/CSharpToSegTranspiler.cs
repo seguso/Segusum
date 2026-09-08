@@ -1437,7 +1437,8 @@ public static class CSharpToSegTranspiler
         // Raw SEG narrative lines trim layout whitespace.  Quote only when
         // leading/trailing content whitespace is part of the C# literal; the
         // literal value itself remains unchanged.
-        return value.Length != value.Trim().Length ? EmitLiteral(literal) : value;
+        return value.Length != value.Trim().Length || value.Contains('"') || value.Contains('\\') || value.Contains('\n') || value.Contains('\r')
+            ? EmitLiteral(literal) : value;
     }
     private static string Arg(SeparatedSyntaxList<ArgumentSyntax> args, int index) => index >= 0 && index < args.Count ? Expression(args[index].Expression) : "";
 
