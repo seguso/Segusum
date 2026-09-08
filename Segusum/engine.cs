@@ -4085,7 +4085,7 @@ namespace Seg
 
 
 
-                    w.beforeRoomChangeManual(curStartLoc, curEndLoc, curSegment, completePath: path, i: i); // puo' annullare il cambio di room
+                    w.invokeBeforeRoomChange(curStartLoc, curEndLoc, curSegment, completePath: path, i: i); // puo' annullare il cambio di room
 
 
                     if (i.canChangeRoom)

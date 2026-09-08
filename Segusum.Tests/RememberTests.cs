@@ -60,6 +60,44 @@ public sealed class RememberTests
         Assert.Equal(at, action.dateTime);
     }
 
+    [Fact]
+    public void BeforeRoomChangeGeneratedHookTakesOwnershipWithoutDoubleInvocation()
+    {
+        var world = new RememberWorld();
+        var from = world.Room;
+        var to = new Room { roomId = "to" };
+        var segment = new WalkPath { locations = new[] { from, to }.ToList() };
+        var completePath = new WalkPath { locations = new[] { from, to, world.Room }.ToList() };
+        var input = new BeforeRoomChangeInput();
+
+        world.GeneratedBeforeRoomChange = true;
+        world.RunBeforeRoomChange(from, to, segment, completePath, input);
+
+        Assert.Equal(0, world.ManualBeforeRoomChangeCalls);
+        Assert.Equal(1, world.GeneratedBeforeRoomChangeCalls);
+        Assert.Same(from, world.LastGeneratedFrom);
+        Assert.Same(to, world.LastGeneratedTo);
+        Assert.Same(segment, world.LastGeneratedSegment);
+        Assert.Same(completePath, world.LastGeneratedFullPath);
+        Assert.Same(input, world.LastGeneratedInput);
+        Assert.False(input.canChangeRoom);
+    }
+
+    [Fact]
+    public void BeforeRoomChangeWithoutGeneratedDeclarationUsesLegacyOverride()
+    {
+        var world = new RememberWorld();
+        var room = world.Room;
+        var path = new WalkPath { locations = new[] { room }.ToList() };
+        var input = new BeforeRoomChangeInput();
+
+        world.RunBeforeRoomChange(room, room, path, path, input);
+
+        Assert.Equal(1, world.ManualBeforeRoomChangeCalls);
+        Assert.Equal(0, world.GeneratedBeforeRoomChangeCalls);
+        Assert.True(input.canChangeRoom);
+    }
+
     private sealed class RememberWorld : WorldBase
     {
         private readonly Character active = new() { loId = "active", name = "active" };
@@ -78,10 +116,21 @@ public sealed class RememberTests
 
         internal LogicObj Object => objectToRemember;
         internal Character Character => characterToRemember;
+        internal Room Room => room;
+        internal bool GeneratedBeforeRoomChange { get; set; }
+        internal int ManualBeforeRoomChangeCalls { get; private set; }
+        internal int GeneratedBeforeRoomChangeCalls { get; private set; }
+        internal Room? LastGeneratedFrom { get; private set; }
+        internal Room? LastGeneratedTo { get; private set; }
+        internal WalkPath? LastGeneratedSegment { get; private set; }
+        internal WalkPath? LastGeneratedFullPath { get; private set; }
+        internal BeforeRoomChangeInput? LastGeneratedInput { get; private set; }
         internal bool CanRemember(LogicObj lo) => canBeRemembered(lo);
         internal List<NamedCutScene> RememberingScenes(LogicObj lo) => namedCutScenesRemembering(lo);
         internal IReadOnlyList<PastAction> PastActions => pastActions;
         internal void AddPastAction(PastAction action) => pastActions.Add(action);
+        internal void RunBeforeRoomChange(Room from, Room to, WalkPath segment, WalkPath fullPath, BeforeRoomChangeInput input)
+            => invokeBeforeRoomChange(from, to, segment, fullPath, input);
 
         internal NamedCutScene AddScene(string id, LogicObj mentioned)
         {
@@ -108,7 +157,18 @@ public sealed class RememberTests
         public override string dynamicRoomName(Room ro) => ro.roomId;
         public override void startGameCutScene() { }
         public override void beforeWalkPathResetVariables() { }
-        public override void beforeRoomChangeManual(Room from, Room to, WalkPath pathFromTo, WalkPath completePath, BeforeRoomChangeInput i) { }
+        protected override bool hasGeneratedBeforeRoomChange => GeneratedBeforeRoomChange;
+        protected override void beforeRoomChangeGenerated(Room from, Room to, WalkPath pathFromTo, WalkPath completePath, BeforeRoomChangeInput i)
+        {
+            GeneratedBeforeRoomChangeCalls++;
+            LastGeneratedFrom = from;
+            LastGeneratedTo = to;
+            LastGeneratedSegment = pathFromTo;
+            LastGeneratedFullPath = completePath;
+            LastGeneratedInput = i;
+            i.canChangeRoom = false;
+        }
+        public override void beforeRoomChangeManual(Room from, Room to, WalkPath pathFromTo, WalkPath completePath, BeforeRoomChangeInput i) => ManualBeforeRoomChangeCalls++;
         public override void beforeRoomChangeManualAndAutoSetRoomAspects(Room roomTarget) { }
         public override void beforeExecuteDialogSetAspects() { }
         public override bool rebuildXmlToTranslateObjects(out string lang) { lang = ""; return false; }

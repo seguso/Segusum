@@ -212,7 +212,7 @@ namespace Seg
 
             var curSegment = new WalkPath { locations = new[] { curRoom, roomTarget }.ToList() };
 
-            beforeRoomChangeManual(curRoom, roomTarget, curSegment, curSegment, i); // puo' annullare il cambio di room
+            invokeBeforeRoomChange(curRoom, roomTarget, curSegment, curSegment, i); // puo' annullare il cambio di room
 
 
             if (i.canChangeRoom)
@@ -236,7 +236,22 @@ namespace Seg
 
         public abstract void beforeWalkPathResetVariables();
 
-        public abstract void beforeRoomChangeManual(Room from, Room to, WalkPath pathFromTo, WalkPath completePath, BeforeRoomChangeInput i);
+        // During migration, a generated SEG hook takes ownership of this
+        // lifecycle callback when present.  Without one, the legacy override
+        // remains the compatibility path.
+        protected virtual bool hasGeneratedBeforeRoomChange => false;
+
+        protected virtual void beforeRoomChangeGenerated(Room from, Room to, WalkPath pathFromTo, WalkPath completePath, BeforeRoomChangeInput i) { }
+
+        internal void invokeBeforeRoomChange(Room from, Room to, WalkPath pathFromTo, WalkPath completePath, BeforeRoomChangeInput i)
+        {
+            if (hasGeneratedBeforeRoomChange)
+                beforeRoomChangeGenerated(from, to, pathFromTo, completePath, i);
+            else
+                beforeRoomChangeManual(from, to, pathFromTo, completePath, i);
+        }
+
+        public virtual void beforeRoomChangeManual(Room from, Room to, WalkPath pathFromTo, WalkPath completePath, BeforeRoomChangeInput i) { }
 
         /// <summary>
         /// needed to set the character aspects in the location

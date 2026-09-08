@@ -574,12 +574,13 @@ public sealed class GeneratorTests
     }
 
     [Fact]
-    public void BeforeRoomChangeBindsContextAndEmitsPrivateBridge()
+    public void BeforeRoomChangeBindsContextAndEmitsRuntimeHookOverride()
     {
         var result = Run("before-room-change:\n if from == roomA and to == roomB:\n  prevent-room-change\n end\nend", "public Room roomA = null!; public Room roomB = null!;");
         Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL"));
         var generated = Generated(result);
-        Assert.Contains("private void beforeRoomChangeSegusum(Room from, Room to, WalkPath fromToSegment, WalkPath fullPath, BeforeRoomChangeInput e)", generated);
+        Assert.Contains("protected override bool hasGeneratedBeforeRoomChange => true;", generated);
+        Assert.Contains("protected override void beforeRoomChangeGenerated(Room from, Room to, WalkPath fromToSegment, WalkPath fullPath, BeforeRoomChangeInput e)", generated);
         Assert.Contains("if (from == roomA && to == roomB)", generated);
         Assert.Contains("e.canChangeRoom = false;", generated);
         Assert.DoesNotContain("foreach", generated, StringComparison.Ordinal);

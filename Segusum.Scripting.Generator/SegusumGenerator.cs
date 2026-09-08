@@ -103,7 +103,8 @@ public sealed class SegusumGenerator : IIncrementalGenerator
     private static void EmitBeforeRoomChange(StringBuilder sb, BeforeRoomChangeDeclaration declaration, BoundModel model)
     {
         EmitLine(sb, declaration.Span);
-        sb.AppendLine(" private void beforeRoomChangeSegusum(Room from, Room to, WalkPath fromToSegment, WalkPath fullPath, BeforeRoomChangeInput e)");
+        sb.AppendLine(" protected override bool hasGeneratedBeforeRoomChange => true;");
+        sb.AppendLine(" protected override void beforeRoomChangeGenerated(Room from, Room to, WalkPath fromToSegment, WalkPath fullPath, BeforeRoomChangeInput e)");
         sb.AppendLine(" {"); EmitDefaultLine(sb);
         foreach (var statement in declaration.Body) EmitStatement(sb, statement, "  ", "e", model);
         sb.AppendLine(" #line hidden\n }"); EmitDefaultLine(sb);
