@@ -748,6 +748,17 @@ public static class MigrationVerifier
         {
             switch (statement)
             {
+                case LocalFunctionStatementSyntax:
+                    // A local function is emitted and verified as its own reachable
+                    // SEG def. Its declaration/body is not an effect executed while
+                    // the containing lifecycle runs.
+                    break;
+                case BlockSyntax nestedBlock:
+                    // Be defensive for syntax wrappers produced by nested C# forms;
+                    // preserve the contained execution order without fingerprinting
+                    // the wrapper itself as an effect.
+                    CollectCSharpHandlerEffects(nestedBlock.Statements, effects);
+                    break;
                 case IfStatementSyntax conditional:
                     CollectCSharpConditionalChain(conditional, effects, true);
                     break;
@@ -1015,6 +1026,13 @@ public static class MigrationVerifier
         ObjectCreationExpressionSyntax creation when creation.Type is GenericNameSyntax generic && generic.Identifier.ValueText is "List" or "IEnumerable" && creation.ArgumentList?.Arguments.Count == 0 && creation.Initializer is null => "[]",
         ImplicitArrayCreationExpressionSyntax array => "[" + string.Join(",", array.Initializer.Expressions.Select(CanonicalCSharpSyntax)) + "]",
         ArrayCreationExpressionSyntax array when array.Initializer is not null => "[" + string.Join(",", array.Initializer.Expressions.Select(CanonicalCSharpSyntax)) + "]",
+        InvocationExpressionSyntax call when call.Expression is MemberAccessExpressionSyntax member
+            && member.Name.Identifier.ValueText == "Where"
+            && call.ArgumentList.Arguments.Count == 1
+            && call.ArgumentList.Arguments[0].Expression is SimpleLambdaExpressionSyntax lambda
+            => "[from " + CanonicalCSharpSyntax(member.Expression) + " " + lambda.Parameter.Identifier.ValueText
+                + " where " + (CanonicalCSharpExpression(lambda.Body.ToString()) ?? lambda.Body.ToString())
+                + " select " + lambda.Parameter.Identifier.ValueText + "]",
         InvocationExpressionSyntax call when call.Expression is MemberAccessExpressionSyntax member && member.Name.Identifier.ValueText == "ToArray" && call.ArgumentList.Arguments.Count == 0 => CanonicalCSharpSyntax(member.Expression),
         InvocationExpressionSyntax call => CanonicalCSharpSyntax(call.Expression) + "(" + string.Join(",", call.ArgumentList.Arguments.Select(x => CanonicalCSharpSyntax(x.Expression))) + ")",
         MemberAccessExpressionSyntax member => CanonicalCSharpSyntax(member.Expression) + "." + member.Name.Identifier.ValueText,

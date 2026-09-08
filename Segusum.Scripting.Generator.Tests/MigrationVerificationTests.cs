@@ -124,6 +124,17 @@ public sealed class MigrationVerificationTests
     }
 
     [Fact]
+    public void AfterActionExecutedVerifierCanonicalizesWhereAsListComprehension()
+    {
+        const string csharp = "class W { void after_action_executed(CutScene cs, ActionContext actionContext) { var selected = items.Where(x => x.Ready); } }";
+        const string dsl = "world game\nafter-action-executed:\n    var selected = [from items x where x.Ready select x]\nend\n";
+        var tree = CSharpSyntaxTree.ParseText(csharp, path: "after-action.cs");
+        var method = tree.GetRoot().DescendantNodes().OfType<MethodDeclarationSyntax>().Single();
+        var check = MigrationVerifier.CompareAfterActionExecuted(method, new DslSource("current.seg", dsl));
+        Assert.Equal(EquivalenceStatus.Pass, check.Status);
+    }
+
+    [Fact]
     public void GameplayVerifierReportsMissingBranchAndMissingSideEffect()
     {
         const string csharp = "class W { void M() { if (ready) { pickUp(obj); } else if (fallback) { changeRoom(room); } } }";

@@ -266,8 +266,7 @@ public sealed class CSharpToSegTranspilerTests
         var result = CSharpToSegTranspiler.Transpile("before-room.cs", source, true, "beforeRoomChangeManual");
 
         var unit = Assert.Single(result.Units, x => x.Id == "beforeRoomChangeManual");
-        Assert.True(unit.Status == MigrationUnitStatus.Translated,
-            $"{unit.Status}: {string.Join(" | ", unit.Diagnostics.Select(x => x.Reason))}");
+        Assert.Equal(MigrationUnitStatus.Translated, unit.Status);
         Assert.DoesNotContain(unit.Diagnostics, x => x.Reason.Contains("special handler round-trip", StringComparison.Ordinal));
     }
 
