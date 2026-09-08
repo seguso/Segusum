@@ -129,16 +129,23 @@ internal sealed class ToolingHost
             var newContext = await MsBuildWorkspaceContext.OpenProjectAsync(projectPath, cancellationToken).ConfigureAwait(false);
             context = newContext;
             var openMs = (initializeTimer.Elapsed - openStarted).TotalMilliseconds;
+            Console.Error.WriteLine($"initialize phase=msbuild-project-opened elapsed={initializeTimer.Elapsed.TotalMilliseconds:0}ms project={projectPath}");
             var generatedTrees = context.Compilation.SyntaxTrees
                 .Where(x => SegusumGeneratedSource.IsGenerated(x))
                 .Select(x => x.FilePath ?? "<generated>")
                 .ToArray();
             var mikeGenerated = context.Compilation.SyntaxTrees.Any(x => SegusumGeneratedSource.IsGenerated(x) && x.GetText().ToString().Contains("creaCicloMikeNonRipete", StringComparison.Ordinal));
+            var rebuildStarted = initializeTimer.Elapsed;
             await RebuildAsync(cancellationToken);
+            Console.Error.WriteLine($"initialize phase=seg-sources-rebuilt elapsed={initializeTimer.Elapsed.TotalMilliseconds:0}ms duration={(initializeTimer.Elapsed - rebuildStarted).TotalMilliseconds:0}ms sources={sources.Count}");
+            var worldIndexStarted = initializeTimer.Elapsed;
             BuildWorldIndex(context.Compilation);
+            Console.Error.WriteLine($"initialize phase=world-index-built elapsed={initializeTimer.Elapsed.TotalMilliseconds:0}ms duration={(initializeTimer.Elapsed - worldIndexStarted).TotalMilliseconds:0}ms worlds={worldsById.Count}");
             // Sources (including world directives) must be loaded before selecting the
             // default world; otherwise a multi-world project leaves this cache key null.
+            var findWorldStarted = initializeTimer.Elapsed;
             world = FindWorld(context.Compilation, null);
+            Console.Error.WriteLine($"initialize phase=default-world-selected elapsed={initializeTimer.Elapsed.TotalMilliseconds:0}ms duration={(initializeTimer.Elapsed - findWorldStarted).TotalMilliseconds:0}ms found={(world != null)}");
             Console.Error.WriteLine($"initialize project={projectPath} openProject={openMs:0}ms generatedSegusumTrees={generatedTrees.Length} mikeHelper={mikeGenerated} total={initializeTimer.Elapsed.TotalMilliseconds:0}ms");
             foreach (var tree in generatedTrees) Console.Error.WriteLine($"generatedSegusumTree={tree}");
         }

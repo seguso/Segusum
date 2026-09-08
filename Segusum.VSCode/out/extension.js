@@ -284,6 +284,8 @@ async function activate(context) {
         return;
     }
     log(`${BUILD_ID}`);
+    const packageVersion = context.extension.packageJSON.version ?? '(unknown)';
+    log(`extension runtime js=${__filename} dirname=${__dirname} extensionPath=${context.extensionPath} extensionUri=${context.extensionUri.fsPath} packageVersion=${packageVersion}`);
     log(`activation complete elapsed=${Date.now() - activationStarted}ms; host initialization is lazy.`);
     context.subscriptions.push(vscode.languages.registerDefinitionProvider({ language: 'segusum' }, { provideDefinition: async (document, pos) => { try {
             const client = await clientFor(document);

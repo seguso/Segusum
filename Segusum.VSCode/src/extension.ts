@@ -165,6 +165,8 @@ export async function activate(context: vscode.ExtensionContext) {
   status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100); status.text = 'Segusum: Idle'; status.tooltip = 'No Segusum project is loading.'; status.show(); context.subscriptions.push(status);
   if (!vscode.workspace.workspaceFolders?.length) { status.text = 'Segusum: No workspace'; return; }
   log(`${BUILD_ID}`);
+  const packageVersion = (context.extension.packageJSON as { version?: string }).version ?? '(unknown)';
+  log(`extension runtime js=${__filename} dirname=${__dirname} extensionPath=${context.extensionPath} extensionUri=${context.extensionUri.fsPath} packageVersion=${packageVersion}`);
   log(`activation complete elapsed=${Date.now() - activationStarted}ms; host initialization is lazy.`);
   context.subscriptions.push(vscode.languages.registerDefinitionProvider({ language: 'segusum' }, { provideDefinition: async (document, pos) => { try { const client = await clientFor(document); const result = await client.request('definition', semanticDocumentSnapshot(document.uri.fsPath, pos.line + 1, pos.character + 1, document.getText())); return result?.path ? new vscode.Location(vscode.Uri.file(result.path), new vscode.Position(result.line - 1, result.column - 1)) : undefined; } catch (e) { log(`Definition failed: ${e}`); output.show(true); vscode.window.showErrorMessage(`Segusum definition failed: ${e}`); return undefined; } } }));
   context.subscriptions.push(vscode.languages.registerCompletionItemProvider({ language: 'segusum' }, { provideCompletionItems: async (document, pos, token) => {
