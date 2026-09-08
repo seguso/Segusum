@@ -99,6 +99,40 @@ public sealed class CSharpToSegTranspilerTests
     }
 
     [Fact]
+    public void TopLevelDeclarationsHaveExactlyOneBlankLineBetweenThem()
+    {
+        const string source = """
+            class W
+            {
+                void M()
+                {
+                    addHandlerUseHere(a, handler: e => { Helper(); });
+                    addHandlerCombine(a, b, "combine", handler: e => { foo(); });
+                    addHandlerUseFor(c, d, "use-for", handler: e => { bar(); });
+                    addHandlerPickUp(e, handler: i => { baz(); });
+                }
+
+                private void Helper()
+                {
+                    qux();
+                }
+            }
+            """;
+
+        var first = CSharpToSegTranspiler.Transpile("x.cs", source);
+        var second = CSharpToSegTranspiler.Transpile("x.cs", source);
+        var text = first.Text.Replace("\r\n", "\n", StringComparison.Ordinal);
+
+        Assert.Contains("end\n\ncombine a with b:", text, StringComparison.Ordinal);
+        Assert.Contains("end\n\nuse c for d:", text, StringComparison.Ordinal);
+        Assert.Contains("end\n\npickup e:", text, StringComparison.Ordinal);
+        Assert.Contains("end\n\ndef Helper:", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n\n\n", text, StringComparison.Ordinal);
+        Assert.Equal(text, second.Text.Replace("\r\n", "\n", StringComparison.Ordinal));
+        Assert.Empty(DslParser.Parse(new DslSource("generated.seg", text)).Diagnostics);
+    }
+
+    [Fact]
     public void ConsecutiveAddBlocksMayOmitIntermediateEnd()
     {
         const string source = "world game\nroom-changed roomA:\n    var cyc = new-cycle\n    add cyc cidA\n        when true\n        foo\n    add cyc cidB\n        when true\n        bar\n    add cyc cidC\n        when true\n        baz\n    end\nend\n";

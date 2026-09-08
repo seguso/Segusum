@@ -55,10 +55,12 @@ public static class CSharpToSegTranspiler
         foreach (var invocation in root.DescendantNodes().OfType<InvocationExpressionSyntax>().Where(x => RegistrationKind(x) != null))
         {
             if (methodName != null && !invocation.Ancestors().OfType<MethodDeclarationSyntax>().Any(x => x.Identifier.ValueText == methodName)) continue;
+            EnsureExactlyOneBlankLine(sb);
             EmitHandler(invocation, sb, diagnostics, emitPartial, contextRoot);
         }
         foreach (var method in root.DescendantNodes().OfType<MethodDeclarationSyntax>().Where(x => methodName == null || x.Identifier.ValueText == methodName || reachableHelpers.Contains(x)))
         {
+            EnsureExactlyOneBlankLine(sb);
             if (method.Identifier.ValueText is "afterActionExecutedCSharp")
             {
                 EmitTriviaComments(method.GetLeadingTrivia(), sb, 0);
@@ -85,7 +87,6 @@ public static class CSharpToSegTranspiler
             }
             else if (method.Identifier.ValueText is not "Configure" && method.Body != null && reachableHelpers.Contains(method))
             {
-                EnsureExactlyOneBlankLine(sb);
                 EmitTriviaComments(AdjacentLeadingComments(method), sb, 0);
                 EmitTriviaComments(method.GetLeadingTrivia(), sb, 0);
                 AppendFunctionHeader(sb, method, diagnostics);
@@ -1221,6 +1222,12 @@ public static class CSharpToSegTranspiler
     private static string EmitCallExpression(InvocationExpressionSyntax invocation)
     {
         var name = invocation.Expression is MemberAccessExpressionSyntax member ? member.Name.Identifier.ValueText : invocation.Expression.ToString();
+        if (name == "translatable"
+            && invocation.ArgumentList.Arguments.Count == 0
+            && invocation.Expression is MemberAccessExpressionSyntax translatableMember
+            && translatableMember.Expression is LiteralExpressionSyntax translatableLiteral
+            && translatableLiteral.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.StringLiteralExpression))
+            return EmitLiteral(translatableLiteral);
         if (name == "Any" && invocation.ArgumentList.Arguments.Count == 1)
         {
             if (invocation.Expression is not MemberAccessExpressionSyntax anyMember
