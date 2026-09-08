@@ -601,6 +601,21 @@ public sealed class MigrationVerificationTests
     }
 
     [Fact]
+    public void BeforeRoomChangeFingerprintCanonicalizesZeroArgumentCallsButNotDifferentCalls()
+    {
+        const string csharp = "class W { void beforeRoomChangeManual(Room from, Room to, WalkPath segment, WalkPath path, BeforeRoomChangeInput e) { useValue(foo()); } }";
+        const string equivalentDsl = "world game\nbefore-room-change:\n    useValue foo\nend\n";
+        const string differentDsl = "world game\nbefore-room-change:\n    useValue bar\nend\n";
+        var left = Assert.Single(MigrationVerifier.ExtractCSharpBeforeRoomChange("before.cs", csharp));
+
+        var equivalent = MigrationVerifier.CompareBeforeRoomChange(left,
+            Assert.Single(MigrationVerifier.ExtractDslBeforeRoomChange(new DslSource("equivalent.seg", equivalentDsl))));
+        Assert.Equal(EquivalenceStatus.Pass, equivalent.Status);
+        Assert.Equal(EquivalenceStatus.Fail, MigrationVerifier.CompareBeforeRoomChange(left,
+            Assert.Single(MigrationVerifier.ExtractDslBeforeRoomChange(new DslSource("different.seg", differentDsl)))).Status);
+    }
+
+    [Fact]
     public void NarrativeCallFingerprintIncludesAllNarRoomAndNarImgArguments()
     {
         const string csharp = "class W { void beforeRoomChangeManual(Room from, Room to, WalkPath segment, WalkPath path, BeforeRoomChangeInput e) { narRoom(\"Room text\", roomA, false, true); narImg(\"Image text\", \"img/a.png\", NarSize.Medium, false, true); } }";

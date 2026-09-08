@@ -969,10 +969,144 @@ public static class MigrationVerifier
             if (ch == '"') quoted = !quoted;
             if (!char.IsWhiteSpace(ch) || quoted) builder.Append(ch);
         }
-        var result = builder.ToString().Replace("&&", "and", StringComparison.Ordinal).Replace("||", "or", StringComparison.Ordinal)
-            .Replace("!=", "<>", StringComparison.Ordinal).Replace("!", "not", StringComparison.Ordinal).Replace("<>", "!=", StringComparison.Ordinal)
-            .Replace("()", "", StringComparison.Ordinal);
-        return System.Text.RegularExpressions.Regex.Replace(result, @"([A-Za-z_]\w*):", "$1=");
+        var result = CanonicalizeCSharpOperators(builder.ToString());
+        result = NormalizeZeroArgumentCalls(result);
+        result = RemoveRedundantSimpleParentheses(result);
+        result = System.Text.RegularExpressions.Regex.Replace(result, @"([A-Za-z_]\w*):", "$1=");
+        return UnwrapRedundantSimpleParentheses(result);
+    }
+
+    private static string RemoveRedundantSimpleParentheses(string expression)
+    {
+        while (true)
+        {
+            var result = new System.Text.StringBuilder(expression.Length);
+            var changed = false;
+            for (var i = 0; i < expression.Length;)
+            {
+                if (expression[i] == '"')
+                {
+                    var start = i++;
+                    while (i < expression.Length)
+                    {
+                        if (expression[i] == '\\') { i += Math.Min(2, expression.Length - i); continue; }
+                        if (expression[i++] == '"') break;
+                    }
+                    result.Append(expression, start, i - start);
+                    continue;
+                }
+                if (expression[i] == '(')
+                {
+                    var j = i + 1;
+                    while (j < expression.Length && char.IsWhiteSpace(expression[j])) j++;
+                    var nameStart = j;
+                    if (j < expression.Length && (char.IsLetter(expression[j]) || expression[j] == '_'))
+                    {
+                        j++;
+                        while (j < expression.Length && (char.IsLetterOrDigit(expression[j]) || expression[j] is '_' or '.')) j++;
+                        var nameEnd = j;
+                        while (j < expression.Length && char.IsWhiteSpace(expression[j])) j++;
+                        if (j < expression.Length && expression[j] == ')')
+                        {
+                            result.Append(expression, nameStart, nameEnd - nameStart);
+                            i = j + 1;
+                            changed = true;
+                            continue;
+                        }
+                    }
+                }
+                result.Append(expression[i++]);
+            }
+            expression = result.ToString();
+            if (!changed) return expression;
+        }
+    }
+
+    private static string NormalizeZeroArgumentCalls(string expression)
+    {
+        var result = new System.Text.StringBuilder(expression.Length);
+        for (var i = 0; i < expression.Length;)
+        {
+            if (expression[i] == '"')
+            {
+                var start = i++;
+                while (i < expression.Length)
+                {
+                    if (expression[i] == '\\') { i += Math.Min(2, expression.Length - i); continue; }
+                    if (expression[i++] == '"') break;
+                }
+                result.Append(expression, start, i - start);
+                continue;
+            }
+            if (char.IsLetter(expression[i]) || expression[i] == '_')
+            {
+                var start = i++;
+                while (i < expression.Length && (char.IsLetterOrDigit(expression[i]) || expression[i] is '_' or '.')) i++;
+                var nameEnd = i;
+                if (i + 1 < expression.Length && expression[i] == '(' && expression[i + 1] == ')')
+                {
+                    result.Append(expression, start, nameEnd - start);
+                    i += 2;
+                }
+                else result.Append(expression, start, i - start);
+                continue;
+            }
+            result.Append(expression[i++]);
+        }
+        return result.ToString();
+    }
+
+    private static string CanonicalizeCSharpOperators(string expression)
+    {
+        var result = new System.Text.StringBuilder(expression.Length);
+        var quoted = false;
+        for (var i = 0; i < expression.Length; i++)
+        {
+            var ch = expression[i];
+            if (ch == '"')
+            {
+                quoted = !quoted;
+                result.Append(ch);
+                continue;
+            }
+            if (quoted)
+            {
+                result.Append(ch);
+                if (ch == '\\' && i + 1 < expression.Length) result.Append(expression[++i]);
+                continue;
+            }
+            if (ch == '&' && i + 1 < expression.Length && expression[i + 1] == '&') { result.Append("and"); i++; continue; }
+            if (ch == '|' && i + 1 < expression.Length && expression[i + 1] == '|') { result.Append("or"); i++; continue; }
+            if (ch == '!' && i + 1 < expression.Length && expression[i + 1] == '=') { result.Append("!="); i++; continue; }
+            if (ch == '!') { result.Append("not"); continue; }
+            result.Append(ch);
+        }
+        return result.ToString();
+    }
+
+    private static string UnwrapRedundantSimpleParentheses(string expression)
+    {
+        var candidate = expression;
+        while (candidate.Length >= 2 && candidate[0] == '(' && candidate[^1] == ')' && IsWholeParenthesized(candidate))
+            candidate = candidate[1..^1];
+        return System.Text.RegularExpressions.Regex.IsMatch(candidate, @"^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*(?:\(\))?$")
+            ? candidate.Replace("()", "", StringComparison.Ordinal)
+            : expression;
+    }
+
+    private static bool IsWholeParenthesized(string expression)
+    {
+        var depth = 0;
+        var quoted = false;
+        for (var i = 0; i < expression.Length; i++)
+        {
+            var ch = expression[i];
+            if (ch == '"') quoted = !quoted;
+            if (quoted) continue;
+            if (ch == '(') depth++;
+            else if (ch == ')' && --depth == 0 && i != expression.Length - 1) return false;
+        }
+        return depth == 0;
     }
 
     private static string StripCSharpComments(string expression)
