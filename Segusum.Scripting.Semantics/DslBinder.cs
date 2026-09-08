@@ -782,7 +782,12 @@ public sealed class DslBinder
     private bool IsCompatible(DslExpression expression, ITypeSymbol? actual, ITypeSymbol? expected)
     {
         if (expected == null) return false;
-        if (expression is ListExpression && actual != null && TryGetCollectionElement(actual, out var actualElement) && TryGetCollectionElement(expected, out var expectedElement) && Compatible(actualElement, expectedElement)) return true;
+        // SEG has one collection abstraction.  A collection-producing call
+        // may therefore be returned through an explicit C# array signature;
+        // the generator materializes it at that boundary.  Keep this rule
+        // structural so it applies to LINQ/ordinary runtime calls alike,
+        // rather than only to list literals.
+        if (expected is IArrayTypeSymbol && actual != null && TryGetCollectionElement(actual, out var actualElement) && TryGetCollectionElement(expected, out var expectedElement) && Compatible(actualElement, expectedElement)) return true;
         return (nullLiterals.Contains(expression) && (expected.IsReferenceType || expected.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T)) || Compatible(actual, expected);
     }
     private bool TryGetCollectionElement(ITypeSymbol type, out ITypeSymbol element)

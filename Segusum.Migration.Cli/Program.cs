@@ -44,14 +44,15 @@ if (string.Equals(args[0], "merge-seg", StringComparison.OrdinalIgnoreCase))
 }
 if (string.Equals(args[0], "audit-ownership", StringComparison.OrdinalIgnoreCase))
 {
-    if (args.Length < 2) { Console.Error.WriteLine("Usage: audit-ownership <file.seg> --runtime-root DIR --history FILE [--apply]"); return 2; }
-    var segPath = Path.GetFullPath(args[1]); string? runtimeRoot = null; string? history = null; var apply = false;
+    if (args.Length < 2) { Console.Error.WriteLine("Usage: audit-ownership <file.seg> --runtime-root DIR --history FILE [--apply] [--methods-only]"); return 2; }
+    var segPath = Path.GetFullPath(args[1]); string? runtimeRoot = null; string? history = null; var apply = false; var methodsOnly = false;
     for (var i = 2; i < args.Length; i++)
         switch (args[i])
         {
             case "--runtime-root": runtimeRoot = Path.GetFullPath(args[++i]); break;
             case "--history": history = Path.GetFullPath(args[++i]); break;
             case "--apply": apply = true; break;
+            case "--methods-only": methodsOnly = true; break;
             default: Console.Error.WriteLine($"Unknown option: {args[i]}"); return 2;
         }
     if (runtimeRoot == null || history == null) { Console.Error.WriteLine("Both --runtime-root and --history are required."); return 2; }
@@ -72,7 +73,7 @@ if (string.Equals(args[0], "audit-ownership", StringComparison.OrdinalIgnoreCase
     if (report.Ambiguities.Count != 0) { Console.WriteLine("AMBIGUITIES:"); foreach (var x in report.Ambiguities) Console.WriteLine("  " + x); return 3; }
     if (apply)
     {
-        foreach (var file in SegOwnership.ApplyRemoval(report)) Console.WriteLine("UPDATED: " + file);
+        foreach (var file in SegOwnership.ApplyRemoval(report, includeRuntimeIds: !methodsOnly)) Console.WriteLine("UPDATED: " + file);
         Console.WriteLine("HISTORICAL SOURCE: " + history);
     }
     return 0;

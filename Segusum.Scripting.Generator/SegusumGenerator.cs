@@ -96,7 +96,7 @@ public sealed class SegusumGenerator : IIncrementalGenerator
         EmitLine(sb, function.Span);
         sb.Append(" private ").Append(Type(function.ReturnType ?? "void")).Append(' ').Append(Name(function.Name)).Append('(').Append(string.Join(",", function.Parameters.Select(x => Type(x.Type) + " " + Name(x.Name)))).AppendLine(")\n {");
         EmitDefaultLine(sb);
-        foreach (var statement in function.Body) EmitStatement(sb, statement, "  ", null, model);
+        foreach (var statement in function.Body) EmitStatement(sb, statement, "  ", null, model, function.ReturnType);
         sb.AppendLine(" #line hidden\n }");
         EmitDefaultLine(sb);
     }
@@ -148,7 +148,7 @@ public sealed class SegusumGenerator : IIncrementalGenerator
         if (condition != null) { sb.Append(", x =>\n"); EmitLine(sb, condition.Span); sb.AppendLine("("); sb.Append(Emit(condition, model)).AppendLine(")"); EmitDefaultLine(sb); }
         sb.Append(", x => {\n"); EmitDefaultLine(sb); foreach (var statement in body) EmitStatement(sb, statement, indent + "  ", null, model); sb.Append("#line hidden\n").Append(indent).AppendLine("});"); EmitDefaultLine(sb);
     }
-    private static void EmitStatement(StringBuilder sb, DslStatement statement, string indent, string? input, BoundModel model)
+    private static void EmitStatement(StringBuilder sb, DslStatement statement, string indent, string? input, BoundModel model, string? expectedReturnType = null)
     {
         EmitLine(sb, statement.Span);
         switch (statement)
@@ -164,12 +164,12 @@ public sealed class SegusumGenerator : IIncrementalGenerator
             case ForStatement f:
                 sb.Append(indent).Append("foreach (var ").Append(Name(f.ItemName)).Append(" in ").Append(Emit(f.Collection, model)).AppendLine(")");
                 sb.Append(indent).AppendLine("{");
-                foreach (var child in f.Body) EmitStatement(sb, child, indent + "  ", input, model);
+                foreach (var child in f.Body) EmitStatement(sb, child, indent + "  ", input, model, expectedReturnType);
                 sb.Append(indent).AppendLine("}");
                 break;
             case ReturnStatement r:
                 sb.Append(indent).Append("return");
-                if (r.Expression != null) sb.Append(' ').Append(Emit(r.Expression, model));
+                if (r.Expression != null) sb.Append(' ').Append(Emit(r.Expression, model, expectedReturnType));
                 sb.AppendLine(";");
                 break;
             case CallStatement c: sb.Append(indent).Append(Emit(c.Expression, model)).AppendLine(";"); break;
@@ -191,13 +191,13 @@ public sealed class SegusumGenerator : IIncrementalGenerator
                 sb.Append(indent).Append("using (namedCutScene(").Append(EmitIdentifier(n.Id, model));
                 if (n.Arguments.Count != 0) sb.Append(", ").Append(string.Join(", ", n.Arguments.Select(x => Emit(x, model))));
                 sb.AppendLine("))"); sb.Append(indent).AppendLine("{");
-                foreach (var child in n.Body) EmitStatement(sb, child, indent + "  ", input, model);
+                foreach (var child in n.Body) EmitStatement(sb, child, indent + "  ", input, model, expectedReturnType);
                 sb.Append(indent).AppendLine("}"); break;
             case NextCycleStatement n: sb.Append(indent).Append("execNextInCycle(").Append(Emit(n.Cycle, model)).AppendLine(");"); break;
             case AddCycleElementStatement a: EmitAdd(sb, a.Cycle, a.Id, a.Important, a.Repeat, a.Condition, a.Body, a.Span, default, indent, model); break;
             case IfStatement i:
-                for (var index = 0; index < i.Branches.Count; index++) { sb.Append(indent).Append(index == 0 ? "if (" : "else if (").Append(Emit(i.Branches[index].Condition, model)).AppendLine(")\n" + indent + "{"); foreach (var child in i.Branches[index].Body) EmitStatement(sb, child, indent + "  ", input, model); sb.Append(indent).AppendLine("}"); }
-                if (i.ElseBody != null) { sb.Append(indent).AppendLine("else\n" + indent + "{"); foreach (var child in i.ElseBody) EmitStatement(sb, child, indent + "  ", input, model); sb.Append(indent).AppendLine("}"); } break;
+                for (var index = 0; index < i.Branches.Count; index++) { sb.Append(indent).Append(index == 0 ? "if (" : "else if (").Append(Emit(i.Branches[index].Condition, model)).AppendLine(")\n" + indent + "{"); foreach (var child in i.Branches[index].Body) EmitStatement(sb, child, indent + "  ", input, model, expectedReturnType); sb.Append(indent).AppendLine("}"); }
+                if (i.ElseBody != null) { sb.Append(indent).AppendLine("else\n" + indent + "{"); foreach (var child in i.ElseBody) EmitStatement(sb, child, indent + "  ", input, model, expectedReturnType); sb.Append(indent).AppendLine("}"); } break;
             case MakesNoSenseStatement when input != null: sb.Append(indent).Append(input).AppendLine(".makesNoSenseAtThisTime = true;"); break;
             case FinishGameStatement when input != null: sb.Append(indent).Append(input).AppendLine(".gameFinished = true;"); break;
             case DoNotAdvanceTimeStatement when input != null: sb.Append(indent).Append(input).AppendLine(".timeMustAdvance = false;"); break;
@@ -210,7 +210,7 @@ public sealed class SegusumGenerator : IIncrementalGenerator
     private static void EmitDefaultLine(StringBuilder sb) => sb.AppendLine("#line default");
     private static string EscapeLinePath(string path) => path.Replace("\\", "\\\\").Replace("\"", "\\\"");
     private static string EmitIdentifier(string name, BoundModel model) => model.References.TryGetValue(name, out var resolved) ? resolved : Name(name);
-    private static string Emit(DslExpression expression, BoundModel model) => expression switch
+    private static string Emit(DslExpression expression, BoundModel model, string? expectedType = null) => expression switch
     {
         IdentifierExpression i => model.Values.TryGetValue(i, out var value) ? (value.Kind is BoundSymbolKind.CSharpMethod or BoundSymbolKind.Function ? value.CSharpName + "()" : value.CSharpName) : Name(i.Name),
         ThisExpression => "this",
@@ -228,9 +228,23 @@ public sealed class SegusumGenerator : IIncrementalGenerator
         MemberAccessExpression m when model.Values.TryGetValue(m, out var staticProperty) && staticProperty.Symbol is IPropertySymbol { IsStatic: true } => staticProperty.CSharpName,
         MemberAccessExpression m when model.Values.TryGetValue(m, out var member) && member.Kind == BoundSymbolKind.CSharpMethod => Emit(m.Receiver, model) + "." + member.CSharpName + "()",
         MemberAccessExpression m when model.Values.TryGetValue(m, out var property) => Emit(m.Receiver, model) + "." + property.CSharpName,
-        CallExpression c when model.Calls.TryGetValue(c, out var bound) => (bound.Receiver == null ? bound.TargetName : bound.Method?.IsStatic == true ? bound.Method.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) + "." + bound.TargetName : Emit(bound.Receiver, model) + "." + bound.TargetName) + "(" + string.Join(", ", bound.Arguments.Select(a => (a.Source.Name == null ? "" : Name(a.ParameterName) + ": ") + Emit(a.Source.Expression, model))) + ")",
+        CallExpression c when model.Calls.TryGetValue(c, out var bound) => EmitBoundCall(bound, model, expectedType),
         _ => "default"
     };
+    private static string EmitBoundCall(BoundCall bound, BoundModel model, string? expectedType)
+    {
+        var call = (bound.Receiver == null ? bound.TargetName : bound.Method?.IsStatic == true ? bound.Method.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) + "." + bound.TargetName : Emit(bound.Receiver, model) + "." + bound.TargetName)
+            + "(" + string.Join(", ", bound.Arguments.Select(a => (a.Source.Name == null ? "" : Name(a.ParameterName) + ": ") + Emit(a.Source.Expression, model))) + ")";
+        // SEG deliberately treats array/list materialization as one collection
+        // abstraction.  When a collection expression is returned through an
+        // explicitly array-typed C# signature, materialize the enumerable at
+        // this boundary instead of losing the source type information.
+        if (expectedType?.EndsWith("[]", StringComparison.Ordinal) == true && IsEnumerable(bound.ReturnType))
+            call += ".ToArray()";
+        return call;
+    }
+    private static bool IsEnumerable(ITypeSymbol? type)
+        => type is IArrayTypeSymbol || type is INamedTypeSymbol named && (named.Name == "IEnumerable" || named.AllInterfaces.Any(x => x.Name == "IEnumerable"));
     private static string EmitList(ListExpression list, BoundModel model)
     {
         var type = model.ContextualTypes.TryGetValue(list, out var contextual) && contextual != null

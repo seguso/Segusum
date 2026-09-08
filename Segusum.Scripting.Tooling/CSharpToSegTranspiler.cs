@@ -83,7 +83,7 @@ public static class CSharpToSegTranspiler
         var diagnostics = new List<MigrationDiagnostic>();
         var sb = new StringBuilder().Append("world ").Append(worldId).Append('\n');
         var root = (CompilationUnitSyntax)tree.GetRoot();
-        var contextLoad = LoadContextRoots(path, contextRoot);
+        var contextLoad = LoadContextRoots(path, text, contextRoot);
         Mark("context-parse");
         var contextRoots = contextLoad.Roots;
         var semanticContext = BuildSemanticContext(path, root, contextRoots);
@@ -200,7 +200,7 @@ public static class CSharpToSegTranspiler
         return output;
     }
 
-    private static ContextLoadResult LoadContextRoots(string inputPath, string? contextRoot)
+    private static ContextLoadResult LoadContextRoots(string inputPath, string inputText, string? contextRoot)
     {
         if (string.IsNullOrWhiteSpace(contextRoot) || !Directory.Exists(contextRoot)) return new(Array.Empty<CompilationUnitSyntax>(), 0, GC.GetTotalMemory(false));
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
@@ -208,6 +208,11 @@ public static class CSharpToSegTranspiler
         var roots = Directory.EnumerateFiles(contextRoot, "*.cs", SearchOption.AllDirectories)
             .Select(Path.GetFullPath)
             .Where(x => !string.Equals(x, fullInputPath, StringComparison.OrdinalIgnoreCase))
+            // A frozen source may live outside the consumer project while the
+            // byte-identical live source is still present under context-root.
+            // Do not add the same compilation unit twice: duplicate declarations
+            // make otherwise resolvable helper calls appear ambiguous.
+            .Where(x => !string.Equals(File.ReadAllText(x), inputText, StringComparison.Ordinal))
             .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
             .Select(x => (CompilationUnitSyntax)CSharpSyntaxTree.ParseText(File.ReadAllText(x), path: x).GetRoot())
             .ToArray();

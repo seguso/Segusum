@@ -159,7 +159,9 @@ public static class SegOwnership
     {
         var specialNames = declarations.Any(x => x is BeforeRoomChangeDeclaration)
             ? new[] { "beforeRoomChangeManual", "beforeRoomChangeSegusum" }
-            : Array.Empty<string>();
+            : declarations.Any(x => x is AfterActionExecutedDeclaration)
+                ? new[] { "after_action_executed", "afterActionExecutedCSharp" }
+                : Array.Empty<string>();
         foreach (var name in specialNames)
         {
             var historical = historicalMethods.Where(x => x.Name == name).ToArray();
@@ -180,11 +182,11 @@ public static class SegOwnership
         }
     }
 
-    public static IReadOnlyList<string> ApplyRemoval(SegOwnershipReport report)
+    public static IReadOnlyList<string> ApplyRemoval(SegOwnershipReport report, bool includeRuntimeIds = true)
     {
         if (!report.IsUnambiguous) throw new InvalidOperationException(string.Join(Environment.NewLine, report.Ambiguities));
         var owned = report.OwnedCycleElementIds.Concat(report.OwnedNamedCutSceneIds).ToHashSet(StringComparer.Ordinal);
-        var idChanges = report.RuntimeDeclarations.Where(x => owned.Contains(x.Name));
+        var idChanges = includeRuntimeIds ? report.RuntimeDeclarations.Where(x => owned.Contains(x.Name)) : Enumerable.Empty<RuntimeIdDeclaration>();
         var allChanges = idChanges.Select(x => (x.Path, x.Span, Name: x.Name))
             .Concat(report.MethodsToRemove.Select(x => (x.Path, x.Span, Name: x.Name)))
             .GroupBy(x => x.Path, StringComparer.OrdinalIgnoreCase);

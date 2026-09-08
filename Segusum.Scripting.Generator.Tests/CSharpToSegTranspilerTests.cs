@@ -965,6 +965,27 @@ public sealed class CSharpToSegTranspilerTests
     }
 
     [Fact]
+    public void FrozenInputDoesNotDuplicateAnIdenticalLiveContextSource()
+    {
+        var directory = Directory.CreateTempSubdirectory("segusum-frozen-context-source-");
+        try
+        {
+            var live = "class W { private bool Helper() { return true; } }";
+            var input = Path.Combine(directory.FullName, "frozen.cs");
+            File.WriteAllText(input, live);
+            File.WriteAllText(Path.Combine(directory.FullName, "world.cs"), live);
+            var result = CSharpToSegTranspiler.Transpile(input, live, emitPartial: true, methodName: null, worldId: "game", contextRoot: directory.FullName);
+
+            Assert.DoesNotContain(result.Diagnostics, x => x.Reason.Contains("ambiguous source helper call", StringComparison.Ordinal));
+            Assert.Single(result.Units, x => x.Id == "Helper");
+        }
+        finally
+        {
+            directory.Delete(true);
+        }
+    }
+
+    [Fact]
     public void SemanticAfterActionExecutedOverrideBecomesLifecycleRoot()
     {
         var directory = Directory.CreateTempSubdirectory("segusum-after-action-override-");
