@@ -205,16 +205,27 @@ public static class CSharpToSegTranspiler
         if (string.IsNullOrWhiteSpace(contextRoot) || !Directory.Exists(contextRoot)) return new(Array.Empty<CompilationUnitSyntax>(), 0, GC.GetTotalMemory(false));
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var fullInputPath = Path.GetFullPath(inputPath);
+        var inputTypeNames = CSharpSyntaxTree.ParseText(inputText, path: inputPath).GetRoot()
+            .DescendantNodes().OfType<ClassDeclarationSyntax>()
+            .Select(x => x.Identifier.ValueText)
+            .ToHashSet(StringComparer.Ordinal);
         var roots = Directory.EnumerateFiles(contextRoot, "*.cs", SearchOption.AllDirectories)
             .Select(Path.GetFullPath)
             .Where(x => !string.Equals(x, fullInputPath, StringComparison.OrdinalIgnoreCase))
+            .Select(x => (Path: x, Text: File.ReadAllText(x)))
+            .Select(x => (x.Path, x.Text, Root: (CompilationUnitSyntax)CSharpSyntaxTree.ParseText(x.Text, path: x.Path).GetRoot()))
             // A frozen source may live outside the consumer project while the
             // byte-identical live source is still present under context-root.
             // Do not add the same compilation unit twice: duplicate declarations
             // make otherwise resolvable helper calls appear ambiguous.
-            .Where(x => !string.Equals(File.ReadAllText(x), inputText, StringComparison.Ordinal))
-            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
-            .Select(x => (CompilationUnitSyntax)CSharpSyntaxTree.ParseText(File.ReadAllText(x), path: x).GetRoot())
+            .Where(x => !string.Equals(x.Text, inputText, StringComparison.Ordinal))
+            // A frozen input can differ from its live overlay by runtime-only
+            // edits (or a BOM) while still declaring the same partial type.
+            // Do not compile that overlay twice.
+            .Where(x => !string.Equals(Path.GetFileName(x.Path), Path.GetFileName(inputPath), StringComparison.OrdinalIgnoreCase)
+                || !inputTypeNames.SetEquals(x.Root.DescendantNodes().OfType<ClassDeclarationSyntax>().Select(y => y.Identifier.ValueText)))
+            .OrderBy(x => x.Path, StringComparer.OrdinalIgnoreCase)
+            .Select(x => x.Root)
             .ToArray();
         stopwatch.Stop();
         return new(roots, stopwatch.ElapsedMilliseconds, GC.GetTotalMemory(false));

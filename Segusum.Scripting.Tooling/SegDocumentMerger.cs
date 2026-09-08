@@ -1,6 +1,9 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
+using System.Text;
 using Segusum.Scripting.Core;
 
 namespace Segusum.Scripting.Tooling;
@@ -10,9 +13,76 @@ public sealed record SegMergeResult(string Text, IReadOnlyList<string> Diagnosti
     public bool Succeeded => Diagnostics.Count == 0;
 }
 
+public sealed record SegDeclarationAuditEntry(string Identity, string Status, string? ExistingPath, string GeneratedBodyHash);
+public sealed record SegDeclarationAuditResult(IReadOnlyList<SegDeclarationAuditEntry> Entries, IReadOnlyList<string> Diagnostics)
+{
+    public bool Succeeded => Diagnostics.Count == 0;
+}
+
 /// <summary>AST-validated merger for generated top-level SEG declarations.</summary>
 public static class SegDocumentMerger
 {
+    public static (SegDeclarationAuditResult Audit, string NewOnlyText) ExtractNewDeclarations(string generatedPath, string generatedText, IEnumerable<(string Path, string Text)> runtimeSources)
+    {
+        var audit = Audit(generatedPath, generatedText, runtimeSources);
+        var newKeys = audit.Entries.Where(x => x.Status == "New").Select(x => x.Identity).ToHashSet(StringComparer.Ordinal);
+        var parsed = DslParser.Parse(new DslSource(generatedPath, generatedText));
+        var declarations = parsed.Document.Declarations.OrderBy(x => x.Span.Start).ToArray();
+        var headerEnd = generatedText.IndexOf('\n');
+        var header = headerEnd < 0 ? generatedText.Trim() : generatedText[..headerEnd].TrimEnd('\r');
+        var segments = new List<string>();
+        for (var i = 0; i < declarations.Length; i++)
+        {
+            if (!newKeys.Contains(DeclarationKey(declarations[i]))) continue;
+            var start = Math.Clamp(declarations[i].Span.Start, 0, generatedText.Length);
+            var end = i + 1 < declarations.Length ? Math.Clamp(declarations[i + 1].Span.Start, start, generatedText.Length) : generatedText.Length;
+            segments.Add(generatedText[start..end].Trim('\r', '\n'));
+        }
+        var newOnly = header + (segments.Count == 0 ? "\r\n" : "\r\n\r\n" + string.Join("\r\n\r\n", segments) + "\r\n");
+        return (audit, newOnly);
+    }
+
+    public static SegDeclarationAuditResult Audit(string generatedPath, string generatedText, IEnumerable<(string Path, string Text)> runtimeSources)
+    {
+        var diagnostics = new List<string>();
+        var generated = DslParser.Parse(new DslSource(generatedPath, generatedText));
+        AddParserDiagnostics(generated, diagnostics);
+        var existing = new Dictionary<string, (DslDeclaration Declaration, string Path, string Canonical)>(StringComparer.Ordinal);
+        foreach (var source in runtimeSources.OrderBy(x => x.Path, StringComparer.OrdinalIgnoreCase))
+        {
+            var parsed = DslParser.Parse(new DslSource(source.Path, source.Text));
+            AddParserDiagnostics(parsed, diagnostics);
+            foreach (var declaration in parsed.Document.Declarations)
+            {
+                var identity = DeclarationKey(declaration);
+                var canonical = Canonical(declaration);
+                if (existing.TryGetValue(identity, out var previous))
+                {
+                    if (!string.Equals(previous.Canonical, canonical, StringComparison.Ordinal))
+                        diagnostics.Add($"runtime SEG declaration conflict: {identity} ({previous.Path} vs {source.Path})");
+                }
+                else existing.Add(identity, (declaration, source.Path, canonical));
+            }
+        }
+        var entries = new List<SegDeclarationAuditEntry>();
+        foreach (var declaration in generated.Document.Declarations)
+        {
+            var identity = DeclarationKey(declaration);
+            var canonical = Canonical(declaration);
+            var hash = BitConverter.ToString(System.Security.Cryptography.SHA256.Create().ComputeHash(Encoding.UTF8.GetBytes(canonical))).Replace("-", "");
+            if (!existing.TryGetValue(identity, out var match))
+                entries.Add(new(identity, "New", null, hash));
+            else if (string.Equals(match.Canonical, canonical, StringComparison.Ordinal))
+                entries.Add(new(identity, "AlreadyPresent", match.Path, hash));
+            else
+            {
+                entries.Add(new(identity, "Conflict", match.Path, hash));
+                diagnostics.Add($"generated SEG declaration conflict: {identity} ({match.Path})");
+            }
+        }
+        return new(entries, diagnostics);
+    }
+
     public static SegMergeResult Merge(string basePath, string baseText, IReadOnlyList<(string Path, string Text)> additions)
     {
         var diagnostics = new List<string>();
@@ -90,5 +160,40 @@ public static class SegDocumentMerger
     {
         foreach (var diagnostic in parsed.Diagnostics)
             diagnostics.Add($"{diagnostic.Id} {diagnostic.Span.Line}:{diagnostic.Span.Column}: {diagnostic.Message}");
+    }
+
+    private static string DeclarationKey(DslDeclaration declaration) => declaration switch
+    {
+        FunctionDeclaration function => function.Name + "(" + string.Join(",", function.Parameters.Select(x => x.Type)) + ")",
+        BeforeRoomChangeDeclaration => "before-room-change",
+        AfterActionExecutedDeclaration => "after-action-executed",
+        HandlerDeclaration handler => handler.Kind + ":" + handler.First + ":" + handler.Second + ":" + handler.Target,
+        _ => declaration.GetType().Name
+    };
+
+    private static string Canonical(object? value)
+    {
+        if (value == null) return "null";
+        if (value is SourceSpan) return "<span>";
+        if (value is string text) return "\"" + text.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
+        if (value is bool or byte or sbyte or short or ushort or int or uint or long or ulong or float or double or decimal or char or Enum)
+            return Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? "";
+        if (value is IEnumerable sequence && value is not string)
+        {
+            var builder = new StringBuilder("[");
+            var first = true;
+            foreach (var item in sequence) { if (!first) builder.Append(','); first = false; builder.Append(Canonical(item)); }
+            return builder.Append(']').ToString();
+        }
+        var type = value.GetType();
+        var result = new StringBuilder(type.FullName);
+        foreach (var property in type.GetProperties(BindingFlags.Instance | BindingFlags.Public).OrderBy(x => x.Name, StringComparer.Ordinal))
+        {
+            if (property.Name.EndsWith("Span", StringComparison.Ordinal) || property.PropertyType == typeof(SourceSpan)) continue;
+            result.Append('|').Append(property.Name).Append('=').Append(Canonical(property.GetValue(value)));
+        }
+        foreach (var field in type.GetFields(BindingFlags.Instance | BindingFlags.Public).OrderBy(x => x.Name, StringComparer.Ordinal))
+            result.Append('|').Append(field.Name).Append('=').Append(Canonical(field.GetValue(value)));
+        return result.ToString();
     }
 }
