@@ -744,6 +744,30 @@ public sealed class CSharpToSegTranspilerTests
     }
 
     [Fact]
+    public void HelperDependencyStatusPropagatesThroughTheWholeChain()
+    {
+        const string source = "class W { void M() { addHandlerUseHere(a, handler: i => { A(); Independent(); }); } private void A() { B(); } private void B() { C(); } private void C() { while (true) { } } private void Independent() { foo(); } }";
+        var result = CSharpToSegTranspiler.Transpile("dependency-chain.cs", source);
+
+        Assert.Equal(MigrationUnitStatus.DependsOnCSharpHelper, result.Units.Single(x => x.Id == "A").Status);
+        Assert.Equal(MigrationUnitStatus.DependsOnCSharpHelper, result.Units.Single(x => x.Id == "B").Status);
+        Assert.Equal(MigrationUnitStatus.Unsupported, result.Units.Single(x => x.Id == "C").Status);
+        Assert.Equal(MigrationUnitStatus.Translated, result.Units.Single(x => x.Id == "Independent").Status);
+    }
+
+    [Fact]
+    public void LocalFunctionsWithTheSameNameUseCapturesFromTheirOwnMethod()
+    {
+        const string source = "class W { void beforeRoomChangeManual() { int first = 1; int helper() { return first; } foo(helper()); } void afterActionExecutedCSharp() { int second = 2; int helper() { return second; } foo(helper()); } }";
+        var result = CSharpToSegTranspiler.Transpile("local-functions.cs", source);
+
+        Assert.Contains("foo (helper first)", result.Text, StringComparison.Ordinal);
+        Assert.Contains("foo (helper second)", result.Text, StringComparison.Ordinal);
+        Assert.Contains("def helper first: int ret int", result.Text, StringComparison.Ordinal);
+        Assert.Contains("def helper second: int ret int", result.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ReachableHelperIndexPreservesDirectAndTransitiveCallSemantics()
     {
         const string source = "class W { void M() { addHandlerUseHere(a, handler: i => { Direct(); }); } private void Direct() { Nested(); } private void Nested() { leaf(); } private void Uncalled() { never(); } }";
