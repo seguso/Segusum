@@ -3,6 +3,7 @@ using System.Text;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -170,23 +171,84 @@ public static class SegOwnership
         if (!report.IsUnambiguous) throw new InvalidOperationException(string.Join(Environment.NewLine, report.Ambiguities));
         var owned = report.OwnedCycleElementIds.Concat(report.OwnedNamedCutSceneIds).ToHashSet(StringComparer.Ordinal);
         var idChanges = report.RuntimeDeclarations.Where(x => owned.Contains(x.Name));
-        var allChanges = idChanges.Select(x => (x.Path, x.Span))
-            .Concat(report.MethodsToRemove.Select(x => (x.Path, x.Span)))
+        var allChanges = idChanges.Select(x => (x.Path, x.Span, Name: x.Name))
+            .Concat(report.MethodsToRemove.Select(x => (x.Path, x.Span, Name: x.Name)))
             .GroupBy(x => x.Path, StringComparer.OrdinalIgnoreCase);
         var changed = new List<string>();
         foreach (var file in allChanges)
         {
             var text = File.ReadAllText(file.Key);
+            var originalText = text;
+            var syntaxRoot = CSharpSyntaxTree.ParseText(originalText, path: file.Key).GetRoot();
             foreach (var declaration in file
                 .GroupBy(x => (x.Span.Start, x.Span.Length))
                 .Select(x => x.First())
                 .OrderByDescending(x => x.Span.Start))
-                text = text.Remove(declaration.Span.Start, declaration.Span.Length);
+            {
+                var node = syntaxRoot.DescendantNodes().FirstOrDefault(x => x.Span == declaration.Span);
+                var removal = node == null
+                    ? declaration.Span
+                    : DeclarationRemovalSpan(originalText, node, declaration.Name);
+                text = text.Remove(removal.Start, removal.Length);
+            }
+
+            // Removing syntax nodes must not leave the large whitespace islands
+            // that the old span-only implementation produced.  This is a
+            // formatting-only normalization: comments and non-whitespace text
+            // are never removed here.
+            text = CollapseBlankLineRuns(text);
             File.WriteAllText(file.Key, text, new UTF8Encoding(false));
             changed.Add(file.Key);
         }
         return changed;
     }
+
+    private static TextSpan DeclarationRemovalSpan(string text, SyntaxNode node, string? declarationName)
+    {
+        var start = node.Span.Start;
+        var leadingComments = node.GetLeadingTrivia()
+            .Where(x => x.IsKind(SyntaxKind.SingleLineCommentTrivia)
+                || x.IsKind(SyntaxKind.MultiLineCommentTrivia)
+                || x.IsKind(SyntaxKind.SingleLineDocumentationCommentTrivia)
+                || x.IsKind(SyntaxKind.MultiLineDocumentationCommentTrivia))
+            .Where(x => x.IsKind(SyntaxKind.SingleLineDocumentationCommentTrivia)
+                || x.IsKind(SyntaxKind.MultiLineDocumentationCommentTrivia)
+                || (!string.IsNullOrEmpty(declarationName)
+                    && x.ToFullString().Contains(declarationName, StringComparison.Ordinal)))
+            .ToArray();
+
+        if (leadingComments.Length != 0)
+            start = LineStart(text, leadingComments.Min(x => x.SpanStart));
+
+        var end = node.Span.End;
+        var nodeLineStart = LineStart(text, node.Span.Start);
+        var nodeLineEnd = LineEnd(text, node.Span.End);
+        if (string.IsNullOrWhiteSpace(text.Substring(nodeLineStart, node.Span.Start - nodeLineStart))
+            && string.IsNullOrWhiteSpace(text.Substring(node.Span.End, nodeLineEnd - node.Span.End)))
+        {
+            end = IncludeLineBreak(text, nodeLineEnd);
+        }
+
+        return TextSpan.FromBounds(start, end);
+    }
+
+    private static int LineStart(string text, int position)
+    {
+        var newline = text.LastIndexOf('\n', Math.Max(0, position - 1));
+        return newline < 0 ? 0 : newline + 1;
+    }
+
+    private static int LineEnd(string text, int position)
+    {
+        var newline = text.IndexOf('\n', position);
+        return newline < 0 ? text.Length : newline;
+    }
+
+    private static int IncludeLineBreak(string text, int lineEnd)
+        => lineEnd < text.Length ? lineEnd + 1 : lineEnd;
+
+    private static string CollapseBlankLineRuns(string text)
+        => Regex.Replace(text, @"(?:\r?\n[ \t]*){3,}", Environment.NewLine + Environment.NewLine);
 
     private static IEnumerable<RuntimeIdDeclaration> ReadRuntimeDeclarations(string path)
     {

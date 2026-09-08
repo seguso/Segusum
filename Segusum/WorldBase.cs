@@ -243,7 +243,7 @@ namespace Seg
 
         protected virtual void beforeRoomChangeGenerated(Room from, Room to, WalkPath pathFromTo, WalkPath completePath, BeforeRoomChangeInput i) { }
 
-        public void invokeBeforeRoomChange(Room from, Room to, WalkPath pathFromTo, WalkPath completePath, BeforeRoomChangeInput i)
+        protected internal void invokeBeforeRoomChange(Room from, Room to, WalkPath pathFromTo, WalkPath completePath, BeforeRoomChangeInput i)
         {
             if (hasGeneratedBeforeRoomChange)
                 beforeRoomChangeGenerated(from, to, pathFromTo, completePath, i);

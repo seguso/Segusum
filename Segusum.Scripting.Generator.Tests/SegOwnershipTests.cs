@@ -103,6 +103,47 @@ public sealed class SegOwnershipTests
         Assert.Contains(report.MethodsToRemove, x => x.Name == "migrated" && x.IsStatic);
     }
 
+    [Fact]
+    public void ApplyRemovalCleansAttachedDeclarationTriviaWithoutRemovingHistoryComments()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "seg-ownership-format-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var active = Path.Combine(root, "World.cs");
+            var history = Path.Combine(root, "history.cs");
+            var seg = Path.Combine(root, "World.seg");
+            var source = """
+                using Seg;
+                public partial class World : WorldBase
+                {
+                    // Design history: this comment is intentionally retained.
+
+                    /// <summary>migrated is the old gameplay helper.</summary>
+                    private bool migrated() => true;
+
+
+                    private bool kept() => true;
+                }
+                """;
+            File.WriteAllText(active, source);
+            File.WriteAllText(history, source);
+            File.WriteAllText(seg, "world game\ndef migrated ret bool:\n    ret true\nend\n");
+
+            var report = SegOwnership.Analyze(seg, new[] { active }, history);
+            SegOwnership.ApplyRemoval(report);
+            var remaining = File.ReadAllText(active);
+
+            Assert.Contains("Design history", remaining, StringComparison.Ordinal);
+            Assert.DoesNotContain("migrated", remaining, StringComparison.Ordinal);
+            Assert.DoesNotContain("\n\n\n", remaining, StringComparison.Ordinal);
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { }
+        }
+    }
+
     private sealed class OwnershipFixture : IDisposable
     {
         private readonly string directory = Path.Combine(Path.GetTempPath(), "seg-ownership-" + Guid.NewGuid().ToString("N"));
