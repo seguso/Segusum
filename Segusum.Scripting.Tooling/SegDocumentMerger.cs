@@ -27,18 +27,22 @@ public static class SegDocumentMerger
         var audit = Audit(generatedPath, generatedText, runtimeSources);
         var newKeys = audit.Entries.Where(x => x.Status == "New").Select(x => x.Identity).ToHashSet(StringComparer.Ordinal);
         var parsed = DslParser.Parse(new DslSource(generatedPath, generatedText));
+        if (parsed.Diagnostics.Count != 0) return (audit, "");
         var declarations = parsed.Document.Declarations.OrderBy(x => x.Span.Start).ToArray();
         var headerEnd = generatedText.IndexOf('\n');
-        var header = headerEnd < 0 ? generatedText.Trim() : generatedText[..headerEnd].TrimEnd('\r');
+        var header = headerEnd < 0 ? generatedText : generatedText[..(headerEnd + 1)];
+        var leadingStarts = LeadingTriviaStarts(generatedText, declarations);
         var segments = new List<string>();
         for (var i = 0; i < declarations.Length; i++)
         {
-            if (!newKeys.Contains(DeclarationKey(declarations[i]))) continue;
-            var start = Math.Clamp(declarations[i].Span.Start, 0, generatedText.Length);
-            var end = i + 1 < declarations.Length ? Math.Clamp(declarations[i + 1].Span.Start, start, generatedText.Length) : generatedText.Length;
+            if (!TryDeclarationKey(declarations[i], out var identity, out _)) continue;
+            if (!newKeys.Contains(identity)) continue;
+            var start = leadingStarts[i];
+            var end = i + 1 < declarations.Length ? leadingStarts[i + 1] : generatedText.Length;
             segments.Add(generatedText[start..end].Trim('\r', '\n'));
         }
-        var newOnly = header + (segments.Count == 0 ? "\r\n" : "\r\n\r\n" + string.Join("\r\n\r\n", segments) + "\r\n");
+        var newline = generatedText.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+        var newOnly = header + (segments.Count == 0 ? newline : newline + newline + string.Join(newline + newline, segments) + newline);
         return (audit, newOnly);
     }
 
@@ -54,7 +58,11 @@ public static class SegDocumentMerger
             AddParserDiagnostics(parsed, diagnostics);
             foreach (var declaration in parsed.Document.Declarations)
             {
-                var identity = DeclarationKey(declaration);
+                if (!TryDeclarationKey(declaration, out var identity, out var unsupported))
+                {
+                    diagnostics.Add(unsupported!);
+                    continue;
+                }
                 var canonical = Canonical(declaration);
                 if (existing.TryGetValue(identity, out var previous))
                 {
@@ -65,10 +73,22 @@ public static class SegDocumentMerger
             }
         }
         var entries = new List<SegDeclarationAuditEntry>();
+        var generatedKeys = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var declaration in generated.Document.Declarations)
         {
-            var identity = DeclarationKey(declaration);
+            if (!TryDeclarationKey(declaration, out var identity, out var unsupported))
+            {
+                diagnostics.Add(unsupported!);
+                continue;
+            }
             var canonical = Canonical(declaration);
+            if (generatedKeys.TryGetValue(identity, out var previousGenerated))
+            {
+                diagnostics.Add($"duplicate generated SEG declaration identity: {identity}");
+                if (!string.Equals(previousGenerated, canonical, StringComparison.Ordinal))
+                    diagnostics.Add($"generated SEG declaration conflict: {identity}");
+            }
+            else generatedKeys.Add(identity, canonical);
             var hash = BitConverter.ToString(System.Security.Cryptography.SHA256.Create().ComputeHash(Encoding.UTF8.GetBytes(canonical))).Replace("-", "");
             if (!existing.TryGetValue(identity, out var match))
                 entries.Add(new(identity, "New", null, hash));
@@ -162,14 +182,59 @@ public static class SegDocumentMerger
             diagnostics.Add($"{diagnostic.Id} {diagnostic.Span.Line}:{diagnostic.Span.Column}: {diagnostic.Message}");
     }
 
-    private static string DeclarationKey(DslDeclaration declaration) => declaration switch
+    private static bool TryDeclarationKey(DslDeclaration declaration, out string key, out string? diagnostic)
     {
-        FunctionDeclaration function => function.Name + "(" + string.Join(",", function.Parameters.Select(x => x.Type)) + ")",
-        BeforeRoomChangeDeclaration => "before-room-change",
-        AfterActionExecutedDeclaration => "after-action-executed",
-        HandlerDeclaration handler => handler.Kind + ":" + handler.First + ":" + handler.Second + ":" + handler.Target,
-        _ => declaration.GetType().Name
-    };
+        switch (declaration)
+        {
+            case FunctionDeclaration function:
+                key = function.Name + "(" + string.Join(",", function.Parameters.Select(x => x.Type)) + ")"; break;
+            case StateDeclaration state: key = "state:" + state.Name; break;
+            case CycleDeclaration cycle: key = "cycle:" + cycle.Variable; break;
+            case NextCycleDeclaration next: key = "next:" + Canonical(next.Cycle); break;
+            case CycleElementDeclaration element: key = "add:" + element.Cycle + ":" + element.Id; break;
+            case BeforeRoomChangeDeclaration: key = "before-room-change"; break;
+            case AfterActionExecutedDeclaration: key = "after-action-executed"; break;
+            case HandlerDeclaration handler: key = handler.Kind + ":" + handler.First + ":" + handler.Second + ":" + handler.Target; break;
+            default:
+                key = "";
+                diagnostic = $"unsupported top-level SEG declaration kind '{declaration.GetType().FullName}'; identity is undefined";
+                return false;
+        }
+        diagnostic = null;
+        return true;
+    }
+
+    private static int[] LeadingTriviaStarts(string text, IReadOnlyList<DslDeclaration> declarations)
+    {
+        var starts = new int[declarations.Count];
+        var lineStarts = new List<int> { 0 };
+        for (var i = 0; i < text.Length; i++) if (text[i] == '\n') lineStarts.Add(i + 1);
+        for (var i = 0; i < declarations.Count; i++)
+        {
+            var line = lineStarts.BinarySearch(Math.Clamp(declarations[i].Span.Start, 0, text.Length));
+            if (line < 0) line = ~line - 1;
+            var candidate = line;
+            var inBlock = false;
+            while (candidate > 0)
+            {
+                var start = lineStarts[candidate - 1];
+                var end = lineStarts[candidate] - 1;
+                var value = text[start..Math.Max(start, end)].Trim();
+                if (value.Length == 0) { candidate--; continue; }
+                if (inBlock)
+                {
+                    candidate--;
+                    if (value.Contains("/*", StringComparison.Ordinal)) inBlock = false;
+                    continue;
+                }
+                if (value.EndsWith("*/", StringComparison.Ordinal)) { inBlock = true; candidate--; continue; }
+                if (value.StartsWith("//", StringComparison.Ordinal) || value.StartsWith("#", StringComparison.Ordinal)) { candidate--; continue; }
+                break;
+            }
+            starts[i] = lineStarts[candidate];
+        }
+        return starts;
+    }
 
     private static string Canonical(object? value)
     {
