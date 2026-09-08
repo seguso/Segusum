@@ -985,12 +985,17 @@ public static class CSharpToSegTranspiler
                             else if (v.Initializer != null)
                             {
                                 var prefix = "var " + v.Identifier.ValueText;
-                                if (x.Declaration.Type != null)
+                                var inferredCollectionType = v.Initializer.Value is ObjectCreationExpressionSyntax { Type: GenericNameSyntax { Identifier.ValueText: "List" } listCreation, ArgumentList.Arguments.Count: 0, Initializer: null }
+                                    ? MapCSharpType(listCreation, diagnostics, v)
+                                    : null;
+                                if (x.Declaration.Type != null && !IsImplicitVar(x.Declaration.Type))
                                 {
                                     var declared = MapCSharpType(x.Declaration.Type, diagnostics, x);
                                     if (declared == null) throw new InvalidOperationException($"unsupported local variable type '{x.Declaration.Type}'");
                                     prefix += ": " + declared;
                                 }
+                                else if (inferredCollectionType != null)
+                                    prefix += ": " + inferredCollectionType;
                                 AppendFormattedExpression(sb, indent + prefix + " = ", v.Initializer.Value, level);
                             }
                             else
@@ -1066,6 +1071,9 @@ public static class CSharpToSegTranspiler
             $"local variable type '{type}' is not representable by the SEG type mapping"));
         return null;
     }
+
+    private static bool IsImplicitVar(TypeSyntax type)
+        => type is IdentifierNameSyntax identifier && identifier.Identifier.ValueText == "var";
 
     private static string DefaultLocalValue(TypeSyntax sourceType, string mappedType)
     {

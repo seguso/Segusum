@@ -96,6 +96,14 @@ public sealed class GeneratorTests
     }
 
     [Fact]
+    public void EmptyCollectionWithoutContextIsDiagnosedInsteadOfBecomingObjectCollection()
+    {
+        var result = Run("def main:\n    var result = []\nend");
+        Assert.Contains(result.Diagnostics, d => d.GetMessage().Contains("Empty collection literal requires a contextual element type", StringComparison.Ordinal));
+        Assert.DoesNotContain("List<object>", Generated(result), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RoomChangedContextResolvesThreeLevelMemberChains()
     {
         var result = Run("room-changed roomA:\n    if isEvenRandomInput i.randomInputs.rnd2:\n        ret\n    end\nend", "public Room roomA = null!; public bool isEvenRandomInput(int value) => true;");

@@ -392,7 +392,7 @@ public sealed class CSharpToSegTranspilerTests
     {
         const string source = "class W { void M() { addHandlerUseHere(a, handler: i => { var result = new List<string>(); result.Add(\"x\"); }); } }";
         var result = CSharpToSegTranspiler.Transpile("x.cs", source, true);
-        Assert.Contains("var result = []", result.Text, StringComparison.Ordinal);
+        Assert.Contains("var result: List<string> = []", result.Text, StringComparison.Ordinal);
         Assert.Contains("result.Add \"x\"", result.Text, StringComparison.Ordinal);
         Assert.DoesNotContain(result.Diagnostics, x => x.Status == MigrationUnitStatus.Unsupported);
     }
@@ -431,7 +431,7 @@ public sealed class CSharpToSegTranspilerTests
     {
         const string source = "using System.Collections.Generic; class W { private List<string> foo(IEnumerable<string> objects) { var result = new List<string>(); foreach (var item in objects) result.Add(item); return result; } }";
         var result = CSharpToSegTranspiler.Transpile("x.cs", source, true);
-        Assert.Contains("var result = []", result.Text, StringComparison.Ordinal);
+        Assert.Contains("var result: List<string> = []", result.Text, StringComparison.Ordinal);
         Assert.Contains("for item in objects:", result.Text, StringComparison.Ordinal);
         Assert.DoesNotContain(result.Diagnostics, x => x.Status == MigrationUnitStatus.Unsupported);
     }
@@ -464,12 +464,12 @@ public sealed class CSharpToSegTranspilerTests
     }
 
     [Fact]
-    public void EmptyListWithoutContextProducesDiagnosticInsteadOfObjectList()
+    public void EmptyListInitializerTypeIsNotDiscardedForVar()
     {
         const string source = "using System.Collections.Generic; class W { private void Foo() { var result = new List<string>(); use(result); } }";
         var result = CSharpToSegTranspiler.Transpile("empty-no-context.cs", source, true);
         Assert.DoesNotContain("List<object>", result.Text, StringComparison.Ordinal);
-        Assert.Contains(result.Diagnostics, x => x.Reason.Contains("Empty collection literal requires a contextual element type", StringComparison.Ordinal));
+        Assert.DoesNotContain(result.Diagnostics, x => x.Reason.Contains("Empty collection literal requires a contextual element type", StringComparison.Ordinal));
     }
 
     [Fact]
