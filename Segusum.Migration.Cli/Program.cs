@@ -84,6 +84,9 @@ Console.WriteLine($"context-files: {result.ContextFileCount}");
 Console.WriteLine($"context-parse-ms: {result.ContextParseMilliseconds}");
 Console.WriteLine($"context-compilation-ms: {result.ContextCompilationMilliseconds}");
 Console.WriteLine($"context-managed-memory: {result.ContextManagedMemoryBytes}");
+Console.WriteLine($"project-discovery-ms: {result.ProjectDiscoveryMilliseconds}");
+Console.WriteLine($"project-load-ms: {result.ProjectLoadMilliseconds}");
+Console.WriteLine($"project-reference-load-ms: {result.ProjectReferenceLoadMilliseconds}");
 foreach (var group in result.Units.GroupBy(x => x.Status).OrderBy(x => x.Key)) Console.WriteLine($"units {group.Key}: {group.Count()}");
 if (audit)
     foreach (var unit in result.Units)

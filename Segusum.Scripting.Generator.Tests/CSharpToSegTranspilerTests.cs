@@ -882,6 +882,49 @@ public sealed class CSharpToSegTranspilerTests
     }
 
     [Fact]
+    public void ReachableGraphUsesReferencesFromContainingProject()
+    {
+        var directory = Directory.CreateTempSubdirectory("segusum-project-context-");
+        try
+        {
+            var input = Path.Combine(directory.FullName, "helpers.cs");
+            var project = Path.Combine(directory.FullName, "helpers.csproj");
+            var segAssembly = typeof(Seg.WorldBase).Assembly.Location.Replace("\\", "\\\\", StringComparison.Ordinal);
+            File.WriteAllText(project, $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net8.0</TargetFramework><EnableDefaultCompileItems>false</EnableDefaultCompileItems></PropertyGroup><ItemGroup><Compile Include=\"helpers.cs\" /><Reference Include=\"Segusum\"><HintPath>{segAssembly}</HintPath></Reference></ItemGroup></Project>");
+            const string source = "using Seg; class W { private void foo(WorldBase x) { WorldBase chosen = x; } private void foo(Character x) { Character chosen = x; } private void Caller(WorldBase value) { foo(value); } }";
+
+            var result = CSharpToSegTranspiler.Transpile(input, source, emitPartial: true, methodName: "Caller", worldId: "game");
+
+            Assert.Contains("def foo x: WorldBase", result.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain("Character chosen", result.Text, StringComparison.Ordinal);
+            Assert.True(result.ProjectLoadMilliseconds >= 0);
+        }
+        finally
+        {
+            directory.Delete(true);
+        }
+    }
+
+    [Fact]
+    public void MissingReferenceWithOneSourceCandidateUsesConservativeFallback()
+    {
+        const string source = "class W { private void foo(MissingType x) { MissingType chosen = x; } private void Caller(MissingType value) { foo(value); } }";
+        var result = CSharpToSegTranspiler.Transpile("missing-reference-single.cs", source, emitPartial: true, methodName: "Caller", worldId: "game");
+
+        Assert.Contains(result.Units, x => x.Id == "foo");
+        Assert.DoesNotContain(result.Diagnostics, x => x.Reason.Contains("ambiguous source helper call", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void MissingReferenceWithAmbiguousSourceCandidatesProducesDiagnostic()
+    {
+        const string source = "class W { private void foo(MissingA x) { } private void foo(MissingB x) { } private void Caller(MissingValue value) { foo(value); } }";
+        var result = CSharpToSegTranspiler.Transpile("missing-reference-ambiguous.cs", source, emitPartial: true, methodName: "Caller", worldId: "game");
+
+        Assert.Contains(result.Diagnostics, x => x.Reason.Contains("ambiguous source helper call 'foo'", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void ContextMethodsAreNotStandaloneRootsAndExternalCallsAreNotDefs()
     {
         var directory = Directory.CreateTempSubdirectory("segusum-overload-context-");

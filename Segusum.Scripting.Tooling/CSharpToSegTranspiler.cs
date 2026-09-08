@@ -26,6 +26,9 @@ public sealed record MigrationOutput(string Text, IReadOnlyList<MigrationDiagnos
     public long ContextParseMilliseconds { get; init; }
     public long ContextCompilationMilliseconds { get; init; }
     public long ContextManagedMemoryBytes { get; init; }
+    public long ProjectDiscoveryMilliseconds { get; init; }
+    public long ProjectLoadMilliseconds { get; init; }
+    public long ProjectReferenceLoadMilliseconds { get; init; }
 }
 
 /// <summary>Deterministic Roslyn-based first-pass C# to SEG emitter.</summary>
@@ -47,8 +50,12 @@ public static class CSharpToSegTranspiler
     private sealed record SemanticContext(
         IReadOnlyDictionary<SyntaxTree, SemanticModel> Models,
         IReadOnlyDictionary<IMethodSymbol, MethodDeclarationSyntax> MethodsBySymbol,
+        IReadOnlyDictionary<string, IReadOnlyList<MethodDeclarationSyntax>> MethodsByName,
         long CompilationMilliseconds,
-        long ManagedMemoryBytes);
+        long ManagedMemoryBytes,
+        long ProjectDiscoveryMilliseconds,
+        long ProjectLoadMilliseconds,
+        long ProjectReferenceLoadMilliseconds);
 
     private static string Indent(int level) => new(' ', level * 4);
 
@@ -63,7 +70,7 @@ public static class CSharpToSegTranspiler
         var root = (CompilationUnitSyntax)tree.GetRoot();
         var contextLoad = LoadContextRoots(path, contextRoot);
         var contextRoots = contextLoad.Roots;
-        var semanticContext = BuildSemanticContext(root, contextRoots);
+        var semanticContext = BuildSemanticContext(path, root, contextRoots);
         var allMethods = new[] { root }.Concat(contextRoots).SelectMany(x => x.DescendantNodes().OfType<MethodDeclarationSyntax>()).ToArray();
         var reachableHelpers = ReachableHelpers(root, methodName, contextRoots, semanticContext);
         var selectedMethods = allMethods
@@ -142,6 +149,15 @@ public static class CSharpToSegTranspiler
         var parsed = DslParser.Parse(new Segusum.Scripting.Core.DslSource(path + ".generated.seg", generated));
         foreach (var diagnostic in parsed.Diagnostics)
             diagnostics.Add(new(MigrationUnitStatus.Unsupported, path + ".generated.seg", diagnostic.Span.Line, "generated SEG is not parsable: " + diagnostic.Message));
+        foreach (var invocation in root.DescendantNodes().OfType<InvocationExpressionSyntax>())
+        {
+            if (ResolveSourceMethod(invocation, semanticContext) != null) continue;
+            var name = CallName(invocation);
+            if (name.Length == 0 || !semanticContext.MethodsByName.TryGetValue(name, out var candidates) || candidates.Count < 2) continue;
+            var line = invocation.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
+            diagnostics.Add(new(MigrationUnitStatus.Unsupported, path, line,
+                $"ambiguous source helper call '{name}': {string.Join(", ", candidates.Select(MethodSignature))}"));
+        }
         var units = BuildUnits(path, root, reachableHelpers, methodName, contextRoot, semanticContext);
         var output = new MigrationOutput(generated, diagnostics)
         {
@@ -151,7 +167,10 @@ public static class CSharpToSegTranspiler
             ContextFileCount = contextRoots.Count,
             ContextParseMilliseconds = contextLoad.ParseMilliseconds,
             ContextCompilationMilliseconds = semanticContext.CompilationMilliseconds,
-            ContextManagedMemoryBytes = Math.Max(contextLoad.ManagedMemoryBytes, semanticContext.ManagedMemoryBytes)
+            ContextManagedMemoryBytes = Math.Max(contextLoad.ManagedMemoryBytes, semanticContext.ManagedMemoryBytes),
+            ProjectDiscoveryMilliseconds = semanticContext.ProjectDiscoveryMilliseconds,
+            ProjectLoadMilliseconds = semanticContext.ProjectLoadMilliseconds,
+            ProjectReferenceLoadMilliseconds = semanticContext.ProjectReferenceLoadMilliseconds
         };
         return output;
     }
@@ -171,15 +190,40 @@ public static class CSharpToSegTranspiler
         return new(roots, stopwatch.ElapsedMilliseconds, GC.GetTotalMemory(false));
     }
 
-    private static SemanticContext BuildSemanticContext(CompilationUnitSyntax root, IReadOnlyList<CompilationUnitSyntax> contextRoots)
+    private static SemanticContext BuildSemanticContext(string inputPath, CompilationUnitSyntax root, IReadOnlyList<CompilationUnitSyntax> contextRoots)
     {
+        var discovery = System.Diagnostics.Stopwatch.StartNew();
+        var projectPath = FindContainingProject(inputPath);
+        discovery.Stop();
+        long projectLoadMilliseconds = 0;
+        long projectReferenceLoadMilliseconds = 0;
+        IReadOnlyList<MetadataReference>? projectReferences = null;
+        if (projectPath != null)
+        {
+            var load = System.Diagnostics.Stopwatch.StartNew();
+            try
+            {
+                using var workspaceContext = MsBuildWorkspaceContext.OpenProjectAsync(projectPath).GetAwaiter().GetResult();
+                load.Stop();
+                projectLoadMilliseconds = load.ElapsedMilliseconds;
+                var referenceLoad = System.Diagnostics.Stopwatch.StartNew();
+                projectReferences = workspaceContext.Compilation.References.ToArray();
+                referenceLoad.Stop();
+                projectReferenceLoadMilliseconds = referenceLoad.ElapsedMilliseconds;
+            }
+            catch
+            {
+                load.Stop();
+                projectLoadMilliseconds = load.ElapsedMilliseconds;
+            }
+        }
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var trees = new[] { root }.Concat(contextRoots).Select(x => x.SyntaxTree).ToArray();
-        var references = ((string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES"))?.Split(Path.PathSeparator)
+        var references = projectReferences?.ToList() ?? (((string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES"))?.Split(Path.PathSeparator)
             .Where(File.Exists)
             .Select(path => MetadataReference.CreateFromFile(path))
             .Cast<MetadataReference>()
-            .ToList() ?? new List<MetadataReference>();
+            .ToList() ?? new List<MetadataReference>());
         var compilation = CSharpCompilation.Create("SegusumMigrationContext", trees, references,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
         var models = trees.ToDictionary(x => x, x => compilation.GetSemanticModel(x));
@@ -188,8 +232,25 @@ public static class CSharpToSegTranspiler
             foreach (var method in tree.GetRoot().DescendantNodes().OfType<MethodDeclarationSyntax>())
                 if (models[tree].GetDeclaredSymbol(method) is IMethodSymbol symbol)
                     methods[symbol] = method;
+        var methodsByName = trees.SelectMany(tree => tree.GetRoot().DescendantNodes().OfType<MethodDeclarationSyntax>())
+            .GroupBy(x => x.Identifier.ValueText, StringComparer.Ordinal)
+            .ToDictionary(x => x.Key, x => (IReadOnlyList<MethodDeclarationSyntax>)x.ToArray(), StringComparer.Ordinal);
         stopwatch.Stop();
-        return new(models, methods, stopwatch.ElapsedMilliseconds, GC.GetTotalMemory(false));
+        return new(models, methods, methodsByName, stopwatch.ElapsedMilliseconds, GC.GetTotalMemory(false),
+            discovery.ElapsedMilliseconds, projectLoadMilliseconds, projectReferenceLoadMilliseconds);
+    }
+
+    private static string? FindContainingProject(string inputPath)
+    {
+        var directory = new DirectoryInfo(Path.GetDirectoryName(Path.GetFullPath(inputPath))!);
+        while (directory != null)
+        {
+            var projects = directory.EnumerateFiles("*.csproj", SearchOption.TopDirectoryOnly)
+                .OrderBy(x => x.FullName, StringComparer.OrdinalIgnoreCase).ToArray();
+            if (projects.Length != 0) return projects[0].FullName;
+            directory = directory.Parent;
+        }
+        return null;
     }
 
 
@@ -280,10 +341,19 @@ public static class CSharpToSegTranspiler
 
     private static MethodDeclarationSyntax? ResolveSourceMethod(InvocationExpressionSyntax invocation, SemanticContext semanticContext)
     {
-        if (!semanticContext.Models.TryGetValue(invocation.SyntaxTree, out var model)) return null;
-        var symbol = model.GetSymbolInfo(invocation).Symbol as IMethodSymbol;
-        return symbol != null && semanticContext.MethodsBySymbol.TryGetValue(symbol, out var method) ? method : null;
+        if (semanticContext.Models.TryGetValue(invocation.SyntaxTree, out var model))
+        {
+            var symbol = model.GetSymbolInfo(invocation).Symbol as IMethodSymbol;
+            if (symbol != null && semanticContext.MethodsBySymbol.TryGetValue(symbol, out var method)) return method;
+        }
+        var name = CallName(invocation);
+        return name.Length != 0 && semanticContext.MethodsByName.TryGetValue(name, out var candidates) && candidates.Count == 1
+            ? candidates[0]
+            : null;
     }
+
+    private static string MethodSignature(MethodDeclarationSyntax method)
+        => method.Identifier.ValueText + "(" + string.Join(", ", method.ParameterList.Parameters.Select(x => x.Type?.ToString() ?? "?")) + ")";
 
     private sealed record IsolatedUnit(string Text, IReadOnlyList<MigrationDiagnostic> Diagnostics);
 
