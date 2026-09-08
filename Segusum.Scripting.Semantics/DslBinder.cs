@@ -84,6 +84,7 @@ public sealed class BoundModel
 {
     public Dictionary<DslExpression, BoundValue> Values { get; } = new(ReferenceComparer<DslExpression>.Instance);
     public Dictionary<DslExpression, ITypeSymbol?> ExpressionTypes { get; } = new(ReferenceComparer<DslExpression>.Instance);
+    public Dictionary<DslExpression, ITypeSymbol?> ContextualTypes { get; } = new(ReferenceComparer<DslExpression>.Instance);
     public Dictionary<DslExpression, BoundCall> Calls { get; } = new(ReferenceComparer<DslExpression>.Instance);
     public Dictionary<DslExpression, BoundDomainOperation> DomainOperations { get; } = new(ReferenceComparer<DslExpression>.Instance);
     public Dictionary<string, string> References { get; } = new(StringComparer.Ordinal);
@@ -368,15 +369,19 @@ public sealed class DslBinder
     { scope ??= new(); Require(BindName(cycleName, span, scope), cycle, span, "add requires a Cycle."); if (repeat != null && repeat is not ("once" or "forever")) Report("SEGDSL316", $"Unknown Repeat modifier '{repeat}'.", span); if (condition != null) Require(BindExpression(condition, scope, dateTimeNullable), compilation.GetSpecialType(SpecialType.System_Boolean), condition.Span, "when must be bool."); BindStatements(body, new(scope), null); }
     private void BindStatements(IEnumerable<DslStatement> statements, Dictionary<string, ITypeSymbol> scope, ITypeSymbol? returnType)
     {
+        var statementArray = statements as IReadOnlyList<DslStatement> ?? statements.ToArray();
         // Cycle predicates may refer to a later sibling (for example the
         // predicate of cielo1 mentions cielo2). Intern all sibling IDs before
         // binding any predicate so forward references retain CycleElemId type.
-        foreach (var statement in statements)
+        foreach (var statement in statementArray)
         {
             switch (statement)
             {
                 case VariableDeclaration v:
-                    var type = v.Type == null ? BindExpression(v.Initializer, scope) : TypeOf(v.Type);
+                    var declaredType = v.Type == null ? null : TypeOf(v.Type);
+                    var inferredEmptyType = declaredType ?? InferEmptyListType(v, statementArray, scope);
+                    var type = BindExpression(v.Initializer, scope, null, inferredEmptyType);
+                    if (type == null && inferredEmptyType != null) type = inferredEmptyType;
                     if (type != null) { scope[NormalizeKey(v.Name)] = type; AddLocalIdentity(v.Name, "local", v.Span); }
                     if (v.Type != null && v.Initializer is LiteralExpression { Kind: "null" }) nullLiterals.Add(v.Initializer);
                     break;
@@ -388,9 +393,10 @@ public sealed class DslBinder
                         if (target is not IPropertySymbol { SetMethod: not null } && target is not IFieldSymbol { IsReadOnly: false }) Report("SEGDSL321", $"Member '{a.MemberName ?? a.Name}' is not writable.", a.Span);
                         if (target != null)
                             RecordReference(a.MemberName ?? a.Name, a.MemberSpan ?? a.Span, target is IMethodSymbol ? BoundSymbolKind.CSharpMethod : BoundSymbolKind.CSharpProperty, target, null, "member-name");
-                        RequireExpression(a.Value, BindExpression(a.Value, scope), target is IPropertySymbol p ? p.Type : target is IFieldSymbol f ? f.Type : null, "assignment type mismatch.");
+                        var targetType = target is IPropertySymbol p ? p.Type : target is IFieldSymbol f ? f.Type : null;
+                        RequireExpression(a.Value, BindExpression(a.Value, scope, null, targetType), targetType, "assignment type mismatch.");
                     }
-                    else { var targetType = BindName(a.Name, a.NameSpan, scope); RequireExpression(a.Value, BindExpression(a.Value, scope), targetType, "assignment type mismatch."); }
+                    else { var targetType = BindName(a.Name, a.NameSpan, scope); RequireExpression(a.Value, BindExpression(a.Value, scope, null, targetType), targetType, "assignment type mismatch."); }
                     break;
                 case IncrementStatement i: Require(BindName(i.Name, i.NameSpan, scope), compilation.GetSpecialType(SpecialType.System_Int32), i.Span, "++ requires int."); break;
                 case ForStatement f:
@@ -411,7 +417,7 @@ public sealed class DslBinder
                     {
                         if (returnType != null) Report("SEGDSL313", "A bare ret is only valid in a void function.", r.Span);
                     }
-                    else RequireExpression(r.Expression, BindExpression(r.Expression, scope), returnType, "return type mismatch.");
+                    else RequireExpression(r.Expression, BindExpression(r.Expression, scope, null, returnType), returnType, "return type mismatch.");
                     break;
                 case CallStatement c: BindExpression(c.Expression, scope); break;
                 case NextCycleStatement n: Require(BindExpression(n.Cycle, scope), cycle, n.Span, "next requires a Cycle."); break;
@@ -466,6 +472,46 @@ public sealed class DslBinder
             }
         }
     }
+    private ITypeSymbol? InferEmptyListType(VariableDeclaration declaration, IReadOnlyList<DslStatement> statements, Dictionary<string, ITypeSymbol> scope)
+    {
+        if (declaration.Initializer is not ListExpression { Elements.Count: 0 }) return null;
+        var declarationIndex = -1;
+        for (var i = 0; i < statements.Count; i++) if (ReferenceEquals(statements[i], declaration)) { declarationIndex = i; break; }
+        for (var index = declarationIndex + 1; index < statements.Count; index++)
+        {
+            if (TryFindAddedElementType(statements[index], declaration.Name, scope, out var element))
+                return GetTypeByMetadataName("System.Collections.Generic.List`1")?.Construct(element);
+            if (statements[index] is ReturnStatement { Expression: IdentifierExpression { Name: var returned } } && NormalizeKey(returned) == NormalizeKey(declaration.Name))
+                break;
+        }
+        return null;
+    }
+    private bool TryFindAddedElementType(DslStatement statement, string variableName, Dictionary<string, ITypeSymbol> scope, out ITypeSymbol element)
+    {
+        element = null!;
+        if (statement is CallStatement { Expression: CallExpression call } && call.Receiver is IdentifierExpression receiver && NormalizeKey(receiver.Name) == NormalizeKey(variableName) && string.Equals(call.Name, "Add", StringComparison.OrdinalIgnoreCase) && call.Arguments.Count == 1)
+        {
+            var inferred = BindExpression(call.Arguments[0].Expression, scope);
+            if (inferred != null) { element = inferred; return true; }
+        }
+        if (statement is IfStatement conditional)
+        {
+            foreach (var branch in conditional.Branches)
+                foreach (var child in branch.Body)
+                    if (TryFindAddedElementType(child, variableName, scope, out element)) return true;
+            if (conditional.ElseBody != null)
+                foreach (var child in conditional.ElseBody)
+                    if (TryFindAddedElementType(child, variableName, scope, out element)) return true;
+        }
+        return false;
+    }
+    private ITypeSymbol? ContextElementType(ITypeSymbol? type)
+        => type switch
+        {
+            IArrayTypeSymbol array => array.ElementType,
+            INamedTypeSymbol named when named.IsGenericType && named.TypeArguments.Length == 1 => named.TypeArguments[0],
+            _ => null
+        };
     private ITypeSymbol? inputType;
     private bool inputContextAllowed;
     private void BindNamedCutscene(NamedCutsceneStatement statement, Dictionary<string, ITypeSymbol>? scope = null, ITypeSymbol? returnType = null)
@@ -523,13 +569,14 @@ public sealed class DslBinder
         }
         namedCutsceneMetadata[key] = title.Value;
     }
-    private ITypeSymbol? BindExpression(DslExpression expression, Dictionary<string, ITypeSymbol> scope, ITypeSymbol? contextualIt = null)
+    private ITypeSymbol? BindExpression(DslExpression expression, Dictionary<string, ITypeSymbol> scope, ITypeSymbol? contextualIt = null, ITypeSymbol? expectedType = null)
     {
-        var type = profile.Measure("BindExpression", () => BindExpressionCore(expression, scope, contextualIt));
+        if (expression is ListExpression) model.ContextualTypes[expression] = expectedType;
+        var type = profile.Measure("BindExpression", () => BindExpressionCore(expression, scope, contextualIt, expectedType));
         model.ExpressionTypes[expression] = type;
         return type;
     }
-    private ITypeSymbol? BindExpressionCore(DslExpression expression, Dictionary<string, ITypeSymbol> scope, ITypeSymbol? contextualIt = null)
+    private ITypeSymbol? BindExpressionCore(DslExpression expression, Dictionary<string, ITypeSymbol> scope, ITypeSymbol? contextualIt = null, ITypeSymbol? expectedType = null)
     {
         switch (expression)
         {
@@ -538,9 +585,13 @@ public sealed class DslBinder
             {
                 if (list.Elements.Count == 0)
                 {
-                    var objectType = compilation.GetSpecialType(SpecialType.System_Object);
-                    var listDefinition = GetTypeByMetadataName("System.Collections.Generic.List`1");
-                    return listDefinition?.Construct(objectType);
+                    var contextual = expectedType ?? ContextElementType(expectedType);
+                    if (contextual == null)
+                    {
+                        Report("SEGDSL334", "Empty collection literal requires a contextual element type.", list.Span);
+                        return null;
+                    }
+                    return expectedType ?? GetTypeByMetadataName("System.Collections.Generic.List`1")?.Construct(contextual);
                 }
                 var elementTypes = list.Elements
                     .Select(element => BindExpression(element, scope, contextualIt))
@@ -552,8 +603,7 @@ public sealed class DslBinder
                         Report("SEGDSL309", "List elements must have a compatible type.", element.Span);
                     return null;
                 }
-                var definition = GetTypeByMetadataName("System.Collections.Generic.List`1");
-                return definition?.Construct(listElementType);
+                return compilation.CreateArrayTypeSymbol(listElementType);
             }
             case IdentifierExpression i:
                 if (i.Name == "it" && contextualIt != null) { model.Values[i] = new BoundValue(contextualIt, "x", null, BoundSymbolKind.ContextualIt); return contextualIt; }
@@ -569,7 +619,7 @@ public sealed class DslBinder
             case ThisExpression current:
                 model.Values[current] = new BoundValue(world, "this", world, BoundSymbolKind.Local);
                 return world;
-            case ParenthesizedExpression p: return BindExpression(p.Expression, scope, contextualIt);
+            case ParenthesizedExpression p: return BindExpression(p.Expression, scope, contextualIt, expectedType);
             case ConditionalExpression conditional:
                 var conditionType = BindExpression(conditional.Condition, scope, contextualIt);
                 Require(conditionType, compilation.GetSpecialType(SpecialType.System_Boolean), conditional.Condition.Span, "conditional condition must be bool.");
@@ -712,8 +762,8 @@ public sealed class DslBinder
         var result = new List<BoundArgument>(); var used = new HashSet<string>(StringComparer.Ordinal); var namedSeen = false; var positionalIndex = 0; var score = 0;
         foreach (var argument in call.Arguments)
         {
-            if (argument.Name != null) { namedSeen = true; var exact = parameters.Where(p => string.Equals(p.Name, argument.Name, StringComparison.Ordinal)).ToArray(); var normalized = exact.Length == 0 ? parameters.Where(p => NormalizeKey(p.Name) == NormalizeKey(argument.Name)).ToArray() : exact; if (normalized.Length > 1) return Failure(CallFailureKind.UnknownNamedArgument, argument.Span, $"Ambiguous named argument '{argument.Name}'."); var parameter = normalized.SingleOrDefault(); if (parameter == null) return Failure(CallFailureKind.UnknownNamedArgument, argument.Span, $"Unknown named argument '{argument.Name}'."); if (!used.Add(parameter.Name)) return Failure(CallFailureKind.DuplicateNamedArgument, argument.Span, $"Duplicate named argument '{argument.Name}'."); var actual = BindExpression(argument.Expression, scope, contextualIt); var expected = ParamsElementType(parameter) ?? parameter.Type; var conversion = Classify(actual, expected); if (!IsCompatible(argument.Expression, actual, expected)) return Failure(CallFailureKind.IncompatibleArgument, argument.Expression.Span, $"Argument '{argument.Name}' has incompatible type (expected {expected?.ToDisplayString() ?? "<unknown>"}, actual {actual?.ToDisplayString() ?? "<unknown>"})."); score += ConversionScore(conversion); result.Add(new BoundArgument(argument, parameter.Symbol, parameter.Name)); }
-            else { if (namedSeen) return Failure(CallFailureKind.PositionalAfterNamed, argument.Span, "Positional arguments cannot follow a named argument."); var parameterIndex = positionalIndex; if (parameterIndex >= parameters.Count) { if (parameters.Count == 0 || !parameters[parameters.Count - 1].IsParams) return Failure(CallFailureKind.TooManyArguments, argument.Span, "Too many arguments."); parameterIndex = parameters.Count - 1; } else positionalIndex++; var parameter = parameters[parameterIndex]; if (parameter.IsParams) positionalIndex = parameters.Count; used.Add(parameter.Name); var actual = BindExpression(argument.Expression, scope, contextualIt); var expected = ParamsElementType(parameter) ?? parameter.Type; var conversion = Classify(actual, expected); if (!IsCompatible(argument.Expression, actual, expected)) return Failure(CallFailureKind.IncompatibleArgument, argument.Expression.Span, $"Argument has incompatible type (expected {expected?.ToDisplayString() ?? "<unknown>"}, actual {actual?.ToDisplayString() ?? "<unknown>"})."); score += ConversionScore(conversion); result.Add(new BoundArgument(argument, parameter.Symbol, parameter.Name)); }
+            if (argument.Name != null) { namedSeen = true; var exact = parameters.Where(p => string.Equals(p.Name, argument.Name, StringComparison.Ordinal)).ToArray(); var normalized = exact.Length == 0 ? parameters.Where(p => NormalizeKey(p.Name) == NormalizeKey(argument.Name)).ToArray() : exact; if (normalized.Length > 1) return Failure(CallFailureKind.UnknownNamedArgument, argument.Span, $"Ambiguous named argument '{argument.Name}'."); var parameter = normalized.SingleOrDefault(); if (parameter == null) return Failure(CallFailureKind.UnknownNamedArgument, argument.Span, $"Unknown named argument '{argument.Name}'."); if (!used.Add(parameter.Name)) return Failure(CallFailureKind.DuplicateNamedArgument, argument.Span, $"Duplicate named argument '{argument.Name}'."); var expected = ParamsElementType(parameter) ?? parameter.Type; var actual = BindExpression(argument.Expression, scope, contextualIt, expected); var conversion = Classify(actual, expected); if (!IsCompatible(argument.Expression, actual, expected)) return Failure(CallFailureKind.IncompatibleArgument, argument.Expression.Span, $"Argument '{argument.Name}' has incompatible type (expected {expected?.ToDisplayString() ?? "<unknown>"}, actual {actual?.ToDisplayString() ?? "<unknown>"})."); score += ConversionScore(conversion); result.Add(new BoundArgument(argument, parameter.Symbol, parameter.Name)); }
+            else { if (namedSeen) return Failure(CallFailureKind.PositionalAfterNamed, argument.Span, "Positional arguments cannot follow a named argument."); var parameterIndex = positionalIndex; if (parameterIndex >= parameters.Count) { if (parameters.Count == 0 || !parameters[parameters.Count - 1].IsParams) return Failure(CallFailureKind.TooManyArguments, argument.Span, "Too many arguments."); parameterIndex = parameters.Count - 1; } else positionalIndex++; var parameter = parameters[parameterIndex]; if (parameter.IsParams) positionalIndex = parameters.Count; used.Add(parameter.Name); var expected = ParamsElementType(parameter) ?? parameter.Type; var actual = BindExpression(argument.Expression, scope, contextualIt, expected); var conversion = Classify(actual, expected); if (!IsCompatible(argument.Expression, actual, expected)) return Failure(CallFailureKind.IncompatibleArgument, argument.Expression.Span, $"Argument has incompatible type (expected {expected?.ToDisplayString() ?? "<unknown>"}, actual {actual?.ToDisplayString() ?? "<unknown>"})."); score += ConversionScore(conversion); result.Add(new BoundArgument(argument, parameter.Symbol, parameter.Name)); }
         }
         var missing = parameters.FirstOrDefault(p => !p.Optional && !p.IsParams && !used.Contains(p.Name)); if (missing != null) return Failure(CallFailureKind.MissingRequiredArgument, call.Span, $"Required argument '{missing.Name}' is missing.");
         score += parameters.Count(p => p.Optional && !used.Contains(p.Name)) * 10;
@@ -729,7 +779,19 @@ public sealed class DslBinder
     private static int FailurePriority(CallFailureKind kind) => kind switch { CallFailureKind.UnknownNamedArgument => 0, CallFailureKind.DuplicateNamedArgument => 1, CallFailureKind.PositionalAfterNamed => 2, CallFailureKind.IncompatibleArgument => 3, CallFailureKind.MissingRequiredArgument => 4, _ => 5 };
     private bool Compatible(ITypeSymbol? actual, ITypeSymbol expected) => profile.Measure("Compatible/type checks", () => actual != null && Microsoft.CodeAnalysis.CSharp.CSharpExtensions.ClassifyConversion(compilation, actual, expected).IsImplicit);
     private static bool IsNumeric(ITypeSymbol? type) => type?.SpecialType is SpecialType.System_Byte or SpecialType.System_SByte or SpecialType.System_Int16 or SpecialType.System_UInt16 or SpecialType.System_Int32 or SpecialType.System_UInt32 or SpecialType.System_Int64 or SpecialType.System_UInt64 or SpecialType.System_Single or SpecialType.System_Double or SpecialType.System_Decimal;
-    private bool IsCompatible(DslExpression expression, ITypeSymbol? actual, ITypeSymbol? expected) => expected != null && ((nullLiterals.Contains(expression) && (expected.IsReferenceType || expected.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T)) || Compatible(actual, expected));
+    private bool IsCompatible(DslExpression expression, ITypeSymbol? actual, ITypeSymbol? expected)
+    {
+        if (expected == null) return false;
+        if (expression is ListExpression && actual != null && TryGetCollectionElement(actual, out var actualElement) && TryGetCollectionElement(expected, out var expectedElement) && Compatible(actualElement, expectedElement)) return true;
+        return (nullLiterals.Contains(expression) && (expected.IsReferenceType || expected.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T)) || Compatible(actual, expected);
+    }
+    private bool TryGetCollectionElement(ITypeSymbol type, out ITypeSymbol element)
+    {
+        if (type is IArrayTypeSymbol array) { element = array.ElementType; return true; }
+        if (type is INamedTypeSymbol named && named.IsGenericType && named.TypeArguments.Length == 1 && (named.Name is "List" or "IEnumerable" || named.AllInterfaces.Any(x => x.Name == "IEnumerable"))) { element = named.TypeArguments[0]; return true; }
+        element = null!;
+        return false;
+    }
     private void RequireExpression(DslExpression expression, ITypeSymbol? actual, ITypeSymbol? expected, string message) { if (!IsCompatible(expression, actual, expected)) Report("SEGDSL313", message, expression.Span); }
     private ITypeSymbol? BindName(string name, SourceSpan span, Dictionary<string, ITypeSymbol>? scope = null)
         => profile.Measure("BindName", () => BindNameCore(name, span, scope));

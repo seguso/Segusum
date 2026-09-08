@@ -265,6 +265,11 @@ public static class GameplayMigrationVerifier
     }
     private static IReadOnlyList<MigrationEffect> CSharpEffects(StatementSyntax statement, string path)
     {
+        if (statement is ForEachStatementSyntax loop)
+        {
+            var body = BlockStatements(loop.Statement).SelectMany(x => CSharpEffects(x, path));
+            return new[] { new MigrationEffect("for", loop.Identifier.ValueText + ":" + CanonicalCSharp(loop.Expression) + "[" + string.Join(";", body.Select(x => x.Kind + "=" + x.Value)) + "]", path, Line(loop)) };
+        }
         var effects = new List<MigrationEffect>();
         if (statement is ReturnStatementSyntax ret) effects.Add(new("return", CanonicalCSharp(ret.Expression), path, Line(ret)));
         foreach (var variable in statement.DescendantNodes().OfType<VariableDeclaratorSyntax>().Where(x => x.Initializer is not null))
@@ -347,7 +352,7 @@ public static class GameplayMigrationVerifier
             VariableDeclaration variable => new[] { new MigrationEffect("assign", variable.Name + "=" + CanonicalDsl(variable.Initializer), path, line) },
             IncrementStatement increment => new[] { new MigrationEffect("increment", increment.Name + "++", path, line) },
             CallStatement call => DslCallEffect(call.Expression, path, line),
-            ForStatement loop => loop.Body.SelectMany(x => DslEffects(x, path)).ToArray(),
+            ForStatement loop => new[] { new MigrationEffect("for", loop.ItemName + ":" + CanonicalDsl(loop.Collection) + "[" + string.Join(";", loop.Body.SelectMany(x => DslEffects(x, path)).Select(x => x.Kind + "=" + x.Value)) + "]", path, line) },
             ReturnStatement ret => new[] { new MigrationEffect("return", CanonicalDsl(ret.Expression), path, line) },
             _ => Array.Empty<MigrationEffect>()
         };

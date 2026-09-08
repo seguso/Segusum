@@ -455,6 +455,24 @@ public sealed class CSharpToSegTranspilerTests
     }
 
     [Fact]
+    public void EmptyListUsesDeclaredCollectionContext()
+    {
+        const string source = "using System.Collections.Generic; class W { private List<string> Foo() { List<string> result = new List<string>(); return result; } }";
+        var result = CSharpToSegTranspiler.Transpile("empty-context.cs", source, true);
+        Assert.Contains("var result: List<string> = []", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(result.Diagnostics, x => x.Status == MigrationUnitStatus.Unsupported);
+    }
+
+    [Fact]
+    public void EmptyListWithoutContextProducesDiagnosticInsteadOfObjectList()
+    {
+        const string source = "using System.Collections.Generic; class W { private void Foo() { var result = new List<string>(); use(result); } }";
+        var result = CSharpToSegTranspiler.Transpile("empty-no-context.cs", source, true);
+        Assert.DoesNotContain("List<object>", result.Text, StringComparison.Ordinal);
+        Assert.Contains(result.Diagnostics, x => x.Reason.Contains("Empty collection literal requires a contextual element type", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void ArrayCreationPreservesNestedExpressionsAndWorksAsNamedCutsceneArgument()
     {
         const string source = "class W { void M() { addHandlerUseHere(a, handler: i => { using (namedCutScene(ncs, roomA, new Mentionable[] { foo(x), this, \"[[translation]]\" })) { bar(); } }); } }";

@@ -233,13 +233,18 @@ public sealed class SegusumGenerator : IIncrementalGenerator
     };
     private static string EmitList(ListExpression list, BoundModel model)
     {
-        var elementType = model.ExpressionTypes.TryGetValue(list, out var type) && type is INamedTypeSymbol named && named.IsGenericType
-            ? named.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)
-            : null;
+        var type = model.ContextualTypes.TryGetValue(list, out var contextual) && contextual != null
+            ? contextual
+            : model.ExpressionTypes.TryGetValue(list, out var actual) ? actual : null;
+        var array = type as IArrayTypeSymbol;
+        var named = type as INamedTypeSymbol;
+        var elementType = array?.ElementType ?? (named is { IsGenericType: true, TypeArguments.Length: 1 } ? named.TypeArguments[0] : null);
         var elements = string.Join(", ", list.Elements.Select(x => Emit(x, model)));
-        return elementType == null
-            ? "new System.Collections.Generic.List<object>() { " + elements + " }"
-            : "new System.Collections.Generic.List<" + elementType + ">() { " + elements + " }";
+        if (elementType == null) return "new[] { " + elements + " }";
+        var rendered = elementType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
+        return array != null
+            ? "new " + rendered + "[] { " + elements + " }"
+            : "new System.Collections.Generic.List<" + rendered + ">() { " + elements + " }";
     }
     private static string EmitUnary(UnaryExpression expression, BoundModel model)
     {

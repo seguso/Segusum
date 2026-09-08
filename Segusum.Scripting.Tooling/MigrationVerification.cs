@@ -728,7 +728,9 @@ public static class MigrationVerifier
                     CollectCSharpConditionalChain(conditional, effects, true);
                     break;
                 case ForEachStatementSyntax loop:
-                    CollectCSharpHandlerEffects(loop.Statement is BlockSyntax block ? block.Statements : new[] { loop.Statement }, effects);
+                    var csharpBody = new List<string>();
+                    CollectCSharpHandlerEffects(loop.Statement is BlockSyntax block ? block.Statements : new[] { loop.Statement }, csharpBody);
+                    effects.Add("for:" + loop.Identifier.ValueText + ":" + CanonicalCSharpExpression(loop.Expression.ToString()) + "[" + string.Join(";", csharpBody) + "]");
                     break;
                 case ExpressionStatementSyntax expression when expression.Expression is AssignmentExpressionSyntax assignment:
                     var target = assignment.Left.ToString();
@@ -905,7 +907,7 @@ public static class MigrationVerifier
                         effects.Add("call:" + CanonicalDslExpression(call.Expression));
                     break;
                 case ForStatement loop:
-                    effects.AddRange(ExtractDslHandlerEffects(loop.Body));
+                    effects.Add("for:" + loop.ItemName + ":" + CanonicalDslExpression(loop.Collection) + "[" + string.Join(";", ExtractDslHandlerEffects(loop.Body)) + "]");
                     break;
                 case ReturnStatement ret: effects.Add("return:" + CanonicalDslExpression(ret.Expression)); break;
                 case NextCycleStatement next: effects.Add("cycle:next:" + CanonicalDslExpression(next.Cycle)); break;
@@ -986,6 +988,7 @@ public static class MigrationVerifier
     private static string CanonicalCSharpSyntax(ExpressionSyntax expression) => expression switch
     {
         LiteralExpressionSyntax literal when literal.IsKind(SyntaxKind.CharacterLiteralExpression) => "\"" + literal.Token.ValueText.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal) + "\"",
+        ObjectCreationExpressionSyntax creation when creation.Type is GenericNameSyntax generic && generic.Identifier.ValueText is "List" or "IEnumerable" && creation.ArgumentList?.Arguments.Count == 0 && creation.Initializer is null => "[]",
         ImplicitArrayCreationExpressionSyntax array => "[" + string.Join(",", array.Initializer.Expressions.Select(CanonicalCSharpSyntax)) + "]",
         ArrayCreationExpressionSyntax array when array.Initializer is not null => "[" + string.Join(",", array.Initializer.Expressions.Select(CanonicalCSharpSyntax)) + "]",
         InvocationExpressionSyntax call when call.Expression is MemberAccessExpressionSyntax member && member.Name.Identifier.ValueText == "ToArray" && call.ArgumentList.Arguments.Count == 0 => CanonicalCSharpSyntax(member.Expression),
@@ -1469,7 +1472,9 @@ public static class MigrationVerifier
     {
         null => null,
         IdentifierExpression id => id.Name,
-        LiteralExpression literal => literal.Kind is "string" or "raw-string" ? DslLiteralSemantics.Decode(literal) : literal.Value,
+        LiteralExpression literal => literal.Kind is "string" or "raw-string"
+            ? "\"" + DslLiteralSemantics.Decode(literal).Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal) + "\""
+            : literal.Value,
         UnaryExpression unary => unary.Operator + ExpressionText(unary.Operand),
         BinaryExpression binary => ExpressionText(binary.Left) + " " + binary.Operator + " " + ExpressionText(binary.Right),
         ExistsExpression exists => "exists[from " + ExpressionText(exists.Collection) + " " + exists.ItemName + " where " + ExpressionText(exists.Predicate) + "]",

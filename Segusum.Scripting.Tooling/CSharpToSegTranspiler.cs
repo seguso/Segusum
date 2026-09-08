@@ -70,15 +70,27 @@ public static class CSharpToSegTranspiler
 
     public static MigrationOutput Transpile(string path, string text, bool emitPartial, string? methodName, string worldId, string? contextRoot = null)
     {
+        var profile = string.Equals(Environment.GetEnvironmentVariable("SEGUSUM_MIGRATION_PROFILE"), "1", StringComparison.Ordinal);
+        var profileClock = System.Diagnostics.Stopwatch.StartNew();
+        void Mark(string phase)
+        {
+            if (!profile) return;
+            var process = System.Diagnostics.Process.GetCurrentProcess();
+            Console.Error.WriteLine($"migration-phase={phase} elapsed-ms={profileClock.Elapsed.TotalMilliseconds:0} managed-memory={GC.GetTotalMemory(false)} working-set={process.WorkingSet64}");
+        }
         var tree = CSharpSyntaxTree.ParseText(text, path: path);
+        Mark("input-parse");
         var diagnostics = new List<MigrationDiagnostic>();
         var sb = new StringBuilder().Append("world ").Append(worldId).Append('\n');
         var root = (CompilationUnitSyntax)tree.GetRoot();
         var contextLoad = LoadContextRoots(path, contextRoot);
+        Mark("context-parse");
         var contextRoots = contextLoad.Roots;
         var semanticContext = BuildSemanticContext(path, root, contextRoots);
+        Mark("semantic-compilation");
         var allMethods = new[] { root }.Concat(contextRoots).SelectMany(x => x.DescendantNodes().OfType<MethodDeclarationSyntax>()).ToArray();
         var reachableHelpers = ReachableHelpers(root, methodName, contextRoots, semanticContext);
+        Mark("reachable-graph");
         var selectedMethods = allMethods
             .Where(x => reachableHelpers.Contains(x))
             .Where(x => methodName == null || x.Identifier.ValueText == methodName || reachableHelpers.Contains(x)).ToArray();
@@ -142,6 +154,7 @@ public static class CSharpToSegTranspiler
                 EnsureExactlyOneBlankLine(sb);
             }
         }
+        Mark("csharp-to-seg-emission");
         var emittedLocalFunctions = new HashSet<int>();
         foreach (var methodContext in selectedMethodContexts)
         {
@@ -157,6 +170,7 @@ public static class CSharpToSegTranspiler
         // translation failure.
         var generated = EnsureComments(root, sb.ToString());
         var parsed = DslParser.Parse(new Segusum.Scripting.Core.DslSource(path + ".generated.seg", generated));
+        Mark("seg-parse");
         foreach (var diagnostic in parsed.Diagnostics)
             diagnostics.Add(new(MigrationUnitStatus.Unsupported, path + ".generated.seg", diagnostic.Span.Line, "generated SEG is not parsable: " + diagnostic.Message));
         foreach (var invocation in root.DescendantNodes().OfType<InvocationExpressionSyntax>())
@@ -169,6 +183,7 @@ public static class CSharpToSegTranspiler
                 $"ambiguous source helper call '{name}': {string.Join(", ", candidates.Select(MethodSignature))}"));
         }
         var units = BuildUnits(path, root, reachableHelpers, methodName, contextRoot, semanticContext);
+        Mark("binder-verifier");
         var output = new MigrationOutput(generated, diagnostics)
         {
             Units = units,
@@ -457,7 +472,7 @@ public static class CSharpToSegTranspiler
         if (type is ArrayTypeSyntax array && array.RankSpecifiers.Count == 1 && array.RankSpecifiers[0].Rank == 1)
         {
             var element = MapType(array.ElementType, source, diagnostics, role);
-            return "List<" + element + ">";
+            return element + "[]";
         }
         if (type is NullableTypeSyntax nullable)
             return MapType(nullable.ElementType, source, diagnostics, role) + "?";
@@ -967,7 +982,17 @@ public static class CSharpToSegTranspiler
                                 sb.Append(indent).Append("var ").Append(v.Identifier.ValueText).AppendLine(" = new-cycle");
                             else if (v.Initializer?.Value is InvocationExpressionSyntax start && FindStartCycle(start) != null)
                                 EmitCycle(start, v.Identifier.ValueText, sb, diagnostics, level, partial, contextRoot);
-                            else if (v.Initializer != null) AppendFormattedExpression(sb, indent + "var " + v.Identifier.ValueText + " = ", v.Initializer.Value, level);
+                            else if (v.Initializer != null)
+                            {
+                                var prefix = "var " + v.Identifier.ValueText;
+                                if (x.Declaration.Type != null)
+                                {
+                                    var declared = MapCSharpType(x.Declaration.Type, diagnostics, x);
+                                    if (declared == null) throw new InvalidOperationException($"unsupported local variable type '{x.Declaration.Type}'");
+                                    prefix += ": " + declared;
+                                }
+                                AppendFormattedExpression(sb, indent + prefix + " = ", v.Initializer.Value, level);
+                            }
                             else
                             {
                                 var type = MapCSharpType(x.Declaration.Type, diagnostics, x);
@@ -1007,7 +1032,7 @@ public static class CSharpToSegTranspiler
         if (type is ArrayTypeSyntax array && array.RankSpecifiers.Count == 1 && array.RankSpecifiers[0].Rank == 1)
         {
             var element = MapCSharpType(array.ElementType, diagnostics, source);
-            return element == null ? null : "List<" + element + ">";
+            return element == null ? null : element + "[]";
         }
         if (type is NullableTypeSyntax nullable)
         {

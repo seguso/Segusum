@@ -262,7 +262,7 @@ public static class DslParser
                 {
                     var name = Word();
                     string? type = null;
-                    if (Is(DslTokenKind.Colon)) { Take(); type = Word(); }
+                    if (Is(DslTokenKind.Colon)) { Take(); type = ParseTypeName(); }
                     Need("=");
                     return new VariableDeclaration(name, Expression(), span) { Type = type };
                 }
