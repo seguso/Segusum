@@ -378,6 +378,83 @@ public sealed class CSharpToSegTranspilerTests
     }
 
     [Fact]
+    public void ForeachBecomesGenericForCollectionLoop()
+    {
+        const string source = "class W { void M() { addHandlerUseHere(a, handler: i => { foreach (var obj in objects) { obj.putInRoom(room); } }); } }";
+        var result = CSharpToSegTranspiler.Transpile("x.cs", source, true);
+        Assert.Contains("for obj in objects:", result.Text, StringComparison.Ordinal);
+        Assert.Contains("obj.putInRoom room", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(result.Diagnostics, x => x.Status == MigrationUnitStatus.Unsupported);
+    }
+
+    [Fact]
+    public void EmptyListCreationUsesEmptySegListLiteral()
+    {
+        const string source = "class W { void M() { addHandlerUseHere(a, handler: i => { var result = new List<string>(); result.Add(\"x\"); }); } }";
+        var result = CSharpToSegTranspiler.Transpile("x.cs", source, true);
+        Assert.Contains("var result = []", result.Text, StringComparison.Ordinal);
+        Assert.Contains("result.Add \"x\"", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(result.Diagnostics, x => x.Status == MigrationUnitStatus.Unsupported);
+    }
+
+    [Fact]
+    public void DistinctToArrayKeepsDistinctAndDropsOnlyMaterialization()
+    {
+        const string source = "class W { void M() { addHandlerUseHere(a, handler: i => { var result = new[] { a, b, a }.Distinct().ToArray(); foo(result); }); } }";
+        var result = CSharpToSegTranspiler.Transpile("x.cs", source, true);
+        Assert.Contains("[a, b, a].Distinct", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("ToArray", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(result.Diagnostics, x => x.Status == MigrationUnitStatus.Unsupported);
+    }
+
+    [Fact]
+    public void GenericCollectionReturnAndHelperCallAreTranslated()
+    {
+        const string source = "using System.Collections.Generic; class W { private List<string> splitAndTrim(string value) { return new List<string>(); } private List<string> foo(string value) { return splitAndTrim(value); } }";
+        var result = CSharpToSegTranspiler.Transpile("x.cs", source, true);
+        Assert.Contains("def foo value: string ret List<string>", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(result.Diagnostics, x => x.Status == MigrationUnitStatus.Unsupported);
+    }
+
+    [Fact]
+    public void GenericCollectionHelperWithForeachIsTranslated()
+    {
+        const string source = "using System.Collections.Generic; class W { private List<string> splitAndTrim(string text) { var result = new List<string>(); foreach (var part in text.Split(' ')) result.Add(part.Trim()); return result; } }";
+        var result = CSharpToSegTranspiler.Transpile("x.cs", source, true);
+        Assert.Contains("for part in text.Split", result.Text, StringComparison.Ordinal);
+        Assert.Contains("result.Add", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(result.Diagnostics, x => x.Status == MigrationUnitStatus.Unsupported);
+    }
+
+    [Fact]
+    public void EmptyListAndForeachAccumulatorAreTranslated()
+    {
+        const string source = "using System.Collections.Generic; class W { private List<string> foo(IEnumerable<string> objects) { var result = new List<string>(); foreach (var item in objects) result.Add(item); return result; } }";
+        var result = CSharpToSegTranspiler.Transpile("x.cs", source, true);
+        Assert.Contains("var result = []", result.Text, StringComparison.Ordinal);
+        Assert.Contains("for item in objects:", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(result.Diagnostics, x => x.Status == MigrationUnitStatus.Unsupported);
+    }
+
+    [Fact]
+    public void StringSplitCanDriveCollectionLoop()
+    {
+        const string source = "class W { private void foo(string text) { foreach (var item in text.Split(' ')) useItem(item); } }";
+        var result = CSharpToSegTranspiler.Transpile("x.cs", source, true);
+        Assert.Contains("for item in text.Split", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(result.Diagnostics, x => x.Status == MigrationUnitStatus.Unsupported);
+    }
+
+    [Fact]
+    public void StringSplitMemberCallIsTranslated()
+    {
+        const string source = "class W { private void foo(string text) { var parts = text.Split(' '); use(parts); } }";
+        var result = CSharpToSegTranspiler.Transpile("x.cs", source, true);
+        Assert.Contains("var parts = text.Split", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(result.Diagnostics, x => x.Status == MigrationUnitStatus.Unsupported);
+    }
+
+    [Fact]
     public void ArrayCreationPreservesNestedExpressionsAndWorksAsNamedCutsceneArgument()
     {
         const string source = "class W { void M() { addHandlerUseHere(a, handler: i => { using (namedCutScene(ncs, roomA, new Mentionable[] { foo(x), this, \"[[translation]]\" })) { bar(); } }); } }";

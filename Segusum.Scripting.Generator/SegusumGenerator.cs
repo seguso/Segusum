@@ -161,6 +161,12 @@ public sealed class SegusumGenerator : IIncrementalGenerator
                 break;
             case AssignmentStatement a: sb.Append(indent).Append(a.Receiver == null ? Name(a.Name) : Emit(a.Receiver, model) + "." + Name(a.MemberName ?? a.Name)).Append(a.Operator).Append(Emit(a.Value, model)).AppendLine(";"); break;
             case IncrementStatement i: sb.Append(indent).Append(Name(i.Name)).AppendLine("++;"); break;
+            case ForStatement f:
+                sb.Append(indent).Append("foreach (var ").Append(Name(f.ItemName)).Append(" in ").Append(Emit(f.Collection, model)).AppendLine(")");
+                sb.Append(indent).AppendLine("{");
+                foreach (var child in f.Body) EmitStatement(sb, child, indent + "  ", input, model);
+                sb.Append(indent).AppendLine("}");
+                break;
             case ReturnStatement r:
                 sb.Append(indent).Append("return");
                 if (r.Expression != null) sb.Append(' ').Append(Emit(r.Expression, model));
@@ -227,13 +233,13 @@ public sealed class SegusumGenerator : IIncrementalGenerator
     };
     private static string EmitList(ListExpression list, BoundModel model)
     {
-        var elementType = model.ExpressionTypes.TryGetValue(list, out var type) && type is IArrayTypeSymbol array
-            ? array.ElementType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)
+        var elementType = model.ExpressionTypes.TryGetValue(list, out var type) && type is INamedTypeSymbol named && named.IsGenericType
+            ? named.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)
             : null;
         var elements = string.Join(", ", list.Elements.Select(x => Emit(x, model)));
         return elementType == null
-            ? "new[] { " + elements + " }"
-            : "new " + elementType + "[] { " + elements + " }";
+            ? "new System.Collections.Generic.List<object>() { " + elements + " }"
+            : "new System.Collections.Generic.List<" + elementType + ">() { " + elements + " }";
     }
     private static string EmitUnary(UnaryExpression expression, BoundModel model)
     {

@@ -727,6 +727,9 @@ public static class MigrationVerifier
                 case IfStatementSyntax conditional:
                     CollectCSharpConditionalChain(conditional, effects, true);
                     break;
+                case ForEachStatementSyntax loop:
+                    CollectCSharpHandlerEffects(loop.Statement is BlockSyntax block ? block.Statements : new[] { loop.Statement }, effects);
+                    break;
                 case ExpressionStatementSyntax expression when expression.Expression is AssignmentExpressionSyntax assignment:
                     var target = assignment.Left.ToString();
                     if (target.EndsWith("makesNoSenseAtThisTime", StringComparison.Ordinal) && assignment.Right.ToString() == "true") effects.Add("makes-no-sense");
@@ -901,6 +904,9 @@ public static class MigrationVerifier
                     else
                         effects.Add("call:" + CanonicalDslExpression(call.Expression));
                     break;
+                case ForStatement loop:
+                    effects.AddRange(ExtractDslHandlerEffects(loop.Body));
+                    break;
                 case ReturnStatement ret: effects.Add("return:" + CanonicalDslExpression(ret.Expression)); break;
                 case NextCycleStatement next: effects.Add("cycle:next:" + CanonicalDslExpression(next.Cycle)); break;
                 case AddCycleElementStatement cycle:
@@ -958,7 +964,7 @@ public static class MigrationVerifier
         {
             var syntax = Microsoft.CodeAnalysis.CSharp.SyntaxFactory.ParseExpression(expression);
             if (!syntax.ContainsDiagnostics)
-                expression = syntax.WithoutTrivia().ToFullString();
+                expression = CanonicalCSharpSyntax(syntax);
         }
         catch
         {
@@ -976,6 +982,17 @@ public static class MigrationVerifier
         result = System.Text.RegularExpressions.Regex.Replace(result, @"([A-Za-z_]\w*):", "$1=");
         return UnwrapRedundantSimpleParentheses(result);
     }
+
+    private static string CanonicalCSharpSyntax(ExpressionSyntax expression) => expression switch
+    {
+        LiteralExpressionSyntax literal when literal.IsKind(SyntaxKind.CharacterLiteralExpression) => "\"" + literal.Token.ValueText.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal) + "\"",
+        ImplicitArrayCreationExpressionSyntax array => "[" + string.Join(",", array.Initializer.Expressions.Select(CanonicalCSharpSyntax)) + "]",
+        ArrayCreationExpressionSyntax array when array.Initializer is not null => "[" + string.Join(",", array.Initializer.Expressions.Select(CanonicalCSharpSyntax)) + "]",
+        InvocationExpressionSyntax call when call.Expression is MemberAccessExpressionSyntax member && member.Name.Identifier.ValueText == "ToArray" && call.ArgumentList.Arguments.Count == 0 => CanonicalCSharpSyntax(member.Expression),
+        InvocationExpressionSyntax call => CanonicalCSharpSyntax(call.Expression) + "(" + string.Join(",", call.ArgumentList.Arguments.Select(x => CanonicalCSharpSyntax(x.Expression))) + ")",
+        MemberAccessExpressionSyntax member => CanonicalCSharpSyntax(member.Expression) + "." + member.Name.Identifier.ValueText,
+        _ => expression.WithoutTrivia().ToFullString()
+    };
 
     private static string RemoveRedundantSimpleParentheses(string expression)
     {
@@ -1458,6 +1475,8 @@ public static class MigrationVerifier
         ExistsExpression exists => "exists[from " + ExpressionText(exists.Collection) + " " + exists.ItemName + " where " + ExpressionText(exists.Predicate) + "]",
         ParenthesizedExpression parenthesized => "(" + ExpressionText(parenthesized.Expression) + ")",
         MemberAccessExpression member => ExpressionText(member.Receiver) + "." + member.MemberName,
+        ListExpression list => "[" + string.Join(",", list.Elements.Select(ExpressionText)) + "]",
+        ListComprehensionExpression query => "[from " + ExpressionText(query.Collection) + " " + query.ItemName + " where " + ExpressionText(query.Predicate) + " select " + ExpressionText(query.Selector) + "]",
         CallExpression call => (call.Receiver == null ? call.Name : ExpressionText(call.Receiver) + "." + call.Name)
             + "(" + string.Join(",", call.Arguments.Select(x => (x.Name == null ? "" : x.Name + ":") + ExpressionText(x.Expression))) + ")",
         FunctionReferenceExpression reference => "ref " + reference.Name,

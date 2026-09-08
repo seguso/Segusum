@@ -59,6 +59,7 @@ public sealed record IncrementStatement(string Name,SourceSpan Span) : DslStatem
 {
     public SourceSpan NameSpan { get; init; } = Span;
 }
+public sealed record ForStatement(string ItemName,DslExpression Collection,IReadOnlyList<DslStatement> Body,SourceSpan Span) : DslStatement(Span);
 public sealed record CallStatement(DslExpression Expression,SourceSpan Span) : DslStatement(Span);
 public sealed record ReturnStatement(DslExpression? Expression,SourceSpan Span) : DslStatement(Span);
 public sealed record IfStatement(IReadOnlyList<(DslExpression Condition,IReadOnlyList<DslStatement> Body)> Branches,IReadOnlyList<DslStatement>? ElseBody,SourceSpan Span) : DslStatement(Span);

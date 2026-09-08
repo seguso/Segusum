@@ -347,6 +347,7 @@ public static class GameplayMigrationVerifier
             VariableDeclaration variable => new[] { new MigrationEffect("assign", variable.Name + "=" + CanonicalDsl(variable.Initializer), path, line) },
             IncrementStatement increment => new[] { new MigrationEffect("increment", increment.Name + "++", path, line) },
             CallStatement call => DslCallEffect(call.Expression, path, line),
+            ForStatement loop => loop.Body.SelectMany(x => DslEffects(x, path)).ToArray(),
             ReturnStatement ret => new[] { new MigrationEffect("return", CanonicalDsl(ret.Expression), path, line) },
             _ => Array.Empty<MigrationEffect>()
         };
@@ -382,7 +383,7 @@ public static class GameplayMigrationVerifier
     private static IReadOnlyList<MigrationFinding> UnsupportedCSharp(MethodDeclarationSyntax method, int maxLine)
     {
         var nodes = method.DescendantNodes().Where(x => Line(x) <= maxLine && x is
-            ForStatementSyntax or ForEachStatementSyntax or WhileStatementSyntax or DoStatementSyntax or
+            WhileStatementSyntax or DoStatementSyntax or
             SwitchStatementSyntax or TryStatementSyntax or UsingStatementSyntax or LockStatementSyntax or
             BreakStatementSyntax or ContinueStatementSyntax or LocalFunctionStatementSyntax or
             ConditionalExpressionSyntax);
@@ -398,6 +399,7 @@ public static class GameplayMigrationVerifier
             typeof(NextCycleStatement), typeof(AddCycleElementStatement), typeof(MakesNoSenseStatement),
             typeof(MarkHappenedOnceStatement), typeof(MarkHappenedStatement), typeof(FinishGameStatement),
             typeof(DoNotAdvanceTimeStatement), typeof(PreventRoomChangeStatement), typeof(TextInputStatement) };
+        supported = supported.Append(typeof(ForStatement)).ToArray();
         return FlattenDslStatements(statements).Where(x => !supported.Contains(x.GetType())).Select(x =>
             new MigrationFinding(MigrationFindingKind.Unverifiable, MigrationMatchStatus.Unverifiable,
                 $"Unsupported SEG construct: {x.GetType().Name}", "", x.Span.Line)).ToArray();
@@ -415,6 +417,8 @@ public static class GameplayMigrationVerifier
             }
             else if (statement is NamedCutsceneStatement cutscene)
                 foreach (var nested in FlattenDslStatements(cutscene.Body)) yield return nested;
+            else if (statement is ForStatement loop)
+                foreach (var nested in FlattenDslStatements(loop.Body)) yield return nested;
         }
     }
 
@@ -422,11 +426,21 @@ public static class GameplayMigrationVerifier
         new(Array.Empty<MigrationBranch>(), Array.Empty<MigrationBranch>(), Array.Empty<MigrationEffect>(), Array.Empty<MigrationEffect>(),
             Array.Empty<string>(), Array.Empty<string>(), new[] { new MigrationFinding(MigrationFindingKind.ChangedBranch, MigrationMatchStatus.Unverifiable, message, csharpPath, null, dslPath, null) });
 
-    private static string CanonicalCSharp(SyntaxNode? node) => CanonicalText(node is null ? "" : string.Concat(node.DescendantTokens().Select(x => x.Text)));
+    private static string CanonicalCSharp(SyntaxNode? node) => CanonicalText(node is ExpressionSyntax expression ? CanonicalCSharpExpression(expression) : node is null ? "" : string.Concat(node.DescendantTokens().Select(x => x.Text)));
+    private static string CanonicalCSharpExpression(ExpressionSyntax expression) => expression switch
+    {
+        ImplicitArrayCreationExpressionSyntax array => "[" + string.Join(",", array.Initializer.Expressions.Select(CanonicalCSharpExpression)) + "]",
+        ArrayCreationExpressionSyntax array when array.Initializer is not null => "[" + string.Join(",", array.Initializer.Expressions.Select(CanonicalCSharpExpression)) + "]",
+        InvocationExpressionSyntax call when call.Expression is MemberAccessExpressionSyntax member && member.Name.Identifier.ValueText == "ToArray" && call.ArgumentList.Arguments.Count == 0 => CanonicalCSharpExpression(member.Expression),
+        InvocationExpressionSyntax call => CanonicalCSharpExpression(call.Expression) + "(" + string.Join(",", call.ArgumentList.Arguments.Select(x => CanonicalCSharpExpression(x.Expression))) + ")",
+        MemberAccessExpressionSyntax member => CanonicalCSharpExpression(member.Expression) + "." + member.Name.Identifier.ValueText,
+        _ => string.Concat(expression.DescendantTokens().Select(x => x.Text))
+    };
     private static string CanonicalDsl(DslExpression expression) => CanonicalText(expression switch
     {
         IdentifierExpression id => id.Name,
         LiteralExpression literal => literal.Value,
+        ListExpression list => "[" + string.Join(",", list.Elements.Select(CanonicalDsl)) + "]",
         UnaryExpression unary => unary.Operator + CanonicalDsl(unary.Operand),
         BinaryExpression binary => CanonicalDsl(binary.Left) + binary.Operator + CanonicalDsl(binary.Right),
         ParenthesizedExpression parenthesized => "(" + CanonicalDsl(parenthesized.Expression) + ")",

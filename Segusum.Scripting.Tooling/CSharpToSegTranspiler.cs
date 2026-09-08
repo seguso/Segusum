@@ -454,6 +454,18 @@ public static class CSharpToSegTranspiler
             return "<missing-type>";
         }
 
+        if (type is ArrayTypeSyntax array && array.RankSpecifiers.Count == 1 && array.RankSpecifiers[0].Rank == 1)
+        {
+            var element = MapType(array.ElementType, source, diagnostics, role);
+            return "List<" + element + ">";
+        }
+        if (type is NullableTypeSyntax nullable)
+            return MapType(nullable.ElementType, source, diagnostics, role) + "?";
+        if (type is GenericNameSyntax generic)
+            return generic.Identifier.ValueText + "<" + string.Join(", ", generic.TypeArgumentList.Arguments.Select(x => MapType(x, source, diagnostics, role))) + ">";
+        if (type is QualifiedNameSyntax qualified && qualified.Right is GenericNameSyntax qualifiedGeneric)
+            return qualified.Left + "." + qualifiedGeneric.Identifier.ValueText + "<" + string.Join(", ", qualifiedGeneric.TypeArgumentList.Arguments.Select(x => MapType(x, source, diagnostics, role))) + ">";
+
         var mapped = type switch
         {
             PredefinedTypeSyntax predefined when predefined.Keyword.IsKind(SyntaxKind.BoolKeyword) => "bool",
@@ -461,7 +473,7 @@ public static class CSharpToSegTranspiler
             PredefinedTypeSyntax predefined when predefined.Keyword.IsKind(SyntaxKind.StringKeyword) => "string",
             PredefinedTypeSyntax predefined when predefined.Keyword.IsKind(SyntaxKind.DoubleKeyword) => "double",
             IdentifierNameSyntax identifier => identifier.Identifier.ValueText,
-            QualifiedNameSyntax qualified => qualified.ToString(),
+            QualifiedNameSyntax qualifiedName => qualifiedName.ToString(),
             _ => null
         };
 
@@ -932,6 +944,11 @@ public static class CSharpToSegTranspiler
                     sb.Append(indent).Append(Expression(p.Operand)).AppendLine("++"); break;
                 case ExpressionStatementSyntax x when x.Expression is PrefixUnaryExpressionSyntax p && p.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.PreIncrementExpression):
                     sb.Append(indent).Append(Expression(p.Operand)).AppendLine("++"); break;
+                case ForEachStatementSyntax x:
+                    sb.Append(indent).Append("for ").Append(x.Identifier.ValueText).Append(" in ").AppendLine(Expression(x.Expression) + ":");
+                    EmitStatements(x.Statement is BlockSyntax fb ? fb.Statements : new[] { x.Statement }, sb, diagnostics, level + 1, partial, includeComments, contextRoot);
+                    sb.Append(indent).AppendLine("end");
+                    break;
                 case ExpressionStatementSyntax x:
                     try { AppendFormattedExpression(sb, indent, x.Expression, level); }
                     catch (InvalidOperationException ex) { Unsupported(x.Expression, diagnostics, ex.Message, partial, sb, level); }
@@ -987,6 +1004,26 @@ public static class CSharpToSegTranspiler
 
     private static string? MapCSharpType(TypeSyntax type, List<MigrationDiagnostic> diagnostics, SyntaxNode source)
     {
+        if (type is ArrayTypeSyntax array && array.RankSpecifiers.Count == 1 && array.RankSpecifiers[0].Rank == 1)
+        {
+            var element = MapCSharpType(array.ElementType, diagnostics, source);
+            return element == null ? null : "List<" + element + ">";
+        }
+        if (type is NullableTypeSyntax nullable)
+        {
+            var element = MapCSharpType(nullable.ElementType, diagnostics, source);
+            return element == null ? null : element + "?";
+        }
+        if (type is GenericNameSyntax generic)
+        {
+            var arguments = generic.TypeArgumentList.Arguments.Select(x => MapCSharpType(x, diagnostics, source)).ToArray();
+            return arguments.Any(x => x == null) ? null : generic.Identifier.ValueText + "<" + string.Join(", ", arguments!) + ">";
+        }
+        if (type is QualifiedNameSyntax qualified && qualified.Right is GenericNameSyntax qualifiedGeneric)
+        {
+            var arguments = qualifiedGeneric.TypeArgumentList.Arguments.Select(x => MapCSharpType(x, diagnostics, source)).ToArray();
+            return arguments.Any(x => x == null) ? null : qualified.Left + "." + qualifiedGeneric.Identifier.ValueText + "<" + string.Join(", ", arguments!) + ">";
+        }
         var mapped = type switch
         {
             PredefinedTypeSyntax predefined when predefined.Keyword.IsKind(SyntaxKind.BoolKeyword) => "bool",
@@ -996,7 +1033,7 @@ public static class CSharpToSegTranspiler
             PredefinedTypeSyntax predefined when predefined.Keyword.IsKind(SyntaxKind.FloatKeyword) => "float",
             PredefinedTypeSyntax predefined when predefined.Keyword.IsKind(SyntaxKind.ObjectKeyword) => "object",
             IdentifierNameSyntax identifier => identifier.Identifier.ValueText,
-            QualifiedNameSyntax qualified => qualified.ToString(),
+            QualifiedNameSyntax qualifiedName => qualifiedName.ToString(),
             _ => null
         };
         if (mapped != null) return mapped;
@@ -1468,6 +1505,7 @@ public static class CSharpToSegTranspiler
             CollectionExpressionSyntax x => "[" + string.Join(", ", x.Elements.Select(EmitCollectionElement)) + "]",
             ArrayCreationExpressionSyntax x when x.Initializer is not null => EmitArrayInitializer(x.Initializer),
             ImplicitArrayCreationExpressionSyntax x => EmitArrayInitializer(x.Initializer),
+            ObjectCreationExpressionSyntax x when x.ArgumentList?.Arguments.Count == 0 && x.Initializer is null && x.Type is GenericNameSyntax generic && generic.Identifier.ValueText == "List" => "[]",
             ConditionalExpressionSyntax x => "if " + Expression(x.Condition) + " then " + Expression(x.WhenTrue) + " else " + Expression(x.WhenFalse),
             ArgumentSyntax x => (x.NameColon is null ? "" : x.NameColon.Name.Identifier.ValueText + ": ") + Expression(x.Expression),
             _ => throw new InvalidOperationException("Unsupported C# expression: " + node.Kind())
@@ -1565,6 +1603,10 @@ public static class CSharpToSegTranspiler
     private static string EmitCallExpression(InvocationExpressionSyntax invocation)
     {
         var name = invocation.Expression is MemberAccessExpressionSyntax member ? member.Name.Identifier.ValueText : invocation.Expression.ToString();
+        if (name == "ToArray" && invocation.ArgumentList.Arguments.Count == 0
+            && invocation.Expression is MemberAccessExpressionSyntax toArray
+            && toArray.Expression is InvocationExpressionSyntax materialized)
+            return Expression(materialized);
         if (name == "translatable"
             && invocation.ArgumentList.Arguments.Count == 0
             && invocation.Expression is MemberAccessExpressionSyntax translatableMember
@@ -1641,6 +1683,11 @@ public static class CSharpToSegTranspiler
     };
     private static string EmitLiteral(LiteralExpressionSyntax literal)
     {
+        if (literal.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.CharacterLiteralExpression))
+        {
+            var charValue = literal.Token.ValueText.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal);
+            return "\"" + charValue + "\"";
+        }
         if (!literal.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.StringLiteralExpression)) return literal.Token.Text;
         // C# verbatim literals are not SEG literals.  ValueText is the
         // decoded semantic content; re-escape only when the source token used

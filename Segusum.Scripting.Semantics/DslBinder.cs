@@ -393,6 +393,19 @@ public sealed class DslBinder
                     else { var targetType = BindName(a.Name, a.NameSpan, scope); RequireExpression(a.Value, BindExpression(a.Value, scope), targetType, "assignment type mismatch."); }
                     break;
                 case IncrementStatement i: Require(BindName(i.Name, i.NameSpan, scope), compilation.GetSpecialType(SpecialType.System_Int32), i.Span, "++ requires int."); break;
+                case ForStatement f:
+                {
+                    var collectionType = BindExpression(f.Collection, scope);
+                    if (!TryGetEnumerableElement(collectionType, out var itemType))
+                    {
+                        Report("SEGDSL331", "for requires a typed collection.", f.Collection.Span);
+                        break;
+                    }
+                    var forScope = new Dictionary<string, ITypeSymbol>(scope, StringComparer.Ordinal) { [NormalizeKey(f.ItemName)] = itemType };
+                    AddLocalIdentity(f.ItemName, "local", f.Span);
+                    BindStatements(f.Body, forScope, returnType);
+                    break;
+                }
                 case ReturnStatement r:
                     if (r.Expression == null)
                     {
@@ -523,7 +536,12 @@ public sealed class DslBinder
             case LiteralExpression l: if (l.Kind == "null") { nullLiterals.Add(l); return null; } return l.Kind is "string" or "raw-string" ? compilation.GetSpecialType(SpecialType.System_String) : l.Kind == "bool" ? compilation.GetSpecialType(SpecialType.System_Boolean) : l.Kind == "cycle" ? cycle : compilation.GetSpecialType(SpecialType.System_Int32);
             case ListExpression list:
             {
-                if (list.Elements.Count == 0) { Report("SEGDSL313", "List literals must contain at least one element.", list.Span); return null; }
+                if (list.Elements.Count == 0)
+                {
+                    var objectType = compilation.GetSpecialType(SpecialType.System_Object);
+                    var listDefinition = GetTypeByMetadataName("System.Collections.Generic.List`1");
+                    return listDefinition?.Construct(objectType);
+                }
                 var elementTypes = list.Elements
                     .Select(element => BindExpression(element, scope, contextualIt))
                     .ToArray();
@@ -534,7 +552,8 @@ public sealed class DslBinder
                         Report("SEGDSL309", "List elements must have a compatible type.", element.Span);
                     return null;
                 }
-                return compilation.CreateArrayTypeSymbol(listElementType);
+                var definition = GetTypeByMetadataName("System.Collections.Generic.List`1");
+                return definition?.Construct(listElementType);
             }
             case IdentifierExpression i:
                 if (i.Name == "it" && contextualIt != null) { model.Values[i] = new BoundValue(contextualIt, "x", null, BoundSymbolKind.ContextualIt); return contextualIt; }
@@ -876,6 +895,8 @@ public sealed class DslBinder
     }
     private static bool TryGetEnumerableElement(ITypeSymbol type, out ITypeSymbol element)
     {
+        if (type is IArrayTypeSymbol array)
+        { element = array.ElementType; return true; }
         if (type is INamedTypeSymbol named && named.IsGenericType && named.Name == "IEnumerable" && named.TypeArguments.Length == 1)
         { element = named.TypeArguments[0]; return true; }
         foreach (var iface in type.AllInterfaces)

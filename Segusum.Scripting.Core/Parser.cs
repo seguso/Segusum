@@ -240,6 +240,7 @@ public static class DslParser
             if (keyword == "if") return "if";
             if (keyword is "ret" or "return") return "return";
             if (keyword is "var") return "variable-declaration";
+            if (keyword == "for") return "for";
             if (keyword is "next") return "next";
             if (keyword is "add") return "add-cycle";
             if (keyword is "mark-happened" or "mark-happened-once") return "mark-happened";
@@ -264,6 +265,16 @@ public static class DslParser
                     if (Is(DslTokenKind.Colon)) { Take(); type = Word(); }
                     Need("=");
                     return new VariableDeclaration(name, Expression(), span) { Type = type };
+                }
+                case "for":
+                {
+                    var item = Word();
+                    Need("in");
+                    var collection = Expression();
+                    Need(":");
+                    var body = ParseUntilEnd();
+                    Need("end");
+                    return new ForStatement(item, collection, body, span);
                 }
                 case "next": return new NextCycleStatement(Expression(), span); case "add": return ParseAdd(span);
                 case "makes-no-sense": return new MakesNoSenseStatement(span); case "prevent-room-change": return new PreventRoomChangeStatement(span); case "mark-happened-once": return new MarkHappenedOnceStatement(Expression(), span); case "mark-happened": return new MarkHappenedStatement(Expression(), span); case "finish-game": return new FinishGameStatement(span); case "do-not-advance-time": return new DoNotAdvanceTimeStatement(span);
@@ -517,7 +528,21 @@ public static class DslParser
                     Take(); SkipTerminators();
                 }
                 Need("]");
-                return new ListExpression(elements, span);
+                DslExpression listExpression = new ListExpression(elements, span);
+                while (Is("."))
+                {
+                    Take();
+                    var memberToken = WordToken();
+                    if (!parsingCallArgument && CanStartArgument())
+                    {
+                        var args = new List<DslArgument>();
+                        while (CanStartArgument()) args.Add(ParseArgument());
+                        listExpression = new CallExpression(memberToken.Text, args, span) { Receiver = listExpression, NameSpan = memberToken.Span };
+                    }
+                    else
+                        listExpression = new MemberAccessExpression(listExpression, memberToken.Text, span) { MemberSpan = memberToken.Span };
+                }
+                return listExpression;
             }
             if (Current.Kind == DslTokenKind.String) return new LiteralExpression(Take().Text, "string", span);
             if (Current.Kind == DslTokenKind.Number) return new LiteralExpression(Take().Text, "number", span);
