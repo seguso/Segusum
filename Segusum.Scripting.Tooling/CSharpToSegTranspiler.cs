@@ -46,6 +46,12 @@ public static class CSharpToSegTranspiler
     private sealed record SelectedMethod(
         MethodDeclarationSyntax Syntax,
         IReadOnlyDictionary<string, IReadOnlyList<LocalFunctionCapture>> LocalFunctionCaptures);
+    private enum LifecycleKind
+    {
+        AfterActionExecuted,
+        BeforeRoomChange,
+        UnmappedOverride
+    }
     private sealed record ContextLoadResult(IReadOnlyList<CompilationUnitSyntax> Roots, long ParseMilliseconds, long ManagedMemoryBytes);
     private sealed record SemanticContext(
         IReadOnlyDictionary<SyntaxTree, SemanticModel> Models,
@@ -74,8 +80,7 @@ public static class CSharpToSegTranspiler
         var allMethods = new[] { root }.Concat(contextRoots).SelectMany(x => x.DescendantNodes().OfType<MethodDeclarationSyntax>()).ToArray();
         var reachableHelpers = ReachableHelpers(root, methodName, contextRoots, semanticContext);
         var selectedMethods = allMethods
-            .Where(x => reachableHelpers.Contains(x)
-                || (x.SyntaxTree == root.SyntaxTree && x.Identifier.ValueText is "afterActionExecutedCSharp" or "beforeRoomChangeManual" or "beforeRoomChangeSegusum"))
+            .Where(x => reachableHelpers.Contains(x))
             .Where(x => methodName == null || x.Identifier.ValueText == methodName || reachableHelpers.Contains(x)).ToArray();
         var selectedMethodContexts = selectedMethods.Select(method =>
         {
@@ -96,7 +101,8 @@ public static class CSharpToSegTranspiler
         {
             var method = methodContext.Syntax;
             EnsureExactlyOneBlankLine(sb);
-            if (method.Identifier.ValueText is "afterActionExecutedCSharp")
+            var lifecycle = LifecycleFor(method, semanticContext);
+            if (lifecycle == LifecycleKind.AfterActionExecuted)
             {
                 EmitTriviaComments(method.GetLeadingTrivia(), sb, 0);
                 sb.AppendLine("after-action-executed:");
@@ -108,7 +114,7 @@ public static class CSharpToSegTranspiler
                 diagnostics.Add(new(MigrationUnitStatus.Partial, path, method.GetLocation().GetLineSpan().StartLinePosition.Line + 1,
                     "special handler round-trip is not yet certifiable"));
             }
-            else if (method.Identifier.ValueText is "beforeRoomChangeManual" or "beforeRoomChangeSegusum")
+            else if (lifecycle == LifecycleKind.BeforeRoomChange)
             {
                 EmitTriviaComments(method.GetLeadingTrivia(), sb, 0);
                 sb.AppendLine("before-room-change:");
@@ -117,6 +123,10 @@ public static class CSharpToSegTranspiler
                 EmitTriviaComments(method.Body?.CloseBraceToken.LeadingTrivia ?? default, sb, 1);
                 EmitTriviaComments(method.Body?.CloseBraceToken.TrailingTrivia ?? default, sb, 1);
                 sb.AppendLine("end");
+            }
+            else if (lifecycle == LifecycleKind.UnmappedOverride)
+            {
+                EmitUnsupportedLifecycle(method, diagnostics, emitPartial, sb, 0);
             }
             else if (method.Identifier.ValueText is not "Configure" && method.Body != null && reachableHelpers.Contains(method))
             {
@@ -276,7 +286,7 @@ public static class CSharpToSegTranspiler
             units.Add(CreateUnit(id, path, line, endLine, isolated.Text, isolated.Diagnostics));
         }
         var methodsToIsolate = root.DescendantNodes().OfType<MethodDeclarationSyntax>()
-            .Where(x => x.Body != null && x.Identifier.ValueText is "afterActionExecutedCSharp" or "beforeRoomChangeManual" or "beforeRoomChangeSegusum")
+            .Where(x => x.Body != null && LifecycleFor(x, semanticContext) != null)
             .Concat(reachableHelpers.Where(x => x.Body != null))
             .Distinct()
             .Where(x => methodName == null || x.Identifier.ValueText == methodName || reachableHelpers.Contains(x))
@@ -286,7 +296,7 @@ public static class CSharpToSegTranspiler
         {
             var line = method.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
             var endLine = method.GetLocation().GetLineSpan().EndLinePosition.Line + 1;
-            var isolated = IsolateMethod(path, method, contextRoot);
+            var isolated = IsolateMethod(path, method, contextRoot, semanticContext);
             units.Add(CreateUnit(MethodUnitId(method, reachableHelpers), method.SyntaxTree?.FilePath ?? path, line, endLine, isolated.Text, isolated.Diagnostics));
         }
         var helpers = reachableHelpers
@@ -376,11 +386,12 @@ public static class CSharpToSegTranspiler
         return new(text, diagnostics);
     }
 
-    private static IsolatedUnit IsolateMethod(string path, MethodDeclarationSyntax method, string? contextRoot)
+    private static IsolatedUnit IsolateMethod(string path, MethodDeclarationSyntax method, string? contextRoot, SemanticContext semanticContext)
     {
         var diagnostics = new List<MigrationDiagnostic>();
         var sb = new StringBuilder("world game\n");
-        if (method.Identifier.ValueText == "afterActionExecutedCSharp")
+        var lifecycle = LifecycleFor(method, semanticContext);
+        if (lifecycle == LifecycleKind.AfterActionExecuted)
         {
             EmitTriviaComments(method.GetLeadingTrivia(), sb, 0);
             sb.AppendLine("after-action-executed:");
@@ -391,7 +402,7 @@ public static class CSharpToSegTranspiler
             sb.AppendLine("end");
             diagnostics.Add(new(MigrationUnitStatus.Partial, path, StartLine(method), "special handler round-trip is not yet certifiable"));
         }
-        else if (method.Identifier.ValueText is "beforeRoomChangeManual" or "beforeRoomChangeSegusum")
+        else if (lifecycle == LifecycleKind.BeforeRoomChange)
         {
             EmitTriviaComments(method.GetLeadingTrivia(), sb, 0);
             sb.AppendLine("before-room-change:");
@@ -400,6 +411,10 @@ public static class CSharpToSegTranspiler
             EmitTriviaComments(method.Body.CloseBraceToken.LeadingTrivia, sb, 1);
             EmitTriviaComments(method.Body.CloseBraceToken.TrailingTrivia, sb, 1);
             sb.AppendLine("end");
+        }
+        else if (lifecycle == LifecycleKind.UnmappedOverride)
+        {
+            EmitUnsupportedLifecycle(method, diagnostics, false, sb, 0);
         }
         else
         {
@@ -414,7 +429,8 @@ public static class CSharpToSegTranspiler
             sb.AppendLine("end");
         }
         var text = EnsureComments(method, sb.ToString());
-        VerifyIsolated(path, method, text, diagnostics, false);
+        if (lifecycle != LifecycleKind.UnmappedOverride)
+            VerifyIsolated(path, method, text, diagnostics, false);
         return new(text, diagnostics);
     }
 
@@ -691,6 +707,37 @@ public static class CSharpToSegTranspiler
     private static bool IsHelperCandidate(MethodDeclarationSyntax method)
         => method.Modifiers.Any(x => x.ValueText is "private" or "protected") && method.ParameterList.Parameters.All(x => x.Type != null);
 
+    private static LifecycleKind? LifecycleFor(MethodDeclarationSyntax method, SemanticContext semanticContext)
+    {
+        if (semanticContext.Models.TryGetValue(method.SyntaxTree, out var model)
+            && model.GetDeclaredSymbol(method) is IMethodSymbol symbol)
+        {
+            if (symbol.OverriddenMethod is { } overridden)
+                return LifecycleName(overridden.Name) ?? LifecycleKind.UnmappedOverride;
+        }
+
+        if (method.Modifiers.Any(x => x.IsKind(SyntaxKind.OverrideKeyword)))
+            return LifecycleName(method.Identifier.ValueText) ?? LifecycleKind.UnmappedOverride;
+
+        // Compatibility for frozen sources that predate semantic lifecycle
+        // recognition. New source should normally be recognized through the
+        // Roslyn override symbol above.
+        return LifecycleName(method.Identifier.ValueText);
+    }
+
+    private static LifecycleKind? LifecycleName(string name) => name switch
+    {
+        "after_action_executed" or "afterActionExecutedCSharp" => LifecycleKind.AfterActionExecuted,
+        "beforeRoomChangeManual" or "beforeRoomChangeSegusum" => LifecycleKind.BeforeRoomChange,
+        _ => null
+    };
+
+    private static void EmitUnsupportedLifecycle(MethodDeclarationSyntax method, List<MigrationDiagnostic> diagnostics, bool partial, StringBuilder sb, int level)
+    {
+        var reason = $"lifecycle override '{method.Identifier.ValueText}' has no SEG lifecycle mapping";
+        Unsupported(method, diagnostics, reason, partial, sb, level);
+    }
+
     private static bool IsRegistrationContainer(MethodDeclarationSyntax method)
         => method.Body?.DescendantNodes().OfType<InvocationExpressionSyntax>().Any(x => RegistrationKind(x) != null) == true;
 
@@ -725,21 +772,21 @@ public static class CSharpToSegTranspiler
             .Where(x => methodName == null || x.Ancestors().OfType<MethodDeclarationSyntax>().Any(m => m.Identifier.ValueText == methodName))
             .ToArray();
         var rootMethods = root.DescendantNodes().OfType<MethodDeclarationSyntax>().Where(x => x.Body != null).ToArray();
-        var specialMethods = rootMethods
-            .Where(x => x.Identifier.ValueText is "afterActionExecutedCSharp" or "beforeRoomChangeManual" or "beforeRoomChangeSegusum")
+        var lifecycleMethods = rootMethods
+            .Where(x => LifecycleFor(x, semanticContext) != null)
             .ToArray();
-        // A standalone helper file has no handler registration from which to
-        // seed reachability. In that mode the file itself is the migration
-        // unit, so ordinary helper methods are roots. This keeps
+        // A standalone input file has no handler registration from which to
+        // seed reachability. In that mode every method with a body in the
+        // input file is a potential migration root. This keeps
         // migrate-csharp useful for arbitrary gameplay files without a
         // Litgir-specific name list.
-        if (registrationCalls.Length == 0 && methodName == null && specialMethods.Length == 0)
-            return ReachableFrom(rootMethods.Where(IsHelperCandidate), Dependencies);
+        if (registrationCalls.Length == 0 && methodName == null)
+            return ReachableFrom(rootMethods, Dependencies);
         if (methodName != null && registrationCalls.Length == 0)
             return ReachableFrom(methods.Where(x => x.Identifier.ValueText == methodName), Dependencies);
         foreach (var invocation in registrationCalls.SelectMany(x => x.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>()))
             if (ResolvedMethod(invocation) is { } helper && methods.Contains(helper)) work.Push(helper);
-        foreach (var special in specialMethods)
+        foreach (var special in lifecycleMethods)
             foreach (var helper in Dependencies(special)) work.Push(helper);
         var reachable = new HashSet<MethodDeclarationSyntax>();
         while (work.Count != 0)

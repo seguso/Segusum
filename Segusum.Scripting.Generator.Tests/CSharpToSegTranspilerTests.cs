@@ -824,6 +824,84 @@ public sealed class CSharpToSegTranspilerTests
     }
 
     [Fact]
+    public void StandaloneRootsIncludeAllMethodVisibilities()
+    {
+        const string source = "class W { public bool PublicHelper() { return true; } bool ImplicitPrivate() { return true; } private void ExplicitPrivate() { } protected int ProtectedHelper() { return 1; } internal string InternalHelper() { return \"x\"; } }";
+        var result = CSharpToSegTranspiler.Transpile("visibility-roots.cs", source, emitPartial: true, methodName: null, worldId: "game");
+
+        Assert.Equal(
+            new[] { "PublicHelper", "ImplicitPrivate", "ExplicitPrivate", "ProtectedHelper", "InternalHelper" }.OrderBy(x => x, StringComparer.Ordinal),
+            result.Units.Select(x => x.Id).OrderBy(x => x, StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void UncalledContextMethodsDoNotBecomeStandaloneRoots()
+    {
+        var directory = Directory.CreateTempSubdirectory("segusum-standalone-context-root-");
+        try
+        {
+            var input = Path.Combine(directory.FullName, "input.cs");
+            File.WriteAllText(Path.Combine(directory.FullName, "context.cs"), "class W { public void UncalledContextMethod() { never(); } }");
+            var source = "class W { public void InputMethod() { } }";
+
+            var result = CSharpToSegTranspiler.Transpile(input, source, emitPartial: true, methodName: null, worldId: "game", contextRoot: directory.FullName);
+
+            Assert.Contains(result.Units, x => x.Id == "InputMethod");
+            Assert.DoesNotContain(result.Units, x => x.Id == "UncalledContextMethod");
+            Assert.DoesNotContain("def UncalledContextMethod", result.Text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            directory.Delete(true);
+        }
+    }
+
+    [Fact]
+    public void SemanticAfterActionExecutedOverrideBecomesLifecycleRoot()
+    {
+        var directory = Directory.CreateTempSubdirectory("segusum-after-action-override-");
+        try
+        {
+            var input = Path.Combine(directory.FullName, "world.cs");
+            File.WriteAllText(Path.Combine(directory.FullName, "base.cs"), "class Base { public virtual void after_action_executed(object cs, object actionContext) { } }");
+            const string source = "class W : Base { public override void after_action_executed(object cs, object actionContext) { dial(camilla, \"Test\"); } }";
+
+            var result = CSharpToSegTranspiler.Transpile(input, source, emitPartial: true, methodName: null, worldId: "game", contextRoot: directory.FullName);
+
+            var unit = Assert.Single(result.Units, x => x.Id == "after_action_executed");
+            Assert.DoesNotContain(unit.Diagnostics, x => x.Reason.Contains("no SEG lifecycle mapping", StringComparison.Ordinal));
+            Assert.Contains("after-action-executed:", result.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain("def after_action_executed", result.Text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            directory.Delete(true);
+        }
+    }
+
+    [Fact]
+    public void UnmappedOverrideIsReportedInsteadOfBeingSilentlyIgnored()
+    {
+        var directory = Directory.CreateTempSubdirectory("segusum-unmapped-lifecycle-");
+        try
+        {
+            var input = Path.Combine(directory.FullName, "world.cs");
+            File.WriteAllText(Path.Combine(directory.FullName, "base.cs"), "class Base { public virtual void beforeWalkPathResetVariables() { } }");
+            const string source = "class W : Base { public override void beforeWalkPathResetVariables() { flag = true; } }";
+
+            var result = CSharpToSegTranspiler.Transpile(input, source, emitPartial: true, methodName: null, worldId: "game", contextRoot: directory.FullName);
+
+            var unit = Assert.Single(result.Units, x => x.Id == "beforeWalkPathResetVariables");
+            Assert.Equal(MigrationUnitStatus.Unsupported, unit.Status);
+            Assert.Contains(unit.Diagnostics, x => x.Reason.Contains("no SEG lifecycle mapping", StringComparison.Ordinal));
+        }
+        finally
+        {
+            directory.Delete(true);
+        }
+    }
+
+    [Fact]
     public void StandaloneHelperGraphIncludesReachableMethodFromContextRoot()
     {
         var directory = Directory.CreateTempSubdirectory("segusum-helper-context-");
