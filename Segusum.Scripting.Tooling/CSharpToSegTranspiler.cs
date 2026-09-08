@@ -82,6 +82,8 @@ public static class CSharpToSegTranspiler
                 EmitTriviaComments(method.Body?.CloseBraceToken.LeadingTrivia ?? default, sb, 1);
                 EmitTriviaComments(method.Body?.CloseBraceToken.TrailingTrivia ?? default, sb, 1);
                 sb.AppendLine("end");
+                diagnostics.Add(new(MigrationUnitStatus.Partial, path, method.GetLocation().GetLineSpan().StartLinePosition.Line + 1,
+                    "special handler round-trip is not yet certifiable"));
             }
             else if (method.Identifier.ValueText is "beforeRoomChangeManual" or "beforeRoomChangeSegusum")
             {
@@ -233,6 +235,7 @@ public static class CSharpToSegTranspiler
             EmitTriviaComments(method.Body.CloseBraceToken.LeadingTrivia, sb, 1);
             EmitTriviaComments(method.Body.CloseBraceToken.TrailingTrivia, sb, 1);
             sb.AppendLine("end");
+            diagnostics.Add(new(MigrationUnitStatus.Partial, path, StartLine(method), "special handler round-trip is not yet certifiable"));
         }
         else if (method.Identifier.ValueText is "beforeRoomChangeManual" or "beforeRoomChangeSegusum")
         {
@@ -406,7 +409,7 @@ public static class CSharpToSegTranspiler
         {
             if (method.Identifier.ValueText is "beforeRoomChangeManual" or "beforeRoomChangeSegusum")
             {
-                var csharp = MigrationVerifier.ExtractCSharpBeforeRoomChange(path, method.ToFullString()).FirstOrDefault();
+                var csharp = MigrationVerifier.ExtractCSharpBeforeRoomChange(path, "class W { " + method.ToFullString() + " }").FirstOrDefault();
                 var dsl = MigrationVerifier.ExtractDslBeforeRoomChange(new DslSource(path + ".generated.seg", generated)).FirstOrDefault();
                 if (csharp is null || dsl is null)
                     diagnostics.Add(new(MigrationUnitStatus.Unsupported, path, StartLine(method), "before-room-change certification could not extract both representations"));

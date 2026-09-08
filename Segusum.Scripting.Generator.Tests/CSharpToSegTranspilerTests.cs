@@ -239,6 +239,28 @@ public sealed class CSharpToSegTranspilerTests
     }
 
     [Fact]
+    public void AfterActionExecutedRemainsPartialUntilItHasASemanticVerifier()
+    {
+        const string source = "class W { void afterActionExecutedCSharp() { dial(camilla, \"Test\"); } }";
+        var result = CSharpToSegTranspiler.Transpile("after-action.cs", source, true);
+
+        var unit = Assert.Single(result.Units, x => x.Id == "afterActionExecutedCSharp");
+        Assert.Equal(MigrationUnitStatus.Partial, unit.Status);
+        Assert.Contains(unit.Diagnostics, x => x.Reason == "special handler round-trip is not yet certifiable");
+    }
+
+    [Fact]
+    public void BeforeRoomChangeUsesItsRealSemanticVerifier()
+    {
+        const string source = "class W { void beforeRoomChangeManual(Room from, Room to, WalkPath segment, WalkPath path, BeforeRoomChangeInput e) { dial(camilla, \"Test\"); } }";
+        var result = CSharpToSegTranspiler.Transpile("before-room.cs", source, true, "beforeRoomChangeManual");
+
+        var unit = Assert.Single(result.Units, x => x.Id == "beforeRoomChangeManual");
+        Assert.Equal(MigrationUnitStatus.Translated, unit.Status);
+        Assert.DoesNotContain(unit.Diagnostics, x => x.Reason.Contains("special handler round-trip", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void GeneralModuloExpressionIsEmittedWithNumericPrecedence()
     {
         var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { void M() { addRoomChangedHandler(roomA, e => { var ra = rand.Next() % 3; if (ra % 2 == 0) { foo(); } }); } }");
