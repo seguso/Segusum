@@ -102,6 +102,28 @@ public sealed class MigrationVerificationTests
     }
 
     [Fact]
+    public void AfterActionExecutedVerifierAcceptsEquivalentLifecycleBody()
+    {
+        const string csharp = "class W { void after_action_executed(CutScene cs, ActionContext actionContext) { if (actionContext.IsMove) { dial(camilla, \"Test\"); } } }";
+        const string dsl = "world game\nafter-action-executed:\n    if actionContext.IsMove:\n        camilla: Test\n    end\nend\n";
+        var tree = CSharpSyntaxTree.ParseText(csharp, path: "after-action.cs");
+        var method = tree.GetRoot().DescendantNodes().OfType<MethodDeclarationSyntax>().Single();
+        var check = MigrationVerifier.CompareAfterActionExecuted(method, new DslSource("current.seg", dsl));
+        Assert.Equal(EquivalenceStatus.Pass, check.Status);
+    }
+
+    [Fact]
+    public void AfterActionExecutedVerifierRejectsChangedLifecycleEffects()
+    {
+        const string csharp = "class W { void after_action_executed(CutScene cs, ActionContext actionContext) { dial(camilla, \"Test\"); } }";
+        const string dsl = "world game\nafter-action-executed:\n    olivia: Test\nend\n";
+        var tree = CSharpSyntaxTree.ParseText(csharp, path: "after-action.cs");
+        var method = tree.GetRoot().DescendantNodes().OfType<MethodDeclarationSyntax>().Single();
+        var check = MigrationVerifier.CompareAfterActionExecuted(method, new DslSource("current.seg", dsl));
+        Assert.Equal(EquivalenceStatus.Fail, check.Status);
+    }
+
+    [Fact]
     public void GameplayVerifierReportsMissingBranchAndMissingSideEffect()
     {
         const string csharp = "class W { void M() { if (ready) { pickUp(obj); } else if (fallback) { changeRoom(room); } } }";

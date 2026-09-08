@@ -326,6 +326,30 @@ public static class MigrationVerifier
                 $"{SequenceMismatch("operations", csharp.OrderedOperations, dsl.OrderedOperations)}; {SequenceMismatch("strings", csharp.Strings, dsl.Strings)}");
     }
 
+    public static VerificationCheck CompareAfterActionExecuted(MethodDeclarationSyntax method, DslSource dslSource)
+    {
+        var declaration = DslParser.Parse(dslSource).Document.Declarations
+            .OfType<AfterActionExecutedDeclaration>().SingleOrDefault();
+        if (declaration is null)
+            return new("after-action-executed", EquivalenceStatus.Fail, "generated after-action-executed declaration is missing");
+        if (method.Body is null)
+            return new("after-action-executed", EquivalenceStatus.Inconclusive, "lifecycle has no block body");
+
+        var context = method.ParameterList.Parameters;
+        if (context.Count != 2
+            || context[0].Type?.ToString() != "CutScene"
+            || context[1].Type?.ToString() != "ActionContext")
+        {
+            return new("after-action-executed context", EquivalenceStatus.Fail,
+                "expected ordered CutScene and ActionContext lifecycle parameters");
+        }
+
+        var csharpEffects = new List<string>();
+        CollectCSharpHandlerEffects(method.Body.Statements, csharpEffects);
+        var dslEffects = ExtractDslHandlerEffects(declaration.Body);
+        return SequenceCheck("after-action-executed body", csharpEffects, dslEffects);
+    }
+
     public static IReadOnlyList<MarkHappenedOnceFingerprint> ExtractCSharpMarkHappenedOnce(string path, string text)
     {
         var tree = CSharpSyntaxTree.ParseText(text, path: path);

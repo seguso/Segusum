@@ -123,8 +123,8 @@ public static class CSharpToSegTranspiler
                 EmitTriviaComments(method.Body?.CloseBraceToken.LeadingTrivia ?? default, sb, 1);
                 EmitTriviaComments(method.Body?.CloseBraceToken.TrailingTrivia ?? default, sb, 1);
                 sb.AppendLine("end");
-                diagnostics.Add(new(MigrationUnitStatus.Partial, path, method.GetLocation().GetLineSpan().StartLinePosition.Line + 1,
-                    "special handler round-trip is not yet certifiable"));
+                if (method.Identifier.ValueText == "afterActionExecutedCSharp")
+                    diagnostics.Add(new(MigrationUnitStatus.Partial, path, StartLine(method), "special handler round-trip is not yet certifiable"));
             }
             else if (lifecycle == LifecycleKind.BeforeRoomChange)
             {
@@ -415,7 +415,8 @@ public static class CSharpToSegTranspiler
             EmitTriviaComments(method.Body.CloseBraceToken.LeadingTrivia, sb, 1);
             EmitTriviaComments(method.Body.CloseBraceToken.TrailingTrivia, sb, 1);
             sb.AppendLine("end");
-            diagnostics.Add(new(MigrationUnitStatus.Partial, path, StartLine(method), "special handler round-trip is not yet certifiable"));
+            if (method.Identifier.ValueText == "afterActionExecutedCSharp")
+                diagnostics.Add(new(MigrationUnitStatus.Partial, path, StartLine(method), "special handler round-trip is not yet certifiable"));
         }
         else if (lifecycle == LifecycleKind.BeforeRoomChange)
         {
@@ -604,6 +605,14 @@ public static class CSharpToSegTranspiler
         }
         if (source is MethodDeclarationSyntax method)
         {
+            if (method.Identifier.ValueText == "after_action_executed")
+            {
+                var comparison = MigrationVerifier.CompareAfterActionExecuted(
+                    method, new DslSource(path + ".generated.seg", generated));
+                if (comparison.Status != EquivalenceStatus.Pass)
+                    diagnostics.Add(new(MigrationUnitStatus.Unsupported, path, StartLine(method),
+                        "after-action-executed semantic round-trip mismatch: " + comparison.Detail));
+            }
             if (method.Identifier.ValueText is "beforeRoomChangeManual" or "beforeRoomChangeSegusum")
             {
                 var csharp = MigrationVerifier.ExtractCSharpBeforeRoomChange(path, "class W { " + method.ToFullString() + " }").FirstOrDefault();
@@ -617,7 +626,7 @@ public static class CSharpToSegTranspiler
                         diagnostics.Add(new(MigrationUnitStatus.Unsupported, path, StartLine(method), "before-room-change semantic round-trip mismatch: " + comparison.Detail));
                 }
             }
-            if (method.Identifier.ValueText is not ("afterActionExecutedCSharp" or "beforeRoomChangeManual" or "beforeRoomChangeSegusum"))
+            if (method.Identifier.ValueText is not ("after_action_executed" or "afterActionExecutedCSharp" or "beforeRoomChangeManual" or "beforeRoomChangeSegusum"))
             {
                 var helperCheck = MigrationVerifier.CompareHelperMethod(method, new DslSource(path + ".generated.seg", generated));
                 if (helperCheck.Status != EquivalenceStatus.Pass)
@@ -1549,16 +1558,12 @@ public static class CSharpToSegTranspiler
     {
         result = "";
         InvocationExpressionSyntax source = invocation;
-        var materialized = false;
         if ((CallName(source) == "ToList" || CallName(source) == "ToArray") && source.ArgumentList.Arguments.Count == 0
             && source.Expression is MemberAccessExpressionSyntax toListMember
             && toListMember.Expression is InvocationExpressionSyntax nested)
         {
             source = nested;
-            materialized = true;
         }
-
-        if (!materialized) return false;
 
         if (CallName(source) != "Where" || source.ArgumentList.Arguments.Count != 1
             || source.Expression is not MemberAccessExpressionSyntax whereMember

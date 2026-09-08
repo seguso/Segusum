@@ -266,7 +266,8 @@ public sealed class CSharpToSegTranspilerTests
         var result = CSharpToSegTranspiler.Transpile("before-room.cs", source, true, "beforeRoomChangeManual");
 
         var unit = Assert.Single(result.Units, x => x.Id == "beforeRoomChangeManual");
-        Assert.Equal(MigrationUnitStatus.Translated, unit.Status);
+        Assert.True(unit.Status == MigrationUnitStatus.Translated,
+            $"{unit.Status}: {string.Join(" | ", unit.Diagnostics.Select(x => x.Reason))}");
         Assert.DoesNotContain(unit.Diagnostics, x => x.Reason.Contains("special handler round-trip", StringComparison.Ordinal));
     }
 
@@ -713,13 +714,26 @@ public sealed class CSharpToSegTranspilerTests
     }
 
     [Fact]
-    public void BareLinqWhereIsNotMaterializedAsListComprehension()
+    public void BareLinqWhereEmitsAListComprehension()
     {
         const string source = "class W { void M() { addHandlerUseHere(a, handler: i => { var filtered = values.Where(x => x.ready); }); } }";
         var result = CSharpToSegTranspiler.Transpile("where.cs", source, emitPartial: true);
 
-        Assert.DoesNotContain("[from values", result.Text, StringComparison.Ordinal);
-        Assert.Contains("C2SEG-MANUAL-BEGIN", result.Text, StringComparison.Ordinal);
+        Assert.Contains("[from values x where x.ready select x]", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Unsupported C# call: Where", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("C2SEG-MANUAL-BEGIN", result.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AfterActionExecutedLifecycleIsSemanticallyCertified()
+    {
+        const string source = "class W { void after_action_executed(CutScene cs, ActionContext actionContext) { if (actionContext.IsMove) { dial(camilla, \"Test\"); } } }";
+        var result = CSharpToSegTranspiler.Transpile("after-action.cs", source, true);
+
+        var unit = Assert.Single(result.Units, x => x.Id == "after_action_executed");
+        Assert.True(unit.Status == MigrationUnitStatus.Translated,
+            $"{unit.Status}: {string.Join(" | ", unit.Diagnostics.Select(x => x.Reason))}");
+        Assert.DoesNotContain(unit.Diagnostics, x => x.Reason.Contains("special handler round-trip", StringComparison.Ordinal));
     }
 
     [Fact]
