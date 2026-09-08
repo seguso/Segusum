@@ -51,8 +51,12 @@ public static class CSharpToSegTranspiler
         var diagnostics = new List<MigrationDiagnostic>();
         var sb = new StringBuilder().Append("world ").Append(worldId).Append('\n');
         var root = (CompilationUnitSyntax)tree.GetRoot();
-        var reachableHelpers = ReachableHelpers(root, methodName);
-        var selectedMethods = root.DescendantNodes().OfType<MethodDeclarationSyntax>()
+        var contextRoots = LoadContextRoots(path, contextRoot);
+        var allMethods = new[] { root }.Concat(contextRoots).SelectMany(x => x.DescendantNodes().OfType<MethodDeclarationSyntax>()).ToArray();
+        var reachableHelpers = ReachableHelpers(root, methodName, contextRoots);
+        var selectedMethods = allMethods
+            .Where(x => reachableHelpers.Contains(x)
+                || (x.SyntaxTree == root.SyntaxTree && x.Identifier.ValueText is "afterActionExecutedCSharp" or "beforeRoomChangeManual" or "beforeRoomChangeSegusum"))
             .Where(x => methodName == null || x.Identifier.ValueText == methodName || reachableHelpers.Contains(x)).ToArray();
         var selectedMethodContexts = selectedMethods.Select(method =>
         {
@@ -136,6 +140,18 @@ public static class CSharpToSegTranspiler
         return output;
     }
 
+    private static IReadOnlyList<CompilationUnitSyntax> LoadContextRoots(string inputPath, string? contextRoot)
+    {
+        if (string.IsNullOrWhiteSpace(contextRoot) || !Directory.Exists(contextRoot)) return Array.Empty<CompilationUnitSyntax>();
+        var fullInputPath = Path.GetFullPath(inputPath);
+        return Directory.EnumerateFiles(contextRoot, "*.cs", SearchOption.AllDirectories)
+            .Select(Path.GetFullPath)
+            .Where(x => !string.Equals(x, fullInputPath, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+            .Select(x => (CompilationUnitSyntax)CSharpSyntaxTree.ParseText(File.ReadAllText(x), path: x).GetRoot())
+            .ToArray();
+    }
+
 
     public static IReadOnlyList<string> CommentInventory(string path, string text)
         => CommentInventory((CompilationUnitSyntax)CSharpSyntaxTree.ParseText(text, path: path).GetRoot());
@@ -158,7 +174,14 @@ public static class CSharpToSegTranspiler
             var isolated = IsolateHandler(path, invocation);
             units.Add(CreateUnit(id, path, line, endLine, isolated.Text, isolated.Diagnostics));
         }
-        foreach (var method in root.DescendantNodes().OfType<MethodDeclarationSyntax>().Where(x => x.Body != null && (x.Identifier.ValueText is "afterActionExecutedCSharp" or "beforeRoomChangeManual" or "beforeRoomChangeSegusum" || reachableHelpers.Contains(x)) && (methodName == null || x.Identifier.ValueText == methodName || reachableHelpers.Contains(x))))
+        var methodsToIsolate = root.DescendantNodes().OfType<MethodDeclarationSyntax>()
+            .Where(x => x.Body != null && x.Identifier.ValueText is "afterActionExecutedCSharp" or "beforeRoomChangeManual" or "beforeRoomChangeSegusum")
+            .Concat(reachableHelpers.Where(x => x.Body != null))
+            .Distinct()
+            .Where(x => methodName == null || x.Identifier.ValueText == methodName || reachableHelpers.Contains(x))
+            .OrderBy(x => x.SyntaxTree?.FilePath, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(x => x.SpanStart);
+        foreach (var method in methodsToIsolate)
         {
             var line = method.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
             var endLine = method.GetLocation().GetLineSpan().EndLinePosition.Line + 1;
@@ -167,7 +190,8 @@ public static class CSharpToSegTranspiler
         }
         var helpers = reachableHelpers
             .Where(x => x.Body != null)
-            .ToDictionary(x => x.Identifier.ValueText, StringComparer.Ordinal);
+            .GroupBy(x => x.Identifier.ValueText, StringComparer.Ordinal)
+            .ToDictionary(x => x.Key, x => x.First(), StringComparer.Ordinal);
         var helperUnits = units.Where(x => helpers.ContainsKey(x.Id)).ToDictionary(x => x.Id, StringComparer.Ordinal);
         var dependencyCache = new Dictionary<string, string[]>(StringComparer.Ordinal);
         string[] Dependencies(MethodDeclarationSyntax helper) => dependencyCache.TryGetValue(helper.Identifier.ValueText, out var cached)
@@ -540,9 +564,10 @@ public static class CSharpToSegTranspiler
     private static bool IsRegistrationContainer(MethodDeclarationSyntax method)
         => method.Body?.DescendantNodes().OfType<InvocationExpressionSyntax>().Any(x => RegistrationKind(x) != null) == true;
 
-    private static IReadOnlySet<MethodDeclarationSyntax> ReachableHelpers(CompilationUnitSyntax root, string? methodName)
+    private static IReadOnlySet<MethodDeclarationSyntax> ReachableHelpers(CompilationUnitSyntax root, string? methodName, IReadOnlyList<CompilationUnitSyntax> contextRoots = null!)
     {
-        var allMethods = root.DescendantNodes().OfType<MethodDeclarationSyntax>()
+        var allRoots = new[] { root }.Concat(contextRoots ?? Array.Empty<CompilationUnitSyntax>()).ToArray();
+        var allMethods = allRoots.SelectMany(x => x.DescendantNodes().OfType<MethodDeclarationSyntax>())
             .Where(x => x.Body != null).ToArray();
         if (methodName != null && !allMethods.Any(x => x.Identifier.ValueText == methodName))
             return new HashSet<MethodDeclarationSyntax>();
@@ -561,6 +586,19 @@ public static class CSharpToSegTranspiler
             .Where(x => RegistrationKind(x) != null)
             .Where(x => methodName == null || x.Ancestors().OfType<MethodDeclarationSyntax>().Any(m => m.Identifier.ValueText == methodName))
             .ToArray();
+        var rootMethods = root.DescendantNodes().OfType<MethodDeclarationSyntax>().Where(x => x.Body != null).ToArray();
+        var specialMethods = rootMethods
+            .Where(x => x.Identifier.ValueText is "afterActionExecutedCSharp" or "beforeRoomChangeManual" or "beforeRoomChangeSegusum")
+            .ToArray();
+        // A standalone helper file has no handler registration from which to
+        // seed reachability. In that mode the file itself is the migration
+        // unit, so ordinary helper methods are roots. This keeps
+        // migrate-csharp useful for arbitrary gameplay files without a
+        // Litgir-specific name list.
+        if (registrationCalls.Length == 0 && methodName == null && specialMethods.Length == 0)
+            return ReachableFrom(rootMethods.Where(IsHelperCandidate), methods, Invocations);
+        if (methodName != null && registrationCalls.Length == 0)
+            return methods.Values.Where(x => x.Identifier.ValueText == methodName).ToHashSet();
         // Build the call-name index once.  The previous implementation walked
         // every registration subtree once per helper candidate, which made a
         // large registration container effectively quadratic (and very
@@ -572,8 +610,7 @@ public static class CSharpToSegTranspiler
             .ToHashSet(StringComparer.Ordinal);
         foreach (var helper in methods.Values)
             if (registrationCallNames.Contains(helper.Identifier.ValueText)) work.Push(helper);
-        foreach (var special in root.DescendantNodes().OfType<MethodDeclarationSyntax>()
-                     .Where(x => x.Identifier.ValueText is "afterActionExecutedCSharp" or "beforeRoomChangeManual" or "beforeRoomChangeSegusum"))
+        foreach (var special in specialMethods)
             foreach (var invocation in Invocations(special))
                 if (methods.TryGetValue(CallName(invocation), out var helper)) work.Push(helper);
         var reachable = new HashSet<MethodDeclarationSyntax>();
@@ -585,6 +622,20 @@ public static class CSharpToSegTranspiler
                 if (methods.TryGetValue(CallName(invocation), out var dependency)) work.Push(dependency);
         }
         return reachable;
+
+        static HashSet<MethodDeclarationSyntax> ReachableFrom(IEnumerable<MethodDeclarationSyntax> roots, IReadOnlyDictionary<string, MethodDeclarationSyntax> methods, Func<MethodDeclarationSyntax, InvocationExpressionSyntax[]> invocations)
+        {
+            var reachable = new HashSet<MethodDeclarationSyntax>();
+            var work = new Stack<MethodDeclarationSyntax>(roots);
+            while (work.Count != 0)
+            {
+                var method = work.Pop();
+                if (!reachable.Add(method)) continue;
+                foreach (var invocation in invocations(method))
+                    if (methods.TryGetValue(CallName(invocation), out var dependency)) work.Push(dependency);
+            }
+            return reachable;
+        }
     }
 
     private static void EmitHandler(InvocationExpressionSyntax invocation, StringBuilder sb, List<MigrationDiagnostic> diagnostics, bool partial, string? contextRoot = null)

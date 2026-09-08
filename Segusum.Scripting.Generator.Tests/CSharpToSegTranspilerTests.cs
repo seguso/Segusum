@@ -811,6 +811,42 @@ public sealed class CSharpToSegTranspilerTests
     }
 
     [Fact]
+    public void StandaloneGameplayHelperFileUsesOrdinaryMethodsAsMigrationRoots()
+    {
+        const string source = "class W { private bool IsEven(int value) { return value % 2 == 0; } private void Use(HandlerInput e) { e.makesNoSenseAtThisTime = IsEven(2); } }";
+        var result = CSharpToSegTranspiler.Transpile("helpers.cs", source, emitPartial: true, methodName: null, worldId: "game");
+
+        Assert.Equal(new[] { MigrationUnitStatus.Translated, MigrationUnitStatus.Translated }, result.Units.Select(x => x.Status));
+        Assert.Contains("def IsEven value: int ret bool", result.Text, StringComparison.Ordinal);
+        Assert.Contains("def Use e: HandlerInput", result.Text, StringComparison.Ordinal);
+        Assert.Contains("e.makesNoSenseAtThisTime = IsEven 2", result.Text, StringComparison.Ordinal);
+        Assert.True(result.CommentsPreserved);
+    }
+
+    [Fact]
+    public void StandaloneHelperGraphIncludesReachableMethodFromContextRoot()
+    {
+        var directory = Directory.CreateTempSubdirectory("segusum-helper-context-");
+        try
+        {
+            var input = Path.Combine(directory.FullName, "helpers.cs");
+            var sibling = Path.Combine(directory.FullName, "sibling.cs");
+            File.WriteAllText(sibling, "class W { private void Reset() { camilla.Aspect = 1; } }");
+            var source = "class W { private void Use() { Reset(); } }";
+
+            var result = CSharpToSegTranspiler.Transpile(input, source, emitPartial: true, methodName: null, worldId: "game", contextRoot: directory.FullName);
+
+            Assert.Contains(result.Units, x => x.Id == "Use" && x.Status == MigrationUnitStatus.Translated);
+            Assert.Contains(result.Units, x => x.Id == "Reset" && x.Status == MigrationUnitStatus.Translated);
+            Assert.Contains("def Reset", result.Text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            directory.Delete(true);
+        }
+    }
+
+    [Fact]
     public void MissingRequestedMethodDoesNotBuildHelperGraphOrUnits()
     {
         const string source = "class W { void Configure() { addHandlerUseHere(a, handler: i => { Direct(); }); } private void Direct() { Nested(); } private void Nested() { leaf(); } }";
