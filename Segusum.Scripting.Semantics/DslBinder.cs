@@ -17,7 +17,7 @@ public enum CallFailureKind { None, UnknownNamedArgument, DuplicateNamedArgument
 public sealed record CandidateResult(BoundCall? Call, CallFailureKind FailureKind, SourceSpan FailureSpan, string FailureDetail, int Score);
 public enum BoundDomainOperationKind { NotSeenRecently, WasSeenAtLeastOnce }
 public sealed record BoundDomainOperation(BoundDomainOperationKind Kind, DslExpression Receiver, DslExpression? Argument, IMethodSymbol? Method);
-public sealed record DslSymbolIdentity(string Name, string Kind, SourceSpan DeclarationSpan);
+public sealed record DslSymbolIdentity(string Name, string Kind, SourceSpan DeclarationSpan, SourceSpan ScopeSpan);
 public sealed record DslSemanticReference(string Path, SourceSpan Span, BoundSymbolKind Kind, ISymbol? CSharpSymbol, DslSymbolIdentity? DslSymbol, string ReferenceKind);
 public sealed class DslBinderProfile
 {
@@ -137,6 +137,7 @@ public sealed class DslBinder
     private string lastCSharpName = "";
     private readonly HashSet<string> currentParameters = new(StringComparer.Ordinal);
     private readonly Dictionary<string, DslSymbolIdentity> activeDslSymbols = new(StringComparer.Ordinal);
+    private SourceSpan? activeDslScope;
     private readonly HashSet<ISymbol> dslRoomChangedTargets = new(SymbolEqualityComparer.Default);
     private readonly HashSet<DslExpression> nullLiterals = new(ReferenceComparer<DslExpression>.Instance);
     private readonly Dictionary<string, INamedTypeSymbol?> typesBySimpleName = new(StringComparer.Ordinal);
@@ -188,14 +189,26 @@ public sealed class DslBinder
         {
             switch (declaration)
             {
-                case StateDeclaration state: AddDslIdentity(state.Name, "state", state.Span); break;
-                case FunctionDeclaration function: AddDslIdentity(function.Name, "function", function.Span); break;
-                case CycleElementDeclaration element: AddDslIdentity(element.Id, "cycle-element", element.Span); break;
+                case StateDeclaration state:
+                    AddDslIdentity(state.Name, "state", state.NameSpan);
+                    RecordDslReference(state.Name, state.NameSpan, BoundSymbolKind.State, state.Name, "definition");
+                    break;
+                case FunctionDeclaration function:
+                    AddDslIdentity(function.Name, "function", function.NameSpan);
+                    RecordDslReference(function.Name, function.NameSpan, BoundSymbolKind.Function, function.Name, "definition");
+                    break;
+                case CycleDeclaration cycle:
+                    AddDslIdentity(cycle.Variable, "cycle", cycle.VariableSpan);
+                    RecordDslReference(cycle.Variable, cycle.VariableSpan, BoundSymbolKind.Cycle, cycle.Variable, "definition");
+                    break;
+                case CycleElementDeclaration element: AddDslIdentity(element.Id, "cycle-element", element.IdSpan); break;
             }
         }
+        foreach (var cycle in declarations.OfType<CycleDeclaration>())
+            RecordDslReference(cycle.Variable, cycle.VariableSpan, BoundSymbolKind.Cycle, cycle.Variable, "definition");
         profile.AddPhase("first declaration identity pass", Stopwatch.GetTimestamp() - phase);
         phase = Stopwatch.GetTimestamp();
-        foreach (var id in profile.MeasureEnumerable("FindNamedCutscenes", declarations.SelectMany(FindNamedCutscenes))) AddDslIdentity(id.Id, "named-cutscene", id.Span);
+        foreach (var id in profile.MeasureEnumerable("FindNamedCutscenes", declarations.SelectMany(FindNamedCutscenes))) AddDslIdentity(id.Id, "named-cutscene", id.IdSpan);
         profile.AddPhase("FindNamedCutscenes", Stopwatch.GetTimestamp() - phase);
         phase = Stopwatch.GetTimestamp();
         foreach (var state in declarations.OfType<StateDeclaration>()) AddGlobal(state.Name, TypeOf(state.Type), state.Span, BoundSymbolKind.State);
@@ -215,7 +228,7 @@ public sealed class DslBinder
                 case StateDeclaration s: BindExpression(s.Initializer, new()); break;
                 case FunctionDeclaration f: profile.MeasureAction("BindFunction", () => BindFunction(f)); break;
                 case HandlerDeclaration h: profile.MeasureAction("BindHandler", () => BindHandler(h)); break;
-                case CycleElementDeclaration c: BindCycle(c.Cycle, c.Id, c.Repeat, c.Condition, c.Body, c.Span, new()); break;
+                case CycleElementDeclaration c: BindCycle(c.Cycle, c.Id, c.Repeat, c.Condition, c.Body, c.Span, new(), c.IdSpan); break;
                 case NextCycleDeclaration n: Require(BindExpression(n.Cycle, new()), cycle, n.Cycle.Span, "next requires a Cycle."); break;
                 case BeforeRoomChangeDeclaration b: profile.MeasureAction("BindBeforeRoomChange", () => BindBeforeRoomChange(b)); break;
                 case AfterActionExecutedDeclaration a: profile.MeasureAction("BindAfterActionExecuted", () => BindAfterActionExecuted(a)); break;
@@ -306,14 +319,18 @@ public sealed class DslBinder
         var scope = new Dictionary<string, ITypeSymbol>(StringComparer.Ordinal);
         currentParameters.Clear();
         activeDslSymbols.Clear();
-        foreach (var p in f.Parameters)
+        activeDslScope = f.Span;
+        for (var parameterIndex = 0; parameterIndex < f.Parameters.Count; parameterIndex++)
         {
+            var p = f.Parameters[parameterIndex];
+            var parameterSpan = parameterIndex < f.ParameterSpans.Count ? f.ParameterSpans[parameterIndex] : f.Span;
             var parameterType = TypeOf(p.Type);
             if (parameterType == null)
                 Report("SEGDSL313", $"Unknown SEG type '{p.Type}' for parameter '{p.Name}'.", f.Span);
             scope[NormalizeKey(p.Name)] = parameterType ?? compilation.GetSpecialType(SpecialType.System_Object);
             currentParameters.Add(NormalizeKey(p.Name));
-            AddLocalIdentity(p.Name, "parameter", f.Span);
+            AddLocalIdentity(p.Name, "parameter", parameterSpan);
+            RecordDslReference(p.Name, parameterSpan, BoundSymbolKind.Parameter, p.Name, "definition");
         }
         ITypeSymbol? returnType = null;
         if (f.ReturnType != null)
@@ -325,6 +342,7 @@ public sealed class DslBinder
         BindStatements(f.Body, scope, returnType);
         currentParameters.Clear();
         activeDslSymbols.Clear();
+        activeDslScope = null;
     }
     private void BindHandler(HandlerDeclaration h)
     {
@@ -365,8 +383,8 @@ public sealed class DslBinder
         inputType = previousInputType;
         inputContextAllowed = false;
     }
-    private void BindCycle(string cycleName, string? elementId, string? repeat, DslExpression? condition, IReadOnlyList<DslStatement> body, SourceSpan span, Dictionary<string, ITypeSymbol>? scope = null)
-    { scope ??= new(); Require(BindName(cycleName, span, scope), cycle, span, "add requires a Cycle."); if (repeat != null && repeat is not ("once" or "forever")) Report("SEGDSL316", $"Unknown Repeat modifier '{repeat}'.", span); if (condition != null) Require(BindExpression(condition, scope, dateTimeNullable), compilation.GetSpecialType(SpecialType.System_Boolean), condition.Span, "when must be bool."); BindStatements(body, new(scope), null); }
+    private void BindCycle(string cycleName, string? elementId, string? repeat, DslExpression? condition, IReadOnlyList<DslStatement> body, SourceSpan span, Dictionary<string, ITypeSymbol>? scope = null, SourceSpan? elementSpan = null)
+    { scope ??= new(); Require(BindName(cycleName, span, scope), cycle, span, "add requires a Cycle."); if (elementId != null) RecordDslReference(elementId, elementSpan ?? span, BoundSymbolKind.CycleElementId, elementId, "definition"); if (repeat != null && repeat is not ("once" or "forever")) Report("SEGDSL316", $"Unknown Repeat modifier '{repeat}'.", span); if (condition != null) Require(BindExpression(condition, scope, dateTimeNullable), compilation.GetSpecialType(SpecialType.System_Boolean), condition.Span, "when must be bool."); BindStatements(body, new(scope), null); }
     private void BindStatements(IEnumerable<DslStatement> statements, Dictionary<string, ITypeSymbol> scope, ITypeSymbol? returnType)
     {
         var statementArray = statements as IReadOnlyList<DslStatement> ?? statements.ToArray();
@@ -382,7 +400,12 @@ public sealed class DslBinder
                     var inferredEmptyType = declaredType ?? InferEmptyListType(v, statementArray, scope);
                     var type = BindExpression(v.Initializer, scope, null, inferredEmptyType);
                     if (type == null && inferredEmptyType != null) type = inferredEmptyType;
-                    if (type != null) { scope[NormalizeKey(v.Name)] = type; AddLocalIdentity(v.Name, "local", v.Span); }
+                    if (type != null)
+                    {
+                        scope[NormalizeKey(v.Name)] = type;
+                        AddLocalIdentity(v.Name, "local", v.NameSpan);
+                        RecordDslReference(v.Name, v.NameSpan, BoundSymbolKind.Local, v.Name, "definition");
+                    }
                     if (v.Type != null && v.Initializer is LiteralExpression { Kind: "null" }) nullLiterals.Add(v.Initializer);
                     break;
                 case AssignmentStatement a:
@@ -421,7 +444,7 @@ public sealed class DslBinder
                     break;
                 case CallStatement c: BindExpression(c.Expression, scope); break;
                 case NextCycleStatement n: Require(BindExpression(n.Cycle, scope), cycle, n.Span, "next requires a Cycle."); break;
-                case AddCycleElementStatement a: BindCycle(a.Cycle, a.Id, a.Repeat, a.Condition, a.Body, a.Span, scope); break;
+                case AddCycleElementStatement a: BindCycle(a.Cycle, a.Id, a.Repeat, a.Condition, a.Body, a.Span, scope, a.IdSpan); break;
                 case IfStatement i:
                     foreach (var branch in i.Branches) { Require(BindExpression(branch.Condition, scope), compilation.GetSpecialType(SpecialType.System_Boolean), branch.Condition.Span, "if condition must be bool."); BindStatements(branch.Body, new(scope), returnType); }
                     if (i.ElseBody != null) BindStatements(i.ElseBody, new(scope), returnType); break;
@@ -828,13 +851,13 @@ public sealed class DslBinder
     }
     private void AddDslIdentity(string name, string kind, SourceSpan span)
     {
-        var identity = new DslSymbolIdentity(name, kind, span);
+        var identity = new DslSymbolIdentity(name, kind, span, default);
         model.DslDefinitions[identity] = span;
         if (!model.DslSymbolsByName.ContainsKey(name)) model.DslSymbolsByName.Add(name, identity);
     }
     private void AddLocalIdentity(string name, string kind, SourceSpan span)
     {
-        var identity = new DslSymbolIdentity(name, kind, span);
+        var identity = new DslSymbolIdentity(name, kind, span, activeDslScope ?? span);
         model.DslDefinitions[identity] = span;
         activeDslSymbols[name] = identity;
     }

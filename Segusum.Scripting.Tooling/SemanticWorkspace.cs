@@ -224,6 +224,8 @@ public sealed class DslSemanticWorkspace
         if (definition == null) return Array.Empty<SemanticReference>();
         var dsl = model.ReferencesByNode
             .Where(x => SameSymbol(x.CSharpSymbol, definition.CSharpSymbol) || SameDsl(x.DslSymbol, definition.DslSymbol))
+            .GroupBy(x => (x.Path, x.Span.Start, x.Span.Length))
+            .Select(x => x.First())
             .Select(x => new SemanticReference(definition.DisplayName, new SemanticLocation(x.Path, NormalizeDslSpan(x), x.ReferenceKind), x.CSharpSymbol, x.DslSymbol))
             .ToList();
         if (definition.CSharpSymbol != null)
@@ -301,8 +303,16 @@ public sealed class DslSemanticWorkspace
         if (definition.CSharpSymbol?.ContainingType is INamedTypeSymbol containingType &&
             containingType.GetMembers(newName).Any(x => !SymbolEqualityComparer.Default.Equals(x, definition.CSharpSymbol)))
             return new RenameResult(Array.Empty<WorkspaceTextEdit>(), new[] { new DslDiagnostic("SEGTOOL005", $"The rename collides with an existing C# member '{newName}'.", definition.Location.Span) });
-        if (definition.DslSymbol != null && model.DslDefinitions.Keys.Any(x => !Equals(x, definition.DslSymbol) && string.Equals(x.Name, newName, StringComparison.Ordinal)))
-            return new RenameResult(Array.Empty<WorkspaceTextEdit>(), new[] { new DslDiagnostic("SEGTOOL006", $"The rename collides with an existing DSL symbol '{newName}'.", definition.Location.Span) });
+        if (definition.DslSymbol != null && model.DslDefinitions.Keys.Any(x => !Equals(x, definition.DslSymbol) &&
+            string.Equals(x.Name, newName, StringComparison.Ordinal) && SameDslRenameDomain(x, definition.DslSymbol)))
+        {
+            var collision = model.DslDefinitions.Keys.First(x => !Equals(x, definition.DslSymbol) &&
+                string.Equals(x.Name, newName, StringComparison.Ordinal) && SameDslRenameDomain(x, definition.DslSymbol));
+            return new RenameResult(Array.Empty<WorkspaceTextEdit>(), new[]
+            {
+                new DslDiagnostic("SEGTOOL006", $"Cannot rename '{definition.DisplayName}' to '{newName}': a {collision.Kind} symbol with that identity already exists.", definition.Location.Span)
+            });
+        }
         var dslReferenceTimer = Stopwatch.StartNew();
         var references = GetDslReferences(definition);
         dslReferenceTimer.Stop();
@@ -376,6 +386,8 @@ public sealed class DslSemanticWorkspace
     private IReadOnlyList<SemanticReference> GetDslReferences(SemanticDefinition definition)
         => model.ReferencesByNode
             .Where(x => SameSymbol(x.CSharpSymbol, definition.CSharpSymbol) || SameDsl(x.DslSymbol, definition.DslSymbol))
+            .GroupBy(x => (x.Path, x.Span.Start, x.Span.Length))
+            .Select(x => x.First())
             .Select(x => new SemanticReference(definition.DisplayName, new SemanticLocation(x.Path, NormalizeDslSpan(x), x.ReferenceKind), x.CSharpSymbol, x.DslSymbol))
             .ToArray();
 
@@ -457,6 +469,12 @@ public sealed class DslSemanticWorkspace
 
     private static bool SameSymbol(ISymbol? left, ISymbol? right) => left != null && right != null && SymbolEqualityComparer.Default.Equals(left, right);
     private static bool SameDsl(DslSymbolIdentity? left, DslSymbolIdentity? right) => left != null && right != null && left.Equals(right);
+    private static bool SameDslRenameDomain(DslSymbolIdentity left, DslSymbolIdentity right)
+    {
+        static bool IsGlobal(string kind) => kind is "function" or "state" or "cycle" or "cycle-element" or "named-cutscene";
+        if (IsGlobal(left.Kind) || IsGlobal(right.Kind)) return IsGlobal(left.Kind) && IsGlobal(right.Kind);
+        return left.ScopeSpan.Path == right.ScopeSpan.Path && left.ScopeSpan.Start == right.ScopeSpan.Start;
+    }
     private SourceSpan NormalizeDslSpan(DslSemanticReference reference)
     {
         if (!documents.TryGetValue(reference.Path, out var document)) return reference.Span;
@@ -681,9 +699,5 @@ public sealed class DslSemanticWorkspace
         return null;
     }
     private SourceSpan DslNameLocation(string name, SourceSpan declaration)
-    {
-        if (!documents.TryGetValue(declaration.Path, out var document)) return declaration;
-        var start = document.Text.IndexOf(name, Math.Max(0, declaration.Start), StringComparison.Ordinal);
-        return start < 0 ? declaration : SourceSpan.From(declaration.Path, document.Text, start, name.Length);
-    }
+        => declaration;
 }

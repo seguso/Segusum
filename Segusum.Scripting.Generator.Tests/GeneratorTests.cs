@@ -282,6 +282,112 @@ public sealed class GeneratorTests
     }
 
     [Fact]
+    public void SemanticWorkspaceUsesOneIdentityForFunctionDeclarationAndReference()
+    {
+        const string dslText = "world game\ndef helper ret bool:\n    ret true\nend\ndef caller ret bool:\n    ret helper\nend\n";
+        var workspace = CreateSemanticWorkspace(dslText, "");
+        var declarationOffset = dslText.IndexOf("helper", StringComparison.Ordinal);
+        var referenceOffset = dslText.LastIndexOf("helper", StringComparison.Ordinal);
+        var declarationSpan = SourceSpan.From("Gameplay/Dirty.seg", dslText, declarationOffset, "helper".Length);
+        var referenceSpan = SourceSpan.From("Gameplay/Dirty.seg", dslText, referenceOffset, "helper".Length);
+
+        var fromDeclaration = workspace.GetDefinition("Gameplay/Dirty.seg", declarationSpan.Line, declarationSpan.Column);
+        var fromReference = workspace.GetDefinition("Gameplay/Dirty.seg", referenceSpan.Line, referenceSpan.Column);
+        Assert.NotNull(fromDeclaration);
+        Assert.NotNull(fromReference);
+        Assert.Equal(fromDeclaration!.Location, fromReference!.Location);
+        Assert.Equal(2, workspace.FindReferences("Gameplay/Dirty.seg", referenceSpan.Line, referenceSpan.Column).Count);
+
+        var rename = workspace.RenameSymbol("Gameplay/Dirty.seg", referenceSpan.Line, referenceSpan.Column, "helperNuovo");
+        Assert.True(rename.Succeeded, string.Join(Environment.NewLine, rename.Diagnostics));
+        Assert.Equal(2, rename.Edits.Count);
+    }
+
+    [Fact]
+    public void SemanticWorkspaceRejectsFunctionAndCycleElementCollisions()
+    {
+        const string dslText = "world game\ndef first ret bool:\n    ret true\nend\ndef second ret bool:\n    ret true\nend\nvar cyc = new-cycle\nadd cyc firstElement\nend\nadd cyc secondElement\nend\n";
+        var workspace = CreateSemanticWorkspace(dslText, "");
+        var firstOffset = dslText.IndexOf("first ret", StringComparison.Ordinal);
+        var firstSpan = SourceSpan.From("Gameplay/Dirty.seg", dslText, firstOffset, "first".Length);
+        var functionRename = workspace.RenameSymbol("Gameplay/Dirty.seg", firstSpan.Line, firstSpan.Column, "second");
+        Assert.False(functionRename.Succeeded);
+        Assert.Contains("Cannot rename 'first' to 'second'", functionRename.Diagnostics.Single().Message, StringComparison.Ordinal);
+
+        var elementOffset = dslText.IndexOf("firstElement", StringComparison.Ordinal);
+        var elementSpan = SourceSpan.From("Gameplay/Dirty.seg", dslText, elementOffset, "firstElement".Length);
+        var elementRename = workspace.RenameSymbol("Gameplay/Dirty.seg", elementSpan.Line, elementSpan.Column, "secondElement");
+        Assert.False(elementRename.Succeeded);
+        Assert.Contains("Cannot rename 'firstElement' to 'secondElement'", elementRename.Diagnostics.Single().Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SemanticWorkspaceAllowsSameTextInIndependentLocalScopes()
+    {
+        const string dslText = "world game\ndef first ret int:\n    var value = 1\n    ret value\nend\ndef second ret int:\n    var value2 = 2\n    ret value2\nend\n";
+        var workspace = CreateSemanticWorkspace(dslText, "");
+        var valueOffset = dslText.IndexOf("value =", StringComparison.Ordinal);
+        var valueSpan = SourceSpan.From("Gameplay/Dirty.seg", dslText, valueOffset, "value".Length);
+        var rename = workspace.RenameSymbol("Gameplay/Dirty.seg", valueSpan.Line, valueSpan.Column, "value2");
+        Assert.True(rename.Succeeded, string.Join(Environment.NewLine, rename.Diagnostics));
+        Assert.Equal(2, rename.Edits.Count);
+        Assert.DoesNotContain(rename.Edits, x => x.Span.Start > dslText.IndexOf("def second", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void SemanticWorkspaceRejectsLocalAndParameterCollisionsInOneScope()
+    {
+        const string dslText = "world game\ndef locals first: int second: int ret int:\n    var localOne = 1\n    var localTwo = 2\n    ret localOne\nend\n";
+        var workspace = CreateSemanticWorkspace(dslText, "");
+        var localOffset = dslText.IndexOf("localOne =", StringComparison.Ordinal);
+        var localSpan = SourceSpan.From("Gameplay/Dirty.seg", dslText, localOffset, "localOne".Length);
+        var localRename = workspace.RenameSymbol("Gameplay/Dirty.seg", localSpan.Line, localSpan.Column, "localTwo");
+        Assert.False(localRename.Succeeded);
+        Assert.Contains("Cannot rename 'localOne' to 'localTwo'", localRename.Diagnostics.Single().Message, StringComparison.Ordinal);
+
+        var parameterOffset = dslText.IndexOf("first: int", StringComparison.Ordinal);
+        var parameterSpan = SourceSpan.From("Gameplay/Dirty.seg", dslText, parameterOffset, "first".Length);
+        var parameterRename = workspace.RenameSymbol("Gameplay/Dirty.seg", parameterSpan.Line, parameterSpan.Column, "second");
+        Assert.False(parameterRename.Succeeded);
+        Assert.Contains("Cannot rename 'first' to 'second'", parameterRename.Diagnostics.Single().Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SemanticWorkspaceRenamesDslFunctionAcrossFiles()
+    {
+        var workspace = CreateSemanticWorkspace("", ("Gameplay/Definitions.seg", "world game\ndef helper ret bool:\n    ret true\nend\n"), ("Gameplay/Caller.seg", "world game\ndef caller ret bool:\n    ret helper\nend\n"));
+        const string callerText = "world game\ndef caller ret bool:\n    ret helper\nend\n";
+        var offset = callerText.IndexOf("helper", StringComparison.Ordinal);
+        var span = SourceSpan.From("Gameplay/Caller.seg", callerText, offset, "helper".Length);
+        var definition = workspace.GetDefinition("Gameplay/Caller.seg", span.Line, span.Column);
+        Assert.Equal("Gameplay/Definitions.seg", definition?.Location.Path);
+        var references = workspace.FindReferences("Gameplay/Caller.seg", span.Line, span.Column);
+        Assert.Contains(references, x => x.Location.Path == "Gameplay/Definitions.seg");
+        Assert.Contains(references, x => x.Location.Path == "Gameplay/Caller.seg");
+        var rename = workspace.RenameSymbol("Gameplay/Caller.seg", span.Line, span.Column, "helperNuovo");
+        Assert.True(rename.Succeeded, string.Join(Environment.NewLine, rename.Diagnostics));
+        Assert.Equal(2, rename.Edits.Count);
+    }
+
+    [Fact]
+    public void SemanticWorkspaceExposesStateAndCycleDeclarationSymbols()
+    {
+        const string dslText = "world game\nstate score: int = 0\nvar cyc = new-cycle\nadd cyc elemId\nend\ndef read ret int:\n    ret score\nend\n";
+        var workspace = CreateSemanticWorkspace(dslText, "");
+        var stateOffset = dslText.IndexOf("score:", StringComparison.Ordinal);
+        var stateSpan = SourceSpan.From("Gameplay/Dirty.seg", dslText, stateOffset, "score".Length);
+        var stateDefinition = workspace.GetDefinition("Gameplay/Dirty.seg", stateSpan.Line, stateSpan.Column);
+        Assert.Equal("score", stateDefinition?.DisplayName);
+        Assert.Equal(stateSpan.Start, stateDefinition?.Location.Span.Start);
+
+        var cycleOffset = dslText.IndexOf("cyc =", StringComparison.Ordinal);
+        var cycleSpan = SourceSpan.From("Gameplay/Dirty.seg", dslText, cycleOffset, "cyc".Length);
+        var cycleDefinition = workspace.GetDefinition("Gameplay/Dirty.seg", cycleSpan.Line, cycleSpan.Column);
+        Assert.Equal("cyc", cycleDefinition?.DisplayName);
+        Assert.Equal(cycleSpan.Start, cycleDefinition?.Location.Span.Start);
+    }
+
+    [Fact]
     public void SemanticWorkspaceProvidesDefinitionReferencesAndCompletions()
     {
         const string worldText = "using Seg; namespace Demo { public partial class Pinco : WorldBase { public Pinco() : base(\"en\") { } public Character olivia = null!; public bool helper() => true; } }";
@@ -425,6 +531,38 @@ public sealed class GeneratorTests
         var rename = workspace.RenameSymbol("Gameplay/Named.seg", 3, 20, "ncsNuova");
         Assert.True(rename.Succeeded, string.Join(Environment.NewLine, rename.Diagnostics));
         Assert.Equal(2, rename.Edits.Count(x => x.Path == "Gameplay/Named.seg" && x.NewText == "ncsNuova"));
+    }
+
+    [Fact]
+    public void SemanticWorkspaceNavigatesAndRenamesCycleElementIdsWithoutTouchingText()
+    {
+        const string dslText = "world game\nafter-action-executed:\n    var cyc = new-cycle\n    add cyc oldId\n        nar: \"oldId\"\n    end\n    add cyc otherId\n    end\nend\ndef usesOldId ret bool:\n    ret oldId was-seen-at-least-once\nend\n// oldId must remain unchanged\n";
+        var workspace = CreateSemanticWorkspace(dslText, "");
+        var declarationOffset = dslText.IndexOf("oldId", StringComparison.Ordinal);
+        var declarationSpan = SourceSpan.From("Gameplay/Dirty.seg", dslText, declarationOffset, "oldId".Length);
+
+        var definition = workspace.GetDefinition("Gameplay/Dirty.seg", declarationSpan.Line, declarationSpan.Column);
+        Assert.NotNull(definition);
+        Assert.Equal("oldId", definition!.DisplayName);
+        Assert.Equal("dsl-definition", definition.Location.Kind);
+        Assert.Equal(declarationSpan.Start, definition.Location.Span.Start);
+
+        var references = workspace.FindReferences("Gameplay/Dirty.seg", declarationSpan.Line, declarationSpan.Column);
+        Assert.Contains(references, x => x.Location.Span.Start == declarationSpan.Start);
+        Assert.Contains(references, x => x.Location.Path == "Gameplay/Dirty.seg" && x.Location.Span.Start == dslText.IndexOf("oldId was-seen", StringComparison.Ordinal));
+
+        var rename = workspace.RenameSymbol("Gameplay/Dirty.seg", declarationSpan.Line, declarationSpan.Column, "newId");
+        Assert.True(rename.Succeeded, string.Join(Environment.NewLine, rename.Diagnostics));
+        Assert.Equal(2, rename.Edits.Count(x => x.Path == "Gameplay/Dirty.seg" && x.NewText == "newId"));
+        Assert.DoesNotContain(rename.Edits, x => x.Span.Start > dslText.IndexOf("nar:", StringComparison.Ordinal) && x.Span.Start < dslText.IndexOf("end\ndef usesOldId", StringComparison.Ordinal));
+        Assert.DoesNotContain(rename.Edits, x => x.Span.Start > dslText.IndexOf("// oldId", StringComparison.Ordinal));
+
+        var renamed = ApplyEdits(dslText, rename.Edits);
+        Assert.Contains("add cyc newId", renamed, StringComparison.Ordinal);
+        Assert.Contains("ret newId was-seen-at-least-once", renamed, StringComparison.Ordinal);
+        Assert.Contains("nar: \"oldId\"", renamed, StringComparison.Ordinal);
+        Assert.Contains("add cyc otherId", renamed, StringComparison.Ordinal);
+        Assert.Contains("// oldId", renamed, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1487,6 +1625,15 @@ public NamedCutSceneId ncsMikeStalloneIlBenefattore = null!;
         var tree = CSharpSyntaxTree.ParseText($"using System; using Seg; namespace Demo {{ public partial class Pinco : WorldBase {{ public Pinco() : base(\"en\") {{ }} {worldSource} }} }}", path: "World.cs");
         var compilation = CSharpCompilation.Create("DirtyPositionTooling", new[] { tree }, references, new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
         return new DslSemanticWorkspace(compilation, compilation.GetTypeByMetadataName("Demo.Pinco")!, new[] { new DslSource("Gameplay/Dirty.seg", dslText) });
+    }
+
+    private static DslSemanticWorkspace CreateSemanticWorkspace(string worldSource, params (string Path, string Text)[] dslSources)
+    {
+        var references = ((string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES"))!.Split(Path.PathSeparator).Select(path => MetadataReference.CreateFromFile(path)).Cast<MetadataReference>().ToList();
+        references.Add(MetadataReference.CreateFromFile(typeof(Seg.WorldBase).Assembly.Location));
+        var tree = CSharpSyntaxTree.ParseText($"using System; using Seg; namespace Demo {{ public partial class Pinco : WorldBase {{ public Pinco() : base(\"en\") {{ }} {worldSource} }} }}", path: "World.cs");
+        var compilation = CSharpCompilation.Create("CrossFileDslTooling", new[] { tree }, references, new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        return new DslSemanticWorkspace(compilation, compilation.GetTypeByMetadataName("Demo.Pinco")!, dslSources.Select(x => new DslSource(x.Path, x.Text)));
     }
 
     private static SemanticDefinition? DefinitionAt(DslSemanticWorkspace workspace, string text, string tokenContext)

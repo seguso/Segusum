@@ -25,8 +25,15 @@ public sealed record DslSource(string Path, string Text);
 public sealed record DslDiagnostic(string Id, string Message, SourceSpan Span);
 public abstract record DslNode(SourceSpan Span);
 public abstract record DslDeclaration(SourceSpan Span) : DslNode(Span);
-public sealed record StateDeclaration(string Name,string Type,DslExpression Initializer,SourceSpan Span) : DslDeclaration(Span);
-public sealed record FunctionDeclaration(string Name,IReadOnlyList<(string Name,string Type)> Parameters,string? ReturnType,IReadOnlyList<DslStatement> Body,SourceSpan Span) : DslDeclaration(Span);
+public sealed record StateDeclaration(string Name,string Type,DslExpression Initializer,SourceSpan Span) : DslDeclaration(Span)
+{
+    public SourceSpan NameSpan { get; init; } = Span;
+}
+public sealed record FunctionDeclaration(string Name,IReadOnlyList<(string Name,string Type)> Parameters,string? ReturnType,IReadOnlyList<DslStatement> Body,SourceSpan Span) : DslDeclaration(Span)
+{
+    public SourceSpan NameSpan { get; init; } = Span;
+    public IReadOnlyList<SourceSpan> ParameterSpans { get; init; } = Array.Empty<SourceSpan>();
+}
 public sealed record HandlerDeclaration(string Kind,string First,string? Second,string? Target,DslExpression? Phrase,DslExpression? Explanation,DslExpression? Condition,IReadOnlyList<DslStatement> Body,SourceSpan Span) : DslDeclaration(Span)
 {
     public SourceSpan FirstSpan { get; init; } = Span;
@@ -35,7 +42,10 @@ public sealed record HandlerDeclaration(string Kind,string First,string? Second,
 }
 public sealed record BeforeRoomChangeDeclaration(IReadOnlyList<DslStatement> Body,SourceSpan Span) : DslDeclaration(Span);
 public sealed record AfterActionExecutedDeclaration(IReadOnlyList<DslStatement> Body,SourceSpan Span) : DslDeclaration(Span);
-public sealed record CycleDeclaration(string Variable,SourceSpan Span) : DslDeclaration(Span);
+public sealed record CycleDeclaration(string Variable,SourceSpan Span) : DslDeclaration(Span)
+{
+    public SourceSpan VariableSpan { get; init; } = Span;
+}
 public sealed record NextCycleDeclaration(DslExpression Cycle,SourceSpan Span) : DslDeclaration(Span);
 public sealed record CycleElementDeclaration(string Cycle,string Id,bool Important,string? Repeat,DslExpression? Condition,IReadOnlyList<DslStatement> Body,SourceSpan Span) : DslDeclaration(Span)
 {
@@ -47,6 +57,7 @@ public abstract record DslStatement(SourceSpan Span) : DslNode(Span);
 public sealed record VariableDeclaration(string Name,DslExpression Initializer,SourceSpan Span) : DslStatement(Span)
 {
     public string? Type { get; init; }
+    public SourceSpan NameSpan { get; init; } = Span;
 }
 public sealed record AssignmentStatement(string Name,string Operator,DslExpression Value,SourceSpan Span) : DslStatement(Span)
 {

@@ -145,7 +145,7 @@ public static class DslParser
                     case "before-room-change": result.Add(profile.Measure("ParseDeclaration.before-room-change", () => new BeforeRoomChangeDeclaration(ParseBody(true), span))); break;
                     case "after-action-executed": result.Add(profile.Measure("ParseDeclaration.after-action-executed", () => new AfterActionExecutedDeclaration(ParseBody(true), span))); break;
                     case "add": result.Add(profile.Measure("ParseDeclaration.add", () => ParseCycleElement(span))); break;
-                    case "var": { var name = Word(); Need("="); Need("new-cycle"); result.Add(profile.Measure("ParseDeclaration.var", () => new CycleDeclaration(name, span))); break; }
+                    case "var": { var token = WordToken(); Need("="); Need("new-cycle"); result.Add(profile.Measure("ParseDeclaration.var", () => new CycleDeclaration(token.Text, span) { VariableSpan = token.Span })); break; }
                     case "next": result.Add(profile.Measure("ParseDeclaration.next", () => new NextCycleDeclaration(Expression(), span))); break;
                     case "world": diagnostics.Add(new DslDiagnostic("SEGDSL104", worldId == null ? "The world directive must appear before declarations." : "The world directive must appear exactly once before declarations.", span)); RecoverLine(); break;
                     default: Error($"Unexpected declaration '{keyword}'."); RecoverLine(); break;
@@ -155,14 +155,14 @@ public static class DslParser
             profile.AddPhase("declaration-cycle", Stopwatch.GetTimestamp() - declarationsStarted, result.Count);
             return new DslDocument(worldId, result);
         }
-        private StateDeclaration ParseState(SourceSpan span) { var name = Word(); Need(":"); var type = Word(); Need("="); return new(name, type, Expression(), span); }
+        private StateDeclaration ParseState(SourceSpan span) { var token = WordToken(); Need(":"); var type = Word(); Need("="); return new(token.Text, type, Expression(), span) { NameSpan = token.Span }; }
         private FunctionDeclaration ParseFunction(SourceSpan span)
         {
-            var name = Word(); var parameters = new List<(string Name, string Type)>();
+            var nameToken = WordToken(); var name = nameToken.Text; var parameters = new List<(string Name, string Type)>(); var parameterSpans = new List<SourceSpan>();
             while (!Is("ret") && !Is(":") && Current.Kind != DslTokenKind.NewLine && Current.Kind != DslTokenKind.EndOfFile)
-            { var parameter = Word(); Need(":"); parameters.Add((parameter, ParseTypeName())); if (Is(",")) Take(); }
+            { var parameterToken = WordToken(); Need(":"); parameters.Add((parameterToken.Text, ParseTypeName())); parameterSpans.Add(parameterToken.Span); if (Is(",")) Take(); }
             string? returnType = null; if (Is("ret")) { Take(); returnType = ParseTypeName(); }
-            return new(name, parameters, returnType, ParseBody(true), span);
+            return new(name, parameters, returnType, ParseBody(true), span) { NameSpan = nameToken.Span, ParameterSpans = parameterSpans };
         }
         private string ParseTypeName()
         {
@@ -260,11 +260,12 @@ public static class DslParser
                 case "nar-room": if (Is(":")) Take(); return new NarRoomStatement(RawTextAfterKeyword(), span); case "call": Error("The 'call' keyword is no longer part of the DSL syntax."); return new CallStatement(new IdentifierExpression("_error", span), span);
                 case "var":
                 {
-                    var name = Word();
+                    var nameToken = WordToken();
+                    var name = nameToken.Text;
                     string? type = null;
                     if (Is(DslTokenKind.Colon)) { Take(); type = ParseTypeName(); }
                     Need("=");
-                    return new VariableDeclaration(name, Expression(), span) { Type = type };
+                    return new VariableDeclaration(name, Expression(), span) { Type = type, NameSpan = nameToken.Span };
                 }
                 case "for":
                 {
