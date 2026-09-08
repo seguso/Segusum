@@ -20,6 +20,6 @@
     "viewsContainers": { "panel": [{ "id": "segusum.references", "title": "Segusum", "icon": "$(references)" }] },
     "views": { "segusum.references": [{ "id": "segusum.referencesView", "name": "References" }] }
   },
-  "scripts": { "compile": "tsc -p ./tsconfig.json", "test:cancellation": "npm run compile && node test/pendingRequests.test.mjs", "test:invalidation": "npm run compile && node test/invalidation.test.mjs", "test:semantic": "npm run compile && node test/semanticRequest.test.mjs", "test:overlay": "npm run compile && node test/hostOverlay.test.mjs", "test": "npm run test:cancellation && node test/invalidation.test.mjs && node test/semanticRequest.test.mjs && node test/hostOverlay.test.mjs" },
+  "scripts": { "compile": "tsc -p ./tsconfig.json", "test:cancellation": "npm run compile && node test/pendingRequests.test.mjs", "test:invalidation": "npm run compile && node test/invalidation.test.mjs", "test:semantic": "npm run compile && node test/semanticRequest.test.mjs", "test:overlay": "npm run compile && node test/hostOverlay.test.mjs", "test:lifecycle": "npm run compile && node test/hostLifecycle.test.mjs", "test": "npm run test:cancellation && node test/invalidation.test.mjs && node test/semanticRequest.test.mjs && node test/hostOverlay.test.mjs && node test/hostLifecycle.test.mjs" },
   "devDependencies": { "@types/node": "^22.0.0", "@types/vscode": "^1.85.0", "typescript": "^5.6.0" }
 }

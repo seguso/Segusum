@@ -42,7 +42,8 @@ const fs = __importStar(require("fs"));
 const pendingRequests_1 = require("./pendingRequests");
 const invalidation_1 = require("./invalidation");
 const semanticRequest_1 = require("./semanticRequest");
-const BUILD_ID = 'extension build = dirty-buffer-definition-0.1.4-2026-09-05';
+const hostLifecycle_1 = require("./hostLifecycle");
+const BUILD_ID = 'extension build = host-start-race-fix-0.1.4-2026-09-08';
 const INTERACTIVE_RPC_TIMEOUT_MS = 15_000;
 const interactiveMethods = new Set(['definition', 'completion', 'references', 'rename']);
 let output;
@@ -229,30 +230,26 @@ async function clientFor(document) {
         throw new Error(`No consumer .csproj containing .seg files found under ${folder.uri.fsPath}`);
     const discoveryMs = Date.now() - started;
     const key = path.normalize(projectPath).toLowerCase();
-    let client = clients.get(key);
-    if (client?.isDead) {
+    const existing = clients.get(key);
+    if (existing?.isDead) {
         clients.delete(key);
-        client = undefined;
     }
-    if (!client) {
-        client = new HostClient(projectPath, folder.uri.fsPath, (deadClient, error) => { if (clients.get(key) === deadClient)
-            clients.delete(key); status.text = 'Segusum: Error'; status.tooltip = `Project: ${projectPath}\n${error.message}`; status.show(); });
-        clients.set(key, client);
+    const client = await (0, hostLifecycle_1.getOrStartClient)(clients, key, () => new HostClient(projectPath, folder.uri.fsPath, (deadClient, error) => {
+        if (clients.get(key) === deadClient)
+            clients.delete(key);
+        status.text = 'Segusum: Error';
+        status.tooltip = `Project: ${projectPath}\n${error.message}`;
+        status.show();
+    }), () => {
         status.text = 'Segusum: Loading';
         status.tooltip = `Project: ${projectPath}\nLoading semantic workspace...`;
         status.show();
-        try {
-            await client.start();
-        }
-        catch (e) {
-            clients.delete(key);
-            client.dispose();
-            status.text = 'Segusum: Error';
-            status.tooltip = `Project: ${projectPath}\n${e}`;
-            status.show();
-            throw e;
-        }
-    }
+    }, (failedClient, error) => {
+        failedClient.dispose();
+        status.text = 'Segusum: Error';
+        status.tooltip = `Project: ${projectPath}\n${error}`;
+        status.show();
+    });
     log(`project discovery=${discoveryMs}ms client=${Date.now() - started}ms`);
     const selectedWorld = document.languageId === 'segusum' ? worldId(document) : '(C# target from source)';
     log(`selection document=${document.uri.fsPath} workspace=${folder.uri.fsPath} project=${projectPath} world=${selectedWorld}`);
