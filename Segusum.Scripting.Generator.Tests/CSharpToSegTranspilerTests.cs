@@ -219,6 +219,36 @@ public sealed class CSharpToSegTranspilerTests
     }
 
     [Fact]
+    public void LocalFunctionIsLiftedToTopLevelDef()
+    {
+        const string source = "class W { void beforeRoomChangeManual() { double tempoPerProssimoZauroz() { return 5; } if (tempoPerProssimoZauroz() > 0) { foo(); } } }";
+        var result = CSharpToSegTranspiler.Transpile("x.cs", source, true, "beforeRoomChangeManual");
+        Assert.Contains("def tempoPerProssimoZauroz ret double:", result.Text, StringComparison.Ordinal);
+        Assert.Contains("if tempoPerProssimoZauroz > 0:", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(result.Diagnostics, x => x.Reason.Contains("LocalFunctionStatement", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void LocalFunctionCapturesBecomeExplicitDefParameters()
+    {
+        const string source = "class W { void beforeRoomChangeManual() { int delay = 5; int helper() { return delay; } if (helper() > 0) { foo(); } } }";
+        var result = CSharpToSegTranspiler.Transpile("x.cs", source, true, "beforeRoomChangeManual");
+        Assert.Contains("def helper delay: int ret int:", result.Text, StringComparison.Ordinal);
+        Assert.Contains("if helper delay > 0:", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(result.Diagnostics, x => x.Reason.Contains("LocalFunctionStatement", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void GeneralModuloExpressionIsEmittedWithNumericPrecedence()
+    {
+        var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { void M() { addRoomChangedHandler(roomA, e => { var ra = rand.Next() % 3; if (ra % 2 == 0) { foo(); } }); } }");
+        var normalized = result.Text.Replace("\r\n", "\n", StringComparison.Ordinal);
+        Assert.Contains("var ra = rand.Next % 3", normalized, StringComparison.Ordinal);
+        Assert.Contains("if ra % 2 == 0:", normalized, StringComparison.Ordinal);
+        Assert.DoesNotContain(result.Diagnostics, x => x.Status == MigrationUnitStatus.Unsupported);
+    }
+
+    [Fact]
     public void DialogueFormattingRemovesOnlyDialogueQuotes()
     {
         var result = CSharpToSegTranspiler.Transpile("x.cs", "class W { void M() { addHandlerUseHere(a, handler: i => { dial(olivia, \"Oh, certo![[right, right.]]\"); }); } }");

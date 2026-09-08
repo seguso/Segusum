@@ -563,6 +563,11 @@ public sealed class DslBinder
             case BinaryExpression b:
                 var lt = BindExpression(b.Left, scope, contextualIt); var rt = BindExpression(b.Right, scope, contextualIt);
                 if (b.Operator is "and" or "or") { Require(lt, compilation.GetSpecialType(SpecialType.System_Boolean), b.Left.Span, "logical operand must be bool."); Require(rt, compilation.GetSpecialType(SpecialType.System_Boolean), b.Right.Span, "logical operand must be bool."); return compilation.GetSpecialType(SpecialType.System_Boolean); }
+                if (b.Operator is "+" or "-" or "*" or "/" or "%")
+                {
+                    if (!IsNumeric(lt) || !IsNumeric(rt)) Report("SEGDSL313", $"Operator '{b.Operator}' requires numeric operands.", b.Span);
+                    return lt;
+                }
                 return b.Operator is "==" or "!=" or ">" or ">=" or "<" or "<=" ? compilation.GetSpecialType(SpecialType.System_Boolean) : lt;
             case MemberAccessExpression m:
                 if (m.Receiver is IdentifierExpression typeName && TryGetTypeBySimpleNameAndMember(typeName.Name, m.MemberName, out var staticType))
@@ -704,6 +709,7 @@ public sealed class DslBinder
     { var failure = results.Where(x => x.Call == null).OrderBy(x => FailurePriority(x.FailureKind)).FirstOrDefault(); if (failure == null) { Report("SEGDSL306", $"No overload of '{call.Name}' accepts these arguments.", call.Span); return; } Report(failure.FailureKind switch { CallFailureKind.UnknownNamedArgument => "SEGDSL307", CallFailureKind.DuplicateNamedArgument => "SEGDSL308", CallFailureKind.PositionalAfterNamed => "SEGDSL310", CallFailureKind.IncompatibleArgument => "SEGDSL309", CallFailureKind.MissingRequiredArgument => "SEGDSL306", _ => "SEGDSL306" }, failure.FailureDetail, failure.FailureSpan); }
     private static int FailurePriority(CallFailureKind kind) => kind switch { CallFailureKind.UnknownNamedArgument => 0, CallFailureKind.DuplicateNamedArgument => 1, CallFailureKind.PositionalAfterNamed => 2, CallFailureKind.IncompatibleArgument => 3, CallFailureKind.MissingRequiredArgument => 4, _ => 5 };
     private bool Compatible(ITypeSymbol? actual, ITypeSymbol expected) => profile.Measure("Compatible/type checks", () => actual != null && Microsoft.CodeAnalysis.CSharp.CSharpExtensions.ClassifyConversion(compilation, actual, expected).IsImplicit);
+    private static bool IsNumeric(ITypeSymbol? type) => type?.SpecialType is SpecialType.System_Byte or SpecialType.System_SByte or SpecialType.System_Int16 or SpecialType.System_UInt16 or SpecialType.System_Int32 or SpecialType.System_UInt32 or SpecialType.System_Int64 or SpecialType.System_UInt64 or SpecialType.System_Single or SpecialType.System_Double or SpecialType.System_Decimal;
     private bool IsCompatible(DslExpression expression, ITypeSymbol? actual, ITypeSymbol? expected) => expected != null && ((nullLiterals.Contains(expression) && (expected.IsReferenceType || expected.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T)) || Compatible(actual, expected));
     private void RequireExpression(DslExpression expression, ITypeSymbol? actual, ITypeSymbol? expected, string message) { if (!IsCompatible(expression, actual, expected)) Report("SEGDSL313", message, expression.Span); }
     private ITypeSymbol? BindName(string name, SourceSpan span, Dictionary<string, ITypeSymbol>? scope = null)

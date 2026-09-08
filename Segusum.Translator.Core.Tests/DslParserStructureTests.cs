@@ -135,6 +135,17 @@ end
     }
 
     [Fact]
+    public void ModuloHasMultiplicativePrecedence()
+    {
+        const string text = "world game\ndef check a: int, b: int, c: int ret int:\n ret a + b % c\nend";
+        var result = DslParser.Parse(new DslSource("modulo.seg", text));
+        Assert.Empty(result.Diagnostics);
+        var expression = Assert.IsType<BinaryExpression>(((ReturnStatement)result.Document.Declarations.OfType<FunctionDeclaration>().Single().Body.Single()).Expression);
+        Assert.Equal("+", expression.Operator);
+        Assert.Equal("%", Assert.IsType<BinaryExpression>(expression.Right).Operator);
+    }
+
+    [Fact]
     public void LargeDocumentWithManyNarrativeSpansParsesStructurally()
     {
         var handlers = string.Join("\n", Enumerable.Range(0, 1000).Select(i => $"use object{i} here:\n    nar: Narrative {i}\nend"));

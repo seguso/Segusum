@@ -460,7 +460,7 @@ public static class DslParser
         }
         private void ConsumeExpressionContinuation()
         { if (Current.Kind != DslTokenKind.NewLine) return; var next = position; while (tokens[next].Kind == DslTokenKind.NewLine) next++; if (Precedence(tokens[next].Text) > 0) while (position < next) Take(); }
-        private static int Precedence(string op) => op switch { "or" => 1, "and" => 2, "not" => 3, "==" or "!=" or ">" or ">=" or "<" or "<=" => 4, "+" or "-" => 5, "*" or "/" => 6, _ => 0 };
+        private static int Precedence(string op) => op switch { "or" => 1, "and" => 2, "not" => 3, "==" or "!=" or ">" or ">=" or "<" or "<=" => 4, "+" or "-" => 5, "*" or "/" or "%" => 6, _ => 0 };
         private static bool IsComparison(string op) => op is "==" or "!=" or ">" or ">=" or "<" or "<=";
         private static bool ContainsComparison(DslExpression expression) => expression is BinaryExpression binary && IsComparison(binary.Operator);
         private DslExpression Prefix()

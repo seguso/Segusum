@@ -35,6 +35,8 @@ public static class CSharpToSegTranspiler
         bool Conflict);
     private static readonly Dictionary<string, IReadOnlyDictionary<string, NamedCutsceneContextValue>> NamedCutsceneIndexCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly object NamedCutsceneIndexLock = new();
+    private sealed record LocalFunctionCapture(string Name, TypeSyntax? Type);
+    [ThreadStatic] private static IReadOnlyDictionary<string, IReadOnlyList<LocalFunctionCapture>>? activeLocalFunctionCaptures;
 
     private static string Indent(int level) => new(' ', level * 4);
 
@@ -48,6 +50,9 @@ public static class CSharpToSegTranspiler
         var sb = new StringBuilder().Append("world ").Append(worldId).Append('\n');
         var root = (CompilationUnitSyntax)tree.GetRoot();
         var reachableHelpers = ReachableHelpers(root, methodName);
+        var selectedMethods = root.DescendantNodes().OfType<MethodDeclarationSyntax>()
+            .Where(x => methodName == null || x.Identifier.ValueText == methodName || reachableHelpers.Contains(x)).ToArray();
+        activeLocalFunctionCaptures = BuildLocalFunctionCaptures(selectedMethods);
         foreach (var trivia in root.DescendantTrivia().Where(x => x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.SingleLineCommentTrivia) || x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.MultiLineCommentTrivia)))
             if (trivia.Token.Parent?.AncestorsAndSelf().OfType<MethodDeclarationSyntax>().Any() != true)
                 sb.AppendLine("// " + trivia.ToString().TrimStart('/').Trim());
@@ -58,7 +63,7 @@ public static class CSharpToSegTranspiler
             EnsureExactlyOneBlankLine(sb);
             EmitHandler(invocation, sb, diagnostics, emitPartial, contextRoot);
         }
-        foreach (var method in root.DescendantNodes().OfType<MethodDeclarationSyntax>().Where(x => methodName == null || x.Identifier.ValueText == methodName || reachableHelpers.Contains(x)))
+        foreach (var method in selectedMethods)
         {
             EnsureExactlyOneBlankLine(sb);
             if (method.Identifier.ValueText is "afterActionExecutedCSharp")
@@ -97,10 +102,14 @@ public static class CSharpToSegTranspiler
                 EmitTriviaComments(method.Body.CloseBraceToken.TrailingTrivia, sb, 1);
                 sb.AppendLine("end");
                 EnsureExactlyOneBlankLine(sb);
-                diagnostics.Add(new(MigrationUnitStatus.DependsOnCSharpHelper, path, method.GetLocation().GetLineSpan().StartLinePosition.Line + 1,
-                    "helper unit round-trip is not yet certifiable"));
             }
         }
+        var emittedLocalFunctions = new HashSet<int>();
+        foreach (var method in selectedMethods)
+            foreach (var localFunction in method.Body?.DescendantNodes().OfType<LocalFunctionStatementSyntax>() ?? Enumerable.Empty<LocalFunctionStatementSyntax>())
+                if (emittedLocalFunctions.Add(localFunction.SpanStart))
+                    EmitLocalFunction(localFunction, sb, diagnostics, emitPartial, contextRoot,
+                        activeLocalFunctionCaptures.TryGetValue(localFunction.Identifier.ValueText, out var captures) ? captures : Array.Empty<LocalFunctionCapture>());
         // Comments are preserved mechanically.  If a trivia item was not
         // attached to an emitted construct, retain it at the nearest safe
         // document location instead of turning that fact into a semantic
@@ -109,13 +118,15 @@ public static class CSharpToSegTranspiler
         var parsed = DslParser.Parse(new Segusum.Scripting.Core.DslSource(path + ".generated.seg", generated));
         foreach (var diagnostic in parsed.Diagnostics)
             diagnostics.Add(new(MigrationUnitStatus.Unsupported, path + ".generated.seg", diagnostic.Span.Line, "generated SEG is not parsable: " + diagnostic.Message));
-        var units = BuildUnits(path, root, reachableHelpers, methodName);
-        return new MigrationOutput(generated, diagnostics)
+        var units = BuildUnits(path, root, reachableHelpers, methodName, contextRoot);
+        var output = new MigrationOutput(generated, diagnostics)
         {
             Units = units,
             SourceComments = CommentInventory(root),
             GeneratedComments = CommentInventory(generated)
         };
+        activeLocalFunctionCaptures = null;
+        return output;
     }
 
 
@@ -128,7 +139,7 @@ public static class CSharpToSegTranspiler
             .Select(x => x.ToString().Trim())
             .ToArray();
 
-    private static IReadOnlyList<MigrationUnit> BuildUnits(string path, CompilationUnitSyntax root, IReadOnlySet<MethodDeclarationSyntax> reachableHelpers, string? methodName)
+    private static IReadOnlyList<MigrationUnit> BuildUnits(string path, CompilationUnitSyntax root, IReadOnlySet<MethodDeclarationSyntax> reachableHelpers, string? methodName, string? contextRoot)
     {
         var units = new List<MigrationUnit>();
         foreach (var invocation in root.DescendantNodes().OfType<InvocationExpressionSyntax>().Where(x => RegistrationKind(x) != null))
@@ -144,7 +155,7 @@ public static class CSharpToSegTranspiler
         {
             var line = method.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
             var endLine = method.GetLocation().GetLineSpan().EndLinePosition.Line + 1;
-            var isolated = IsolateMethod(path, method);
+            var isolated = IsolateMethod(path, method, contextRoot);
             units.Add(CreateUnit(method.Identifier.ValueText, path, line, endLine, isolated.Text, isolated.Diagnostics));
         }
         var helpers = reachableHelpers
@@ -204,7 +215,7 @@ public static class CSharpToSegTranspiler
         return new(text, diagnostics);
     }
 
-    private static IsolatedUnit IsolateMethod(string path, MethodDeclarationSyntax method)
+    private static IsolatedUnit IsolateMethod(string path, MethodDeclarationSyntax method, string? contextRoot)
     {
         var diagnostics = new List<MigrationDiagnostic>();
         var sb = new StringBuilder("world game\n");
@@ -213,7 +224,7 @@ public static class CSharpToSegTranspiler
             EmitTriviaComments(method.GetLeadingTrivia(), sb, 0);
             sb.AppendLine("after-action-executed:");
             EmitTriviaComments(method.Body!.OpenBraceToken.TrailingTrivia, sb, 1);
-            EmitStatements(method.Body.Statements, sb, diagnostics, 1, false);
+            EmitStatements(method.Body.Statements, sb, diagnostics, 1, false, true, contextRoot);
             EmitTriviaComments(method.Body.CloseBraceToken.LeadingTrivia, sb, 1);
             EmitTriviaComments(method.Body.CloseBraceToken.TrailingTrivia, sb, 1);
             sb.AppendLine("end");
@@ -224,7 +235,7 @@ public static class CSharpToSegTranspiler
             EmitTriviaComments(method.GetLeadingTrivia(), sb, 0);
             sb.AppendLine("before-room-change:");
             EmitTriviaComments(method.Body!.OpenBraceToken.TrailingTrivia, sb, 1);
-            EmitStatements(method.Body.Statements, sb, diagnostics, 1, false);
+            EmitStatements(method.Body.Statements, sb, diagnostics, 1, false, true, contextRoot);
             EmitTriviaComments(method.Body.CloseBraceToken.LeadingTrivia, sb, 1);
             EmitTriviaComments(method.Body.CloseBraceToken.TrailingTrivia, sb, 1);
             sb.AppendLine("end");
@@ -237,7 +248,7 @@ public static class CSharpToSegTranspiler
             sb.AppendLine(":");
             EmitTriviaComments(method.GetLeadingTrivia(), sb, 0);
             EmitTriviaComments(method.Body!.OpenBraceToken.TrailingTrivia, sb, 1);
-            EmitStatements(method.Body.Statements, sb, diagnostics, 1, false);
+            EmitStatements(method.Body.Statements, sb, diagnostics, 1, false, true, contextRoot);
             EmitTriviaComments(method.Body.CloseBraceToken.LeadingTrivia, sb, 1);
             EmitTriviaComments(method.Body.CloseBraceToken.TrailingTrivia, sb, 1);
             sb.AppendLine("end");
@@ -259,11 +270,11 @@ public static class CSharpToSegTranspiler
             sb.Append(" ret ").Append(MapType(method.ReturnType, method, diagnostics, "return"));
     }
 
-    private static string MapType(TypeSyntax? type, MethodDeclarationSyntax method, List<MigrationDiagnostic> diagnostics, string role)
+    private static string MapType(TypeSyntax? type, SyntaxNode source, List<MigrationDiagnostic> diagnostics, string role)
     {
         if (type == null)
         {
-            diagnostics.Add(new(MigrationUnitStatus.Unsupported, method.SyntaxTree.FilePath ?? "<source>", StartLine(method), $"helper {role} type is missing"));
+            diagnostics.Add(new(MigrationUnitStatus.Unsupported, source.SyntaxTree?.FilePath ?? "<source>", StartLine(source), $"helper {role} type is missing"));
             return "<missing-type>";
         }
 
@@ -272,6 +283,7 @@ public static class CSharpToSegTranspiler
             PredefinedTypeSyntax predefined when predefined.Keyword.IsKind(SyntaxKind.BoolKeyword) => "bool",
             PredefinedTypeSyntax predefined when predefined.Keyword.IsKind(SyntaxKind.IntKeyword) => "int",
             PredefinedTypeSyntax predefined when predefined.Keyword.IsKind(SyntaxKind.StringKeyword) => "string",
+            PredefinedTypeSyntax predefined when predefined.Keyword.IsKind(SyntaxKind.DoubleKeyword) => "double",
             IdentifierNameSyntax identifier => identifier.Identifier.ValueText,
             QualifiedNameSyntax qualified => qualified.ToString(),
             _ => null
@@ -279,9 +291,64 @@ public static class CSharpToSegTranspiler
 
         if (mapped != null) return mapped;
 
-        diagnostics.Add(new(MigrationUnitStatus.Unsupported, method.SyntaxTree.FilePath ?? "<source>", StartLine(method),
+        diagnostics.Add(new(MigrationUnitStatus.Unsupported, source.SyntaxTree?.FilePath ?? "<source>", StartLine(source),
             $"helper {role} type '{type}' is not representable by the SEG type mapping"));
         return type.ToString();
+    }
+
+    private static void EmitLocalFunction(LocalFunctionStatementSyntax localFunction, StringBuilder sb, List<MigrationDiagnostic> diagnostics, bool partial, string? contextRoot, IReadOnlyList<LocalFunctionCapture> captures)
+    {
+        EnsureExactlyOneBlankLine(sb);
+        EmitTriviaComments(localFunction.GetLeadingTrivia(), sb, 0);
+        sb.Append("def ").Append(localFunction.Identifier.ValueText);
+        foreach (var parameter in localFunction.ParameterList.Parameters)
+        {
+            sb.Append(' ').Append(parameter.Identifier.ValueText).Append(": ");
+            sb.Append(MapType(parameter.Type, localFunction, diagnostics, "parameter"));
+        }
+        foreach (var capture in captures)
+        {
+            sb.Append(' ').Append(capture.Name).Append(": ");
+            sb.Append(MapType(capture.Type, localFunction, diagnostics, "captured local"));
+        }
+        if (!localFunction.ReturnType.IsKind(SyntaxKind.VoidKeyword))
+            sb.Append(" ret ").Append(MapType(localFunction.ReturnType, localFunction, diagnostics, "return"));
+        sb.AppendLine(":");
+        if (localFunction.Body is BlockSyntax body)
+            EmitStatements(body.Statements, sb, diagnostics, 1, partial, true, contextRoot);
+        else
+            Unsupported(localFunction, diagnostics, "local function expression bodies are not supported", partial, sb, 1);
+        sb.AppendLine("end");
+    }
+
+    private static IReadOnlyDictionary<string, IReadOnlyList<LocalFunctionCapture>> BuildLocalFunctionCaptures(IEnumerable<MethodDeclarationSyntax> methods)
+    {
+        var result = new Dictionary<string, IReadOnlyList<LocalFunctionCapture>>(StringComparer.Ordinal);
+        foreach (var method in methods)
+        foreach (var localFunction in method.Body?.DescendantNodes().OfType<LocalFunctionStatementSyntax>() ?? Enumerable.Empty<LocalFunctionStatementSyntax>())
+        {
+            var localFunctions = localFunction.Body?.DescendantNodes().OfType<LocalFunctionStatementSyntax>().ToHashSet() ?? new HashSet<LocalFunctionStatementSyntax>();
+            var localNames = localFunction.ParameterList.Parameters.Select(x => x.Identifier.ValueText)
+                .Concat(localFunction.Body?.DescendantNodes().OfType<VariableDeclaratorSyntax>().Select(x => x.Identifier.ValueText) ?? Enumerable.Empty<string>())
+                .ToHashSet(StringComparer.Ordinal);
+            var candidates = method.ParameterList.Parameters
+                .Select(x => new LocalFunctionCapture(x.Identifier.ValueText, x.Type))
+                .Concat(method.Body?.DescendantNodes().OfType<VariableDeclarationSyntax>()
+                    .Where(x => x.Ancestors().OfType<LocalFunctionStatementSyntax>().All(x => !localFunctions.Contains(x)))
+                    .SelectMany(x => x.Variables.Select(v => new LocalFunctionCapture(v.Identifier.ValueText, x.Type))) ?? Enumerable.Empty<LocalFunctionCapture>())
+                .Where(x => !localNames.Contains(x.Name))
+                .GroupBy(x => x.Name, StringComparer.Ordinal)
+                .ToDictionary(x => x.Key, x => x.First(), StringComparer.Ordinal);
+            var captures = localFunction.Body?.DescendantNodes().OfType<IdentifierNameSyntax>()
+                .Where(x => x.Parent is not MemberAccessExpressionSyntax member || member.Name != x)
+                .Select(x => x.Identifier.ValueText)
+                .Where(candidates.ContainsKey)
+                .Distinct(StringComparer.Ordinal)
+                .Select(x => candidates[x])
+                .ToArray() ?? Array.Empty<LocalFunctionCapture>();
+            result[localFunction.Identifier.ValueText] = captures;
+        }
+        return result;
     }
 
     private static void VerifyIsolated(string path, SyntaxNode source, string generated, List<MigrationDiagnostic> diagnostics, bool handler)
@@ -626,6 +693,7 @@ public static class CSharpToSegTranspiler
                     sb.Append(indent).AppendLine("ret cyc");
                     break;
                 case EmptyStatementSyntax: break;
+                case LocalFunctionStatementSyntax: break;
                 case ReturnStatementSyntax x:
                     if (x.Expression != null) AppendFormattedExpression(sb, indent + "ret ", x.Expression, level);
                     else sb.Append(indent).AppendLine("ret");
@@ -1244,9 +1312,14 @@ public static class CSharpToSegTranspiler
         var receiver = invocation.Expression is MemberAccessExpressionSyntax memberAccess
             ? Expression(memberAccess.Expression) + "." + memberAccess.Name.Identifier.ValueText
             : name;
-        return invocation.ArgumentList.Arguments.Count == 0
+        var callArguments = invocation.ArgumentList.Arguments.Select(ExpressionForCallArgument).ToList();
+        if (invocation.Expression is IdentifierNameSyntax localName
+            && activeLocalFunctionCaptures != null
+            && activeLocalFunctionCaptures.TryGetValue(localName.Identifier.ValueText, out var captures))
+            callArguments.AddRange(captures.Select(x => x.Name));
+        return callArguments.Count == 0
             ? receiver
-            : receiver + " " + string.Join(" ", invocation.ArgumentList.Arguments.Select(ExpressionForCallArgument));
+            : receiver + " " + string.Join(" ", callArguments);
     }
 
     private static string ExpressionForCallArgument(ArgumentSyntax argument)
@@ -1286,6 +1359,7 @@ public static class CSharpToSegTranspiler
             Microsoft.CodeAnalysis.CSharp.SyntaxKind.SubtractExpression => "-",
             Microsoft.CodeAnalysis.CSharp.SyntaxKind.MultiplyExpression => "*",
             Microsoft.CodeAnalysis.CSharp.SyntaxKind.DivideExpression => "/",
+            Microsoft.CodeAnalysis.CSharp.SyntaxKind.ModuloExpression => "%",
             Microsoft.CodeAnalysis.CSharp.SyntaxKind.LessThanExpression => "<",
             Microsoft.CodeAnalysis.CSharp.SyntaxKind.LessThanOrEqualExpression => "<=",
             Microsoft.CodeAnalysis.CSharp.SyntaxKind.GreaterThanExpression => ">",
