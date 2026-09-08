@@ -1,5 +1,7 @@
 using System;
 using System.Linq;
+using System.Reflection;
+using Segusum.Scripting.Core;
 using Segusum.Scripting.Tooling;
 
 namespace Segusum.Scripting.Generator.Tests;
@@ -82,4 +84,32 @@ public sealed class SegDocumentMergerTests
         Assert.False(result.Succeeded);
         Assert.Equal("Conflict", Assert.Single(result.Entries).Status);
     }
+
+    [Fact]
+    public void UnsupportedDeclarationKindProducesHardDiagnosticInsteadOfAnIdentity()
+    {
+        var method = typeof(SegDocumentMerger).GetMethod("TryDeclarationKey", BindingFlags.NonPublic | BindingFlags.Static)!;
+        var arguments = new object?[] { new UnknownDeclaration(new SourceSpan("test.seg", 0, 0, 1, 1)), null, null };
+
+        var supported = (bool)method.Invoke(null, arguments)!;
+
+        Assert.False(supported);
+        Assert.Contains("unsupported top-level SEG declaration kind", (string)arguments[2]!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BlockCommentBetweenExistingAndNewDeclarationStaysWithNewDeclaration()
+    {
+        const string generated = "world game\r\n\r\ndef existing ret bool:\r\n    ret true\r\nend\r\n\r\n/* comment belonging to new */\r\ndef newHelper ret bool:\r\n    ret false\r\nend\r\n";
+        const string existing = "world game\r\n\r\ndef existing ret bool:\r\n    ret true\r\nend\r\n";
+
+        var result = SegDocumentMerger.ExtractNewDeclarations("generated.seg", generated, new[] { ("runtime.seg", existing) });
+
+        Assert.True(result.Audit.Succeeded, string.Join(Environment.NewLine, result.Audit.Diagnostics));
+        Assert.Contains("/* comment belonging to new */", result.NewOnlyText, StringComparison.Ordinal);
+        Assert.DoesNotContain("def existing", result.NewOnlyText, StringComparison.Ordinal);
+        Assert.Contains("\r\n", result.NewOnlyText, StringComparison.Ordinal);
+    }
+
+    private sealed record UnknownDeclaration(SourceSpan Span) : DslDeclaration(Span);
 }

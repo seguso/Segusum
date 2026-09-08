@@ -214,21 +214,25 @@ public static class SegDocumentMerger
             var line = lineStarts.BinarySearch(Math.Clamp(declarations[i].Span.Start, 0, text.Length));
             if (line < 0) line = ~line - 1;
             var candidate = line;
-            var inBlock = false;
             while (candidate > 0)
             {
                 var start = lineStarts[candidate - 1];
                 var end = lineStarts[candidate] - 1;
                 var value = text[start..Math.Max(start, end)].Trim();
                 if (value.Length == 0) { candidate--; continue; }
-                if (inBlock)
-                {
-                    candidate--;
-                    if (value.Contains("/*", StringComparison.Ordinal)) inBlock = false;
-                    continue;
-                }
-                if (value.EndsWith("*/", StringComparison.Ordinal)) { inBlock = true; candidate--; continue; }
                 if (value.StartsWith("//", StringComparison.Ordinal) || value.StartsWith("#", StringComparison.Ordinal)) { candidate--; continue; }
+                if (value.EndsWith("*/", StringComparison.Ordinal))
+                {
+                    var closeEnd = Math.Max(start, end);
+                    var open = text.LastIndexOf("/*", closeEnd, StringComparison.Ordinal);
+                    if (open >= 0)
+                    {
+                        var blockLine = lineStarts.BinarySearch(open);
+                        if (blockLine < 0) blockLine = ~blockLine - 1;
+                        candidate = Math.Max(0, blockLine);
+                    }
+                    break;
+                }
                 break;
             }
             starts[i] = lineStarts[candidate];
