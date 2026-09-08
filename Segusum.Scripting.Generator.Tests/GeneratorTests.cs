@@ -1416,6 +1416,36 @@ public NamedCutSceneId ncsMikeStalloneIlBenefattore = null!;
     }
 
     [Fact]
+    public void ArrayReturnMaterializesCompatibleEnumerableOnlyAtArrayBoundary()
+    {
+        const string dsl = """
+            def arrayResult ret Room[]:
+                ret rooms.Distinct
+            end
+            def listResult ret List<Room>:
+                ret roomList
+            end
+            def enumerableResult ret IEnumerable<Room>:
+                ret rooms.Distinct
+            end
+            def literalResult ret Room[]:
+                ret [roomA, roomB]
+            end
+            """;
+        const string members = "public System.Collections.Generic.IEnumerable<Room> rooms = new System.Collections.Generic.List<Room>(); public System.Collections.Generic.List<Room> roomList = new(); public Room roomA = null!; public Room roomB = null!;";
+
+        var result = Run(dsl, members);
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id.StartsWith("SEGDSL", StringComparison.Ordinal));
+        var generated = Generated(result);
+        Assert.Contains("return rooms.Distinct().ToArray();", generated, StringComparison.Ordinal);
+        Assert.Contains("return roomList;", generated, StringComparison.Ordinal);
+        Assert.Contains("return rooms.Distinct();", generated, StringComparison.Ordinal);
+        Assert.DoesNotContain("return roomList.ToArray();", generated, StringComparison.Ordinal);
+        Assert.Equal(1, generated.Split(".ToArray()", StringSplitOptions.None).Length - 1);
+        AssertGeneratedCompilationSucceeds(result);
+    }
+
+    [Fact]
     public void SubmitTextInputIsRequiredForInputContext()
     {
         var result = Run("def bad:\n    var spl = input.wordsLower\nend");

@@ -226,7 +226,8 @@ public sealed class SegusumGenerator : IIncrementalGenerator
         MemberAccessExpression m when model.Values.TryGetValue(m, out var words) && words.CSharpName == "splittaInputEFaiLower(e)" => words.CSharpName,
         MemberAccessExpression m when model.Values.TryGetValue(m, out var staticField) && staticField.Symbol is IFieldSymbol { IsStatic: true } => staticField.CSharpName,
         MemberAccessExpression m when model.Values.TryGetValue(m, out var staticProperty) && staticProperty.Symbol is IPropertySymbol { IsStatic: true } => staticProperty.CSharpName,
-        MemberAccessExpression m when model.Values.TryGetValue(m, out var member) && member.Kind == BoundSymbolKind.CSharpMethod => Emit(m.Receiver, model) + "." + member.CSharpName + "()",
+        MemberAccessExpression m when model.Values.TryGetValue(m, out var member) && member.Kind == BoundSymbolKind.CSharpMethod
+            => MaterializeArrayIfRequired(Emit(m.Receiver, model) + "." + member.CSharpName + "()", expectedType, (member.Symbol as IMethodSymbol)?.ReturnType),
         MemberAccessExpression m when model.Values.TryGetValue(m, out var property) => Emit(m.Receiver, model) + "." + property.CSharpName,
         CallExpression c when model.Calls.TryGetValue(c, out var bound) => EmitBoundCall(bound, model, expectedType),
         _ => "default"
@@ -239,10 +240,14 @@ public sealed class SegusumGenerator : IIncrementalGenerator
         // abstraction.  When a collection expression is returned through an
         // explicitly array-typed C# signature, materialize the enumerable at
         // this boundary instead of losing the source type information.
-        if (expectedType?.EndsWith("[]", StringComparison.Ordinal) == true && IsEnumerable(bound.ReturnType))
-            call += ".ToArray()";
-        return call;
+        return MaterializeArrayIfRequired(call, expectedType, bound.ReturnType);
     }
+    private static string MaterializeArrayIfRequired(string expression, string? expectedType, ITypeSymbol? actualType)
+        => expectedType?.EndsWith("[]", StringComparison.Ordinal) == true
+            && actualType is not IArrayTypeSymbol
+            && IsEnumerable(actualType)
+            ? expression + ".ToArray()"
+            : expression;
     private static bool IsEnumerable(ITypeSymbol? type)
         => type is IArrayTypeSymbol || type is INamedTypeSymbol named && (named.Name == "IEnumerable" || named.AllInterfaces.Any(x => x.Name == "IEnumerable"));
     private static string EmitList(ListExpression list, BoundModel model)
