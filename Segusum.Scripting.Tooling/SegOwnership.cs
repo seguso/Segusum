@@ -3,7 +3,6 @@ using System.Text;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -190,13 +189,12 @@ public static class SegOwnership
                     ? declaration.Span
                     : DeclarationRemovalSpan(originalText, node, declaration.Name);
                 text = text.Remove(removal.Start, removal.Length);
+                text = NormalizeBlankLinesAroundRemoval(text, Math.Min(removal.Start, text.Length));
             }
 
-            // Removing syntax nodes must not leave the large whitespace islands
-            // that the old span-only implementation produced.  This is a
-            // formatting-only normalization: comments and non-whitespace text
-            // are never removed here.
-            text = CollapseBlankLineRuns(text);
+            // Normalize only the whitespace island created at this removal
+            // point.  Do not reformat unrelated historical whitespace in the
+            // rest of the source file.
             File.WriteAllText(file.Key, text, new UTF8Encoding(false));
             changed.Add(file.Key);
         }
@@ -247,8 +245,52 @@ public static class SegOwnership
     private static int IncludeLineBreak(string text, int lineEnd)
         => lineEnd < text.Length ? lineEnd + 1 : lineEnd;
 
-    private static string CollapseBlankLineRuns(string text)
-        => Regex.Replace(text, @"(?:\r?\n[ \t]*){3,}", Environment.NewLine + Environment.NewLine);
+    private static string NormalizeBlankLinesAroundRemoval(string text, int position)
+    {
+        if (text.Length == 0) return text;
+        position = Math.Clamp(position, 0, text.Length);
+
+        var before = FindPreviousContentLineEnd(text, position);
+        var after = FindNextContentLineStart(text, position);
+        if (before >= after) return text;
+
+        var hasBefore = before > 0;
+        var hasAfter = after < text.Length;
+        var replacement = hasBefore && hasAfter
+            ? Environment.NewLine + Environment.NewLine
+            : string.Empty;
+        return text.Remove(before, after - before).Insert(before, replacement);
+    }
+
+    private static int FindPreviousContentLineEnd(string text, int position)
+    {
+        var lineStart = LineStart(text, position);
+        while (lineStart > 0)
+        {
+            var previousEnd = lineStart;
+            var previousStart = LineStart(text, lineStart - 1);
+            if (!IsBlankLine(text, previousStart, previousEnd))
+                return IncludeLineBreak(text, previousEnd);
+            lineStart = previousStart;
+        }
+        return 0;
+    }
+
+    private static int FindNextContentLineStart(string text, int position)
+    {
+        var lineStart = LineStart(text, position);
+        while (lineStart < text.Length)
+        {
+            var lineEnd = LineEnd(text, lineStart);
+            if (!IsBlankLine(text, lineStart, lineEnd))
+                return lineStart;
+            lineStart = IncludeLineBreak(text, lineEnd);
+        }
+        return text.Length;
+    }
+
+    private static bool IsBlankLine(string text, int start, int end)
+        => string.IsNullOrWhiteSpace(text[start..end]);
 
     private static IEnumerable<RuntimeIdDeclaration> ReadRuntimeDeclarations(string path)
     {
