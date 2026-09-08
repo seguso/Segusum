@@ -847,6 +847,65 @@ public sealed class CSharpToSegTranspilerTests
     }
 
     [Fact]
+    public void ReachableGraphUsesRoslynOverloadResolution()
+    {
+        const string source = "class W { private void foo(int x) { int chosen = x; } private void foo(string x) { string chosen = x; } private void bar() { foo(3); } }";
+        var result = CSharpToSegTranspiler.Transpile("overloads.cs", source, emitPartial: true, methodName: "bar", worldId: "game");
+
+        Assert.Contains(result.Units, x => x.Id == "bar");
+        Assert.Contains(result.Units, x => x.Id == "foo");
+        Assert.DoesNotContain("string chosen", result.Text, StringComparison.Ordinal);
+        Assert.Contains("def foo x: int", result.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ReachableGraphUsesContainingTypeAndTransitiveOverloadResolution()
+    {
+        const string source = "class A { private static void foo(int x) { int chosen = x; } private static void Caller() { foo(3); } } class B { private static void foo(string x) { string chosen = x; } }";
+        var result = CSharpToSegTranspiler.Transpile("containing-types.cs", source, emitPartial: true, methodName: "Caller", worldId: "game");
+
+        Assert.Contains("def Caller", result.Text, StringComparison.Ordinal);
+        Assert.Contains("def foo x: int", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("string chosen", result.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ReachableGraphDistinguishesStaticAndInstanceOverloads()
+    {
+        const string source = "class W { private static void foo(int x) { int staticChosen = x; } private void foo(string x) { string instanceChosen = x; } private void Caller() { foo(3); foo(\"x\"); } }";
+        var result = CSharpToSegTranspiler.Transpile("static-instance.cs", source, emitPartial: true, methodName: "Caller", worldId: "game");
+
+        Assert.Contains("def foo x: int", result.Text, StringComparison.Ordinal);
+        Assert.Contains("def foo x: string", result.Text, StringComparison.Ordinal);
+        Assert.Contains("staticChosen", result.Text, StringComparison.Ordinal);
+        Assert.Contains("instanceChosen", result.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ContextMethodsAreNotStandaloneRootsAndExternalCallsAreNotDefs()
+    {
+        var directory = Directory.CreateTempSubdirectory("segusum-overload-context-");
+        try
+        {
+            var input = Path.Combine(directory.FullName, "helpers.cs");
+            var sibling = Path.Combine(directory.FullName, "sibling.cs");
+            File.WriteAllText(sibling, "class W { private void Uncalled() { never(); } private void foo() { } }");
+            var source = "class W { private void Use() { foo(); } }";
+
+            var result = CSharpToSegTranspiler.Transpile(input, source, emitPartial: true, methodName: "Use", worldId: "game", contextRoot: directory.FullName);
+
+            Assert.Contains("def Use", result.Text, StringComparison.Ordinal);
+            Assert.Contains("def foo", result.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain("def Uncalled", result.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain("def never", result.Text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            directory.Delete(true);
+        }
+    }
+
+    [Fact]
     public void MissingRequestedMethodDoesNotBuildHelperGraphOrUnits()
     {
         const string source = "class W { void Configure() { addHandlerUseHere(a, handler: i => { Direct(); }); } private void Direct() { Nested(); } private void Nested() { leaf(); } }";
