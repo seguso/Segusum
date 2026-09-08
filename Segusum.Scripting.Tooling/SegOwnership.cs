@@ -122,6 +122,7 @@ public static class SegOwnership
                 ambiguities.Add($"SEG method '{MethodDisplay(segMethod)}' matches multiple active runtime methods: {string.Join(", ", matches.Select(x => x.Path))}");
             }
         }
+        AddOwnedSpecialHandlerMethods(parsed.Document.Declarations, historicalMethods, runtimeMethods, methodsToRemove, ambiguities);
         var referencedMethods = FindActiveCSharpReferences(runtimeFiles, methodsToRemove);
         // A semantic SEG definition owns the exact matching legacy method even
         // when active C# callers still reference it.  The source generator adds
@@ -132,6 +133,36 @@ public static class SegOwnership
         var keptMethods = runtimeMethods.Where(x => !ownedMethodKeys.Contains(MethodKey(x))).ToArray();
         return new(ownedCycles, ownedScenes, declarations, remove, keep, missingReferences, unused, missingLegacy, ambiguities,
             segMethods, runtimeMethods, methodsToRemove, keptMethods, referencedMethods, ambiguousMethods, methodsWithoutMatch);
+    }
+
+    private static void AddOwnedSpecialHandlerMethods(
+        IReadOnlyList<DslDeclaration> declarations,
+        IReadOnlyList<RuntimeMethodDeclaration> historicalMethods,
+        IReadOnlyList<RuntimeMethodDeclaration> runtimeMethods,
+        List<RuntimeMethodDeclaration> methodsToRemove,
+        List<string> ambiguities)
+    {
+        var specialNames = declarations.Any(x => x is BeforeRoomChangeDeclaration)
+            ? new[] { "beforeRoomChangeManual", "beforeRoomChangeSegusum" }
+            : Array.Empty<string>();
+        foreach (var name in specialNames)
+        {
+            var historical = historicalMethods.Where(x => x.Name == name).ToArray();
+            if (historical.Length > 1)
+            {
+                ambiguities.Add($"SEG special handler '{name}' matches multiple historical methods: {string.Join(", ", historical.Select(x => x.Path))}");
+                continue;
+            }
+            if (historical.Length == 0) continue;
+            var active = runtimeMethods.Where(x => MethodKey(x) == MethodKey(historical[0])).ToArray();
+            if (active.Length > 1)
+            {
+                ambiguities.Add($"SEG special handler '{name}' matches multiple active runtime methods: {string.Join(", ", active.Select(x => x.Path))}");
+                continue;
+            }
+            if (active.Length == 1 && methodsToRemove.All(x => MethodKey(x) != MethodKey(active[0])))
+                methodsToRemove.Add(active[0]);
+        }
     }
 
     public static IReadOnlyList<string> ApplyRemoval(SegOwnershipReport report)

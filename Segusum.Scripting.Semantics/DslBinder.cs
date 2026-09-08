@@ -1230,7 +1230,12 @@ public sealed class DslBinder
     };
     private static IEnumerable<NamedCutsceneStatement> FindNamedCutscenes(DslDeclaration declaration) => declaration switch
     {
-        HandlerDeclaration h => FindNamedCutscenes(h.Body), FunctionDeclaration f => FindNamedCutscenes(f.Body), CycleElementDeclaration c => FindNamedCutscenes(c.Body), _ => Enumerable.Empty<NamedCutsceneStatement>()
+        HandlerDeclaration h => FindNamedCutscenes(h.Body),
+        FunctionDeclaration f => FindNamedCutscenes(f.Body),
+        CycleElementDeclaration c => FindNamedCutscenes(c.Body),
+        BeforeRoomChangeDeclaration b => FindNamedCutscenes(b.Body),
+        AfterActionExecutedDeclaration a => FindNamedCutscenes(a.Body),
+        _ => Enumerable.Empty<NamedCutsceneStatement>()
     };
     private static IEnumerable<NamedCutsceneStatement> FindNamedCutscenes(IEnumerable<DslStatement> statements) => statements.SelectMany(s => s switch
     {
