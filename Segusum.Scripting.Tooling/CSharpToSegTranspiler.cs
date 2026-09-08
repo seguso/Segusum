@@ -82,8 +82,6 @@ public static class CSharpToSegTranspiler
                 EmitTriviaComments(method.Body?.CloseBraceToken.LeadingTrivia ?? default, sb, 1);
                 EmitTriviaComments(method.Body?.CloseBraceToken.TrailingTrivia ?? default, sb, 1);
                 sb.AppendLine("end");
-                diagnostics.Add(new(MigrationUnitStatus.Partial, path, method.GetLocation().GetLineSpan().StartLinePosition.Line + 1,
-                    "special handler round-trip is not yet certifiable"));
             }
             else if (method.Identifier.ValueText is "beforeRoomChangeManual" or "beforeRoomChangeSegusum")
             {
@@ -94,8 +92,6 @@ public static class CSharpToSegTranspiler
                 EmitTriviaComments(method.Body?.CloseBraceToken.LeadingTrivia ?? default, sb, 1);
                 EmitTriviaComments(method.Body?.CloseBraceToken.TrailingTrivia ?? default, sb, 1);
                 sb.AppendLine("end");
-                diagnostics.Add(new(MigrationUnitStatus.Partial, path, method.GetLocation().GetLineSpan().StartLinePosition.Line + 1,
-                    "special handler round-trip is not yet certifiable"));
             }
             else if (method.Identifier.ValueText is not "Configure" && method.Body != null && reachableHelpers.Contains(method))
             {
@@ -237,7 +233,6 @@ public static class CSharpToSegTranspiler
             EmitTriviaComments(method.Body.CloseBraceToken.LeadingTrivia, sb, 1);
             EmitTriviaComments(method.Body.CloseBraceToken.TrailingTrivia, sb, 1);
             sb.AppendLine("end");
-            diagnostics.Add(new(MigrationUnitStatus.Partial, path, StartLine(method), "special handler round-trip is not yet certifiable"));
         }
         else if (method.Identifier.ValueText is "beforeRoomChangeManual" or "beforeRoomChangeSegusum")
         {
@@ -248,7 +243,6 @@ public static class CSharpToSegTranspiler
             EmitTriviaComments(method.Body.CloseBraceToken.LeadingTrivia, sb, 1);
             EmitTriviaComments(method.Body.CloseBraceToken.TrailingTrivia, sb, 1);
             sb.AppendLine("end");
-            diagnostics.Add(new(MigrationUnitStatus.Partial, path, StartLine(method), "special handler round-trip is not yet certifiable"));
         }
         else
         {
@@ -410,6 +404,19 @@ public static class CSharpToSegTranspiler
         }
         if (source is MethodDeclarationSyntax method)
         {
+            if (method.Identifier.ValueText is "beforeRoomChangeManual" or "beforeRoomChangeSegusum")
+            {
+                var csharp = MigrationVerifier.ExtractCSharpBeforeRoomChange(path, method.ToFullString()).FirstOrDefault();
+                var dsl = MigrationVerifier.ExtractDslBeforeRoomChange(new DslSource(path + ".generated.seg", generated)).FirstOrDefault();
+                if (csharp is null || dsl is null)
+                    diagnostics.Add(new(MigrationUnitStatus.Unsupported, path, StartLine(method), "before-room-change certification could not extract both representations"));
+                else
+                {
+                    var comparison = MigrationVerifier.CompareBeforeRoomChange(csharp, dsl);
+                    if (comparison.Status != EquivalenceStatus.Pass)
+                        diagnostics.Add(new(MigrationUnitStatus.Unsupported, path, StartLine(method), "before-room-change semantic round-trip mismatch: " + comparison.Detail));
+                }
+            }
             if (method.Identifier.ValueText is not ("afterActionExecutedCSharp" or "beforeRoomChangeManual" or "beforeRoomChangeSegusum"))
             {
                 var helperCheck = MigrationVerifier.CompareHelperMethod(method, new DslSource(path + ".generated.seg", generated));
@@ -422,8 +429,12 @@ public static class CSharpToSegTranspiler
             foreach (var cycle in csCycles)
             {
                 var dslCycle = dslCycles.FirstOrDefault(x => x.Id == cycle.Id);
-                if (dslCycle is null || MigrationVerifier.CompareCycles(new[] { cycle }, new[] { dslCycle }).Status != EquivalenceStatus.Pass)
-                    diagnostics.Add(new(MigrationUnitStatus.Unsupported, path, cycle.SourceLine, "semantic round-trip mismatch: cycle fingerprint differs"));
+                var comparison = dslCycle is null
+                    ? null
+                    : MigrationVerifier.CompareCycles(new[] { cycle }, new[] { dslCycle });
+                if (comparison is null || comparison.Status != EquivalenceStatus.Pass)
+                    diagnostics.Add(new(MigrationUnitStatus.Unsupported, path, cycle.SourceLine,
+                        "semantic round-trip mismatch: cycle fingerprint differs" + (comparison?.Detail is null ? "" : ": " + comparison.Detail)));
             }
         }
     }
@@ -1415,7 +1426,16 @@ public static class CSharpToSegTranspiler
     }
 
     private static string LiteralOrExpression(SyntaxNode? node) => node is LiteralExpressionSyntax l && l.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.StringLiteralExpression) ? EmitLiteral(l) : Expression(node);
-    private static string DialogueText(SyntaxNode? node) => node is LiteralExpressionSyntax l && l.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.StringLiteralExpression) ? l.Token.ValueText : Expression(node);
+    private static string DialogueText(SyntaxNode? node)
+    {
+        if (node is not LiteralExpressionSyntax literal || !literal.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.StringLiteralExpression))
+            return Expression(node);
+        var value = literal.Token.ValueText;
+        // Raw SEG narrative lines trim layout whitespace.  Quote only when
+        // leading/trailing content whitespace is part of the C# literal; the
+        // literal value itself remains unchanged.
+        return value.Length != value.Trim().Length ? EmitLiteral(literal) : value;
+    }
     private static string Arg(SeparatedSyntaxList<ArgumentSyntax> args, int index) => index >= 0 && index < args.Count ? Expression(args[index].Expression) : "";
 
     private static void EnsureOneBlankLineBeforeDialogue(StringBuilder sb)

@@ -550,11 +550,35 @@ public sealed class MigrationVerificationTests
         const string dsl = "world game\nbefore-room-change:\n    if to == roomCamilla:\n        camilla: Vieni, Olivia!\n    end\n    if from == roomLibrary and to == roomMuseumOut:\n        mark-happened-once ftDente\n    end\nend\n";
         var left = Assert.Single(MigrationVerifier.ExtractCSharpBeforeRoomChange("worldBeforeRoomChange.cs", csharp));
         var right = Assert.Single(MigrationVerifier.ExtractDslBeforeRoomChange(new DslSource("BeforeRoomChange.seg", dsl)));
-        Assert.Equal(EquivalenceStatus.Pass, MigrationVerifier.CompareBeforeRoomChange(left, right).Status);
+        var equivalent = MigrationVerifier.CompareBeforeRoomChange(left, right);
+        Assert.True(equivalent.Status == EquivalenceStatus.Pass, equivalent.Detail);
 
         var changed = new DslSource("BeforeRoomChange.seg", dsl.Replace("ftDente", "ftOther", StringComparison.Ordinal));
         Assert.Equal(EquivalenceStatus.Fail, MigrationVerifier.CompareBeforeRoomChange(left,
             Assert.Single(MigrationVerifier.ExtractDslBeforeRoomChange(changed))).Status);
+    }
+
+    [Fact]
+    public void NarrativeCallFingerprintIncludesAllNarRoomAndNarImgArguments()
+    {
+        const string csharp = "class W { void beforeRoomChangeManual(Room from, Room to, WalkPath segment, WalkPath path, BeforeRoomChangeInput e) { narRoom(\"Room text\", roomA, false, true); narImg(\"Image text\", \"img/a.png\", NarSize.Medium, false, true); } }";
+        const string dsl = "world game\nbefore-room-change:\n    narRoom \"Room text\" roomA false true\n    narImg \"Image text\" \"img/a.png\" NarSize.Medium false alsoShowGraphicsInTextMode: true\nend\n";
+        var left = Assert.Single(MigrationVerifier.ExtractCSharpBeforeRoomChange("before.cs", csharp));
+        var right = Assert.Single(MigrationVerifier.ExtractDslBeforeRoomChange(new DslSource("before.seg", dsl)));
+        var equivalent = MigrationVerifier.CompareBeforeRoomChange(left, right);
+        Assert.True(equivalent.Status == EquivalenceStatus.Pass, equivalent.Detail);
+
+        var changedRoom = new DslSource("before.seg", dsl.Replace("roomA", "roomB", StringComparison.Ordinal));
+        Assert.Equal(EquivalenceStatus.Fail, MigrationVerifier.CompareBeforeRoomChange(left,
+            Assert.Single(MigrationVerifier.ExtractDslBeforeRoomChange(changedRoom))).Status);
+
+        var changedImage = new DslSource("before.seg", dsl.Replace("img/a.png", "img/b.png", StringComparison.Ordinal));
+        Assert.Equal(EquivalenceStatus.Fail, MigrationVerifier.CompareBeforeRoomChange(left,
+            Assert.Single(MigrationVerifier.ExtractDslBeforeRoomChange(changedImage))).Status);
+
+        var changedFlag = new DslSource("before.seg", dsl.Replace("false true", "true true", StringComparison.Ordinal));
+        Assert.Equal(EquivalenceStatus.Fail, MigrationVerifier.CompareBeforeRoomChange(left,
+            Assert.Single(MigrationVerifier.ExtractDslBeforeRoomChange(changedFlag))).Status);
     }
 
     [Theory]

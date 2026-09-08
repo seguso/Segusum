@@ -323,7 +323,7 @@ public static class MigrationVerifier
         return operations && strings
             ? new("before-room-change", EquivalenceStatus.Pass)
             : new("before-room-change", EquivalenceStatus.Fail,
-                $"operations C#=[{string.Join(";", csharp.OrderedOperations)}] DSL=[{string.Join(";", dsl.OrderedOperations)}]; strings C#=[{string.Join(";", csharp.Strings)}] DSL=[{string.Join(";", dsl.Strings)}]");
+                $"{SequenceMismatch("operations", csharp.OrderedOperations, dsl.OrderedOperations)}; {SequenceMismatch("strings", csharp.Strings, dsl.Strings)}");
     }
 
     public static IReadOnlyList<MarkHappenedOnceFingerprint> ExtractCSharpMarkHappenedOnce(string path, string text)
@@ -518,8 +518,9 @@ public static class MigrationVerifier
     private static IReadOnlyList<CycleFingerprint> ExtractCSharpCyclesFromStatements(IEnumerable<StatementSyntax> statements, string path)
     {
         var cycles = new List<CycleFingerprint>();
-        foreach (var invocation in statements.SelectMany(x => x.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>())
-            .Where(x => InvocationName(x) == "startCycle"))
+        var allInvocations = statements.SelectMany(x => x.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>()).ToArray();
+        var starts = allInvocations.Where(x => InvocationName(x) == "startCycle").ToArray();
+        foreach (var invocation in starts)
         {
             var args = invocation.ArgumentList.Arguments;
             var lambdas = args.Select(x => x.Expression).OfType<AnonymousFunctionExpressionSyntax>().ToArray();
@@ -529,8 +530,13 @@ public static class MigrationVerifier
             var predicate = lambdas.Length > 1 ? CanonicalLambdaBody(lambdas[0], "$cycleElement") : null;
             var body = lambdas.Length == 0 ? Array.Empty<string>() : ExtractCSharpHandlerEffects(lambdas[^1]);
             var variable = invocation.Ancestors().OfType<VariableDeclaratorSyntax>().FirstOrDefault()?.Identifier.ValueText ?? id;
-            var elements = statements.SelectMany(x => x.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>())
+            var nextSameVariable = starts.FirstOrDefault(x => x.Span.Start > invocation.Span.Start
+                && (x.Ancestors().OfType<VariableDeclaratorSyntax>().FirstOrDefault()?.Identifier.ValueText ?? OperandText(x.ArgumentList.Arguments, 0)) == variable);
+            var elements = allInvocations
                 .Where(x => InvocationName(x) == "addToCycle" && IsCycleReceiver(x, invocation, variable))
+                .Where(x => IsFluentCycleAdd(x, invocation)
+                    || (x.Span.Start > invocation.Span.Start
+                        && (nextSameVariable is null || x.Span.Start < nextSameVariable.Span.Start)))
                 // Roslyn's descendant walk visits the outermost invocation of
                 // a fluent chain first. Runtime chain order is the order in
                 // which each invocation closes, i.e. increasing Span.End.
@@ -553,6 +559,21 @@ public static class MigrationVerifier
             receiver = fluent.Expression;
         }
         return receiver == start || receiver is IdentifierNameSyntax identifier && identifier.Identifier.ValueText == variable;
+    }
+
+    private static bool IsFluentCycleAdd(InvocationExpressionSyntax add, InvocationExpressionSyntax start)
+    {
+        if (add.Expression is not MemberAccessExpressionSyntax member
+            || member.Expression is not InvocationExpressionSyntax receiver)
+            return false;
+        while (true)
+        {
+            if (receiver == start) return true;
+            if (receiver.Expression is not MemberAccessExpressionSyntax nested
+                || nested.Expression is not InvocationExpressionSyntax next)
+                return false;
+            receiver = next;
+        }
     }
 
     private static string? EnumMetadata(SeparatedSyntaxList<ArgumentSyntax> args, string enumType, params string[] supported)
@@ -579,9 +600,9 @@ public static class MigrationVerifier
     public static IReadOnlyList<CycleFingerprint> ExtractDslCycles(DslSource source)
     {
         var parsed = DslParser.Parse(source);
-        var statements = parsed.Document.Declarations.SelectMany(x => DeclarationStatements(x)).SelectMany(x => x).SelectMany(FlattenDslStatements).ToArray();
-        var starts = statements.OfType<VariableDeclaration>().Where(x => ExpressionText(x.Initializer) == "new-cycle").GroupBy(x => x.Name, StringComparer.Ordinal).Select(x => x.First()).ToDictionary(x => x.Name, StringComparer.Ordinal);
-        return starts.Values.Select(start => DslCycleFingerprint(start.Name, statements.OfType<AddCycleElementStatement>().Where(x => x.Cycle == start.Name).ToArray(), source.Path, start.Span.Line)).ToArray();
+        var statements = parsed.Document.Declarations.SelectMany(x => DeclarationStatements(x)).SelectMany(x => x)
+            .SelectMany(FlattenDslStatements).OrderBy(x => x.Span.Start).ToArray();
+        return ExtractScopedDslCycles(statements, source.Path);
     }
 
     public static VerificationCheck CompareCycles(IReadOnlyList<CycleFingerprint> csharp, IReadOnlyList<CycleFingerprint> dsl)
@@ -594,14 +615,18 @@ public static class MigrationVerifier
                 return new("cycle metadata", EquivalenceStatus.Inconclusive, "Unverifiable cycle Importance/Repeat value.");
             if (a.Id != b.Id || a.Importance != b.Importance || a.Repeat != b.Repeat || NormalizeCyclePredicate(a.Predicate) != NormalizeCyclePredicate(b.Predicate))
                 return new("cycle", EquivalenceStatus.Fail, $"C#={a.Id}|{a.Importance}|{a.Repeat}|{a.Predicate}; DSL={b.Id}|{b.Importance}|{b.Repeat}|{b.Predicate}");
-            var body = SequenceCheck("cycle body", a.BodyEffects, b.BodyEffects); if (body.Status != EquivalenceStatus.Pass) return body;
-            if (a.Elements.Count != b.Elements.Count) return new("cycle elements", EquivalenceStatus.Fail, "cycle element count mismatch");
+            var body = SequenceCheck("cycle body", a.BodyEffects, b.BodyEffects); if (body.Status != EquivalenceStatus.Pass)
+                return body with { Detail = $"cycle '{a.Id}': {body.Detail}" };
+            if (a.Elements.Count != b.Elements.Count)
+                return new("cycle elements", EquivalenceStatus.Fail,
+                    $"cycle element count mismatch C#={a.Elements.Count}[{string.Join(",", a.Elements.Select(x => x.Id))}] DSL={b.Elements.Count}[{string.Join(",", b.Elements.Select(x => x.Id))}]");
             for (var j = 0; j < a.Elements.Count; j++)
             {
                 var x = a.Elements[j]; var y = b.Elements[j];
                 if (x.Id != y.Id || x.Importance != y.Importance || x.Repeat != y.Repeat || NormalizeCyclePredicate(x.Predicate) != NormalizeCyclePredicate(y.Predicate))
                     return new("cycle element", EquivalenceStatus.Fail, $"element #{j + 1} mismatch C#={x.Id}|{x.Importance}|{x.Repeat}|{x.Predicate}; DSL={y.Id}|{y.Importance}|{y.Repeat}|{y.Predicate}");
-                var effects = SequenceCheck($"cycle element #{j + 1} body", x.BodyEffects, y.BodyEffects); if (effects.Status != EquivalenceStatus.Pass) return effects;
+                var effects = SequenceCheck($"cycle element #{j + 1} body", x.BodyEffects, y.BodyEffects); if (effects.Status != EquivalenceStatus.Pass)
+                    return effects with { Detail = $"cycle '{a.Id}', element '{x.Id}': {effects.Detail}" };
             }
         }
         return new("cycles", EquivalenceStatus.Pass);
@@ -612,9 +637,26 @@ public static class MigrationVerifier
 
     private static IReadOnlyList<CycleFingerprint> ExtractDslCyclesFromStatements(IEnumerable<DslStatement> input, string path)
     {
-        var statements = input.SelectMany(FlattenDslStatements).ToArray();
-        var starts = statements.OfType<VariableDeclaration>().Where(x => ExpressionText(x.Initializer) == "new-cycle").GroupBy(x => x.Name, StringComparer.Ordinal).Select(x => x.First());
-        return starts.Select(start => DslCycleFingerprint(start.Name, statements.OfType<AddCycleElementStatement>().Where(x => x.Cycle == start.Name).ToArray(), path, start.Span.Line)).ToArray();
+        var statements = input.SelectMany(FlattenDslStatements).OrderBy(x => x.Span.Start).ToArray();
+        return ExtractScopedDslCycles(statements, path);
+    }
+
+    private static IReadOnlyList<CycleFingerprint> ExtractScopedDslCycles(IReadOnlyList<DslStatement> statements, string path)
+    {
+        var starts = statements.OfType<VariableDeclaration>()
+            .Where(x => ExpressionText(x.Initializer) == "new-cycle")
+            .OrderBy(x => x.Span.Start).ToArray();
+        var result = new List<CycleFingerprint>();
+        foreach (var start in starts)
+        {
+            var nextSameName = starts.FirstOrDefault(x => x.Span.Start > start.Span.Start && x.Name == start.Name);
+            var adds = statements.OfType<AddCycleElementStatement>()
+                .Where(x => x.Cycle == start.Name && x.Span.Start > start.Span.Start
+                    && (nextSameName is null || x.Span.Start < nextSameName.Span.Start))
+                .ToArray();
+            result.Add(DslCycleFingerprint(start.Name, adds, path, start.Span.Line));
+        }
+        return result;
     }
 
     private static CycleFingerprint DslCycleFingerprint(string cycleName, IReadOnlyList<AddCycleElementStatement> all, string path, int line)
@@ -683,19 +725,20 @@ public static class MigrationVerifier
             switch (statement)
             {
                 case IfStatementSyntax conditional:
-                    effects.Add("if:" + CanonicalCSharpExpression(conditional.Condition.ToString()));
-                    CollectCSharpHandlerEffects(conditional.Statement is BlockSyntax block ? block.Statements : new[] { conditional.Statement }, effects);
-                    if (conditional.Else?.Statement is { } elseStatement)
-                    {
-                        effects.Add(elseStatement is IfStatementSyntax ? "elif" : "else");
-                        CollectCSharpHandlerEffects(elseStatement is BlockSyntax elseBlock ? elseBlock.Statements : new[] { elseStatement }, effects);
-                    }
+                    CollectCSharpConditionalChain(conditional, effects, true);
                     break;
                 case ExpressionStatementSyntax expression when expression.Expression is AssignmentExpressionSyntax assignment:
                     var target = assignment.Left.ToString();
                     if (target.EndsWith("makesNoSenseAtThisTime", StringComparison.Ordinal) && assignment.Right.ToString() == "true") effects.Add("makes-no-sense");
                     else if (target.EndsWith("textInputToShow", StringComparison.Ordinal)) effects.Add("text-input:" + CanonicalCSharpExpression(assignment.Right.ToString()));
                     else effects.Add("assign:" + CanonicalCSharpExpression(assignment.Left + assignment.OperatorToken.Text + assignment.Right));
+                    break;
+                case ExpressionStatementSyntax expression when expression.Expression is PostfixUnaryExpressionSyntax postfix:
+                    effects.Add("increment:" + postfix.Operand.ToString());
+                    break;
+                case ExpressionStatementSyntax expression when expression.Expression is PrefixUnaryExpressionSyntax prefix
+                    && prefix.OperatorToken.IsKind(SyntaxKind.PlusPlusToken):
+                    effects.Add("increment:" + prefix.Operand.ToString());
                     break;
                 case ExpressionStatementSyntax expression when expression.Expression is InvocationExpressionSyntax invocation:
                     if (InvocationName(invocation) == "addToCycle")
@@ -718,7 +761,7 @@ public static class MigrationVerifier
                     effects.Add(CSharpNamedCutsceneEffect(namedCutscene, usingStatement.Statement));
                     break;
                 case ReturnStatementSyntax ret: effects.Add("return:" + CanonicalCSharpExpression(ret.Expression?.ToString())); break;
-                default: effects.Add("unverifiable:" + statement.GetType().Name); break;
+                default: effects.Add("unverifiable:" + statement.GetType().Name + ":" + statement.ToString()); break;
             }
         }
     }
@@ -736,7 +779,7 @@ public static class MigrationVerifier
         if (name == "dial" && invocation.ArgumentList.Arguments.Count >= 2)
             return "dialogue:" + CanonicalCSharpExpression(invocation.ArgumentList.Arguments[0].Expression.ToString()) + ":" + LiteralText(invocation.ArgumentList.Arguments[1].Expression.ToString());
         if (name is "nar" or "narText" or "narRoom" or "narImg")
-            return "narration:" + LiteralText(invocation.ArgumentList.Arguments.LastOrDefault()?.Expression.ToString());
+            return "narration-call:" + CanonicalCSharpCall(invocation);
         return "call:" + CanonicalCSharpExpression(invocation.ToString());
     }
 
@@ -757,6 +800,19 @@ public static class MigrationVerifier
             if (InvocationName(current) == "startCycle") return current;
             if (current.Expression is not MemberAccessExpressionSyntax member || member.Expression is not InvocationExpressionSyntax next) return null;
             current = next;
+        }
+    }
+
+    private static void CollectCSharpConditionalChain(IfStatementSyntax conditional, List<string> effects, bool first)
+    {
+        effects.Add((first ? "if:" : "elif:") + CanonicalCSharpExpression(conditional.Condition.ToString()));
+        CollectCSharpHandlerEffects(conditional.Statement is BlockSyntax block ? block.Statements : new[] { conditional.Statement }, effects);
+        if (conditional.Else?.Statement is IfStatementSyntax nested)
+            CollectCSharpConditionalChain(nested, effects, false);
+        else if (conditional.Else?.Statement is { } elseStatement)
+        {
+            effects.Add("else");
+            CollectCSharpHandlerEffects(elseStatement is BlockSyntax elseBlock ? elseBlock.Statements : new[] { elseStatement }, effects);
         }
     }
 
@@ -830,10 +886,16 @@ public static class MigrationVerifier
                 case AssignmentStatement assignment:
                     effects.Add("assign:" + (assignment.Receiver is null ? assignment.Name : CanonicalDslExpression(assignment.Receiver) + "." + assignment.MemberName) + assignment.Operator + CanonicalDslExpression(assignment.Value)); break;
                 case DialogueStatement dialogue: effects.Add("dialogue:" + dialogue.Character + ":" + LiteralDslText(dialogue.Text)); break;
-                case NarStatement nar: effects.Add("narration:" + LiteralDslText(nar.Text)); break;
-                case NarRoomStatement narRoom: effects.Add("narration:" + LiteralDslText(narRoom.Text)); break;
-                case NarImgStatement narImg: effects.Add("narration:" + LiteralDslText(narImg.Text)); break;
-                case CallStatement call: effects.Add("call:" + CanonicalDslExpression(call.Expression)); break;
+                case NarStatement nar: effects.Add("narration-call:narText(s=" + QuoteCanonicalString(LiteralDslText(nar.Text)) + ")"); break;
+                case NarRoomStatement narRoom: effects.Add("narration-call:narRoom(s=" + QuoteCanonicalString(LiteralDslText(narRoom.Text)) + ")"); break;
+                case NarImgStatement narImg: effects.Add("narration-call:narImg(s=" + QuoteCanonicalString(LiteralDslText(narImg.Text)) + ")"); break;
+                case CallStatement call:
+                    if (call.Expression is CallExpression narrative
+                        && narrative.Name is "nar" or "narText" or "narRoom" or "narImg")
+                        effects.Add("narration-call:" + CanonicalDslCall(narrative));
+                    else
+                        effects.Add("call:" + CanonicalDslExpression(call.Expression));
+                    break;
                 case ReturnStatement ret: effects.Add("return:" + CanonicalDslExpression(ret.Expression)); break;
                 case NextCycleStatement next: effects.Add("cycle:next:" + CanonicalDslExpression(next.Cycle)); break;
                 case AddCycleElementStatement cycle:
@@ -871,9 +933,32 @@ public static class MigrationVerifier
         return new(name, EquivalenceStatus.Fail, string.Join("; ", detail));
     }
 
+    private static string SequenceMismatch(string name, IReadOnlyList<string> left, IReadOnlyList<string> right)
+    {
+        if (left.SequenceEqual(right, StringComparer.Ordinal)) return name + " match";
+        var common = Math.Min(left.Count, right.Count);
+        var index = Enumerable.Range(0, common).FirstOrDefault(i => left[i] != right[i], -1);
+        var first = index >= 0
+            ? $"first difference at #{index + 1}: C#='{left[index]}' DSL='{right[index]}'"
+              + (index > 0 ? $"; previous C#='{left[index - 1]}' DSL='{right[index - 1]}'" : "")
+            : "no common differing item";
+        return $"{name} mismatch ({first}; C# count={left.Count}, DSL count={right.Count})";
+    }
+
     private static string? CanonicalCSharpExpression(string? expression)
     {
         if (expression is null) return null;
+        expression = StripCSharpComments(expression);
+        try
+        {
+            var syntax = Microsoft.CodeAnalysis.CSharp.SyntaxFactory.ParseExpression(expression);
+            if (!syntax.ContainsDiagnostics)
+                expression = syntax.WithoutTrivia().ToFullString();
+        }
+        catch
+        {
+            // Keep the lexical fallback below for intentionally partial expressions.
+        }
         var builder = new System.Text.StringBuilder(); var quoted = false;
         foreach (var ch in expression)
         {
@@ -886,8 +971,80 @@ public static class MigrationVerifier
         return System.Text.RegularExpressions.Regex.Replace(result, @"([A-Za-z_]\w*):", "$1=");
     }
 
+    private static string StripCSharpComments(string expression)
+    {
+        var builder = new System.Text.StringBuilder(expression.Length);
+        var inString = false;
+        var inLineComment = false;
+        var inBlockComment = false;
+        for (var i = 0; i < expression.Length; i++)
+        {
+            var ch = expression[i];
+            var next = i + 1 < expression.Length ? expression[i + 1] : '\0';
+            if (inLineComment)
+            {
+                if (ch is '\r' or '\n') { inLineComment = false; builder.Append(ch); }
+                continue;
+            }
+            if (inBlockComment)
+            {
+                if (ch == '*' && next == '/') { inBlockComment = false; i++; }
+                continue;
+            }
+            if (!inString && ch == '/' && next == '/') { inLineComment = true; i++; continue; }
+            if (!inString && ch == '/' && next == '*') { inBlockComment = true; i++; continue; }
+            builder.Append(ch);
+            if (ch == '"' && (i == 0 || expression[i - 1] != '\\')) inString = !inString;
+        }
+        return builder.ToString();
+    }
+
     private static string? CanonicalDslExpression(DslExpression? expression) => CanonicalCSharpExpression(ExpressionText(expression)) ?? null;
     private static string LiteralDslText(DslExpression expression) => StringValue(expression) ?? CanonicalDslExpression(expression) ?? "";
+
+    private static string CanonicalDslCall(CallExpression call)
+    {
+        var receiver = call.Receiver is null ? call.Name : ExpressionText(call.Receiver) + "." + call.Name;
+        var arguments = call.Arguments.Select((argument, index) =>
+        {
+            var parameter = NarrativeParameterName(call.Name, index, argument.Name);
+            var prefix = parameter is null ? "" : parameter + "=";
+            var value = argument.Expression is LiteralExpression { Kind: "string" or "raw-string" }
+                ? QuoteCanonicalString(DslLiteralTextCanonical(argument.Expression))
+                : CanonicalDslExpression(argument.Expression) ?? "";
+            return prefix + value;
+        });
+        return receiver + "(" + string.Join(",", arguments) + ")";
+    }
+
+    private static string CanonicalCSharpCall(InvocationExpressionSyntax invocation)
+    {
+        var name = InvocationName(invocation);
+        var arguments = invocation.ArgumentList.Arguments.Select((argument, index) =>
+        {
+            var parameter = NarrativeParameterName(name, index, argument.NameColon?.Name.Identifier.ValueText);
+            var prefix = parameter is null ? "" : parameter + "=";
+            return prefix + (CanonicalCSharpExpression(argument.Expression.ToString()) ?? "");
+        });
+        return name + "(" + string.Join(",", arguments) + ")";
+    }
+
+    private static string? NarrativeParameterName(string name, int index, string? explicitName)
+    {
+        if (explicitName is not null) return explicitName;
+        if (name is "nar" or "narText") return index switch { 0 => "s", 1 => "removeIfLast", _ => null };
+        if (name == "narRoom") return index switch { 0 => "s", 1 => "room", 2 => "removeIfLast", 3 => "alsoShowGraphicsInTextMode", _ => explicitName };
+        if (name == "narImg") return index switch { 0 => "s", 1 => "img", 2 => "size", 3 => "removeIfLast", 4 => "alsoShowGraphicsInTextMode", _ => explicitName };
+        return explicitName;
+    }
+
+    private static string QuoteCanonicalString(string value)
+        => "\"" + value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
+
+    private static string DslLiteralTextCanonical(DslExpression expression)
+        => expression is LiteralExpression literal && literal.Kind is "string" or "raw-string"
+            ? DslLiteralSemantics.Decode(literal)
+            : LiteralDslText(expression);
 
     private static string? NamedCutsceneTitle(ObjectCreationExpressionSyntax? creation)
     {
@@ -945,13 +1102,25 @@ public static class MigrationVerifier
             switch (statement)
             {
                 case DialogueStatement dialogue: operations.Add("dial:" + dialogue.Character + ":" + ExpressionText(dialogue.Text)); strings.Add(StringValue(dialogue.Text) ?? ""); break;
-                case NarStatement nar: operations.Add("nar:" + ExpressionText(nar.Text)); strings.Add(StringValue(nar.Text) ?? ""); break;
-                case NarRoomStatement narRoom: operations.Add("nar-room:" + ExpressionText(narRoom.Text)); strings.Add(StringValue(narRoom.Text) ?? ""); break;
+                case NarStatement nar: operations.Add("narration-call:narText(s=" + QuoteCanonicalString(DslLiteralTextCanonical(nar.Text)) + ")"); strings.Add(DslLiteralTextCanonical(nar.Text)); break;
+                case NarRoomStatement narRoom: operations.Add("narration-call:narRoom(s=" + QuoteCanonicalString(DslLiteralTextCanonical(narRoom.Text)) + ")"); strings.Add(DslLiteralTextCanonical(narRoom.Text)); break;
+                case NarImgStatement narImg: operations.Add("narration-call:narImg(s=" + QuoteCanonicalString(DslLiteralTextCanonical(narImg.Text)) + ")"); strings.Add(DslLiteralTextCanonical(narImg.Text)); break;
                 case PreventRoomChangeStatement: operations.Add("prevent-room-change"); break;
                 case MarkHappenedOnceStatement mark: operations.Add("mark-happened-once:" + ExpressionText(mark.Target)); break;
                 case MarkHappenedStatement mark: operations.Add("mark-happened:" + ExpressionText(mark.Target)); break;
                 case AssignmentStatement assignment: operations.Add("assign:" + (assignment.Receiver == null ? assignment.Name : ExpressionText(assignment.Receiver) + "." + assignment.MemberName) + assignment.Operator + ExpressionText(assignment.Value)); break;
-                case CallStatement call: operations.Add("call:" + ExpressionText(call.Expression)); break;
+                case IncrementStatement increment: operations.Add("increment:" + increment.Name); break;
+                case CallStatement call:
+                    if (call.Expression is CallExpression narrative
+                        && narrative.Name is "nar" or "narText" or "narRoom" or "narImg")
+                    {
+                        operations.Add("narration-call:" + CanonicalDslCall(narrative));
+                        if (narrative.Arguments.FirstOrDefault() is { } textArgument)
+                            strings.Add(DslLiteralTextCanonical(textArgument.Expression));
+                    }
+                    else operations.Add("call:" + CanonicalDslExpression(call.Expression));
+                    break;
+                case AddCycleElementStatement: break;
                 case IfStatement conditional:
                     operations.Add("if:" + string.Join("|", conditional.Branches.Select(x => CanonicalCondition(ExpressionText(x.Condition) ?? ""))));
                     foreach (var branch in conditional.Branches) CollectBeforeRoomChange(branch.Body, operations, strings);
@@ -975,29 +1144,58 @@ public static class MigrationVerifier
                         operations.Add("dial:" + invocation.ArgumentList.Arguments[0].Expression + ":" + text);
                         strings.Add(text);
                     }
+                    else if (name is "nar" or "narText" or "narRoom" or "narImg")
+                    {
+                        var text = LiteralText(invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression.ToString()) ?? "";
+                        operations.Add("narration-call:" + CanonicalCSharpCall(invocation));
+                        strings.Add(text);
+                    }
+                    else if (name == "preventRoomChange")
+                        operations.Add("prevent-room-change");
+                    else if (name is "startCycle" or "addToCycle" or "execNextInCycle")
+                    {
+                        // Cycles are certified separately with their ordered
+                        // predicates/effects; do not compare their C# fluent
+                        // spelling with SEG statements here.
+                    }
                     else if (name == "setIfNeverHappened" && invocation.ArgumentList.Arguments.Count == 1)
                         operations.Add("mark-happened-once:" + invocation.ArgumentList.Arguments[0].Expression);
                     else
-                        operations.Add("call:" + name + "(" + string.Join(",", invocation.ArgumentList.Arguments.Select(x => x.Expression.ToString())) + ")");
+                        operations.Add("call:" + CanonicalCSharpExpression(invocation.ToString()));
                     break;
                 case ExpressionStatementSyntax expression when expression.Expression is AssignmentExpressionSyntax assignment:
-                    operations.Add("assign:" + assignment.Left + assignment.OperatorToken.Text + assignment.Right);
+                    operations.Add("assign:" + CanonicalCSharpExpression(assignment.Left + assignment.OperatorToken.Text + assignment.Right));
+                    break;
+                case BlockSyntax block:
+                    CollectCSharpBeforeRoomChange(block.Statements, operations, strings);
                     break;
                 case IfStatementSyntax conditional:
-                    operations.Add("if:" + CanonicalCondition(conditional.Condition.ToString()));
-                    CollectCSharpBeforeRoomChange(conditional.Statement is BlockSyntax block ? block.Statements : new[] { conditional.Statement }, operations, strings);
-                    if (conditional.Else?.Statement is { } elseStatement)
-                        CollectCSharpBeforeRoomChange(elseStatement is BlockSyntax elseBlock ? elseBlock.Statements : new[] { elseStatement }, operations, strings);
+                    CollectCSharpBeforeRoomChangeConditionalChain(conditional, operations, strings);
                     break;
             }
         }
     }
 
+    private static void CollectCSharpBeforeRoomChangeConditionalChain(IfStatementSyntax conditional, List<string> operations, List<string> strings)
+    {
+        var branches = new List<IfStatementSyntax>();
+        IfStatementSyntax? current = conditional;
+        while (current is not null)
+        {
+            branches.Add(current);
+            current = current.Else?.Statement as IfStatementSyntax;
+        }
+
+        operations.Add("if:" + string.Join("|", branches.Select(x => CanonicalCondition(x.Condition.ToString()))));
+        foreach (var branch in branches)
+            CollectCSharpBeforeRoomChange(branch.Statement is BlockSyntax body ? body.Statements : new[] { branch.Statement }, operations, strings);
+
+        if (branches[^1].Else?.Statement is { } elseStatement)
+            CollectCSharpBeforeRoomChange(elseStatement is BlockSyntax elseBlock ? elseBlock.Statements : new[] { elseStatement }, operations, strings);
+    }
+
     private static string CanonicalCondition(string condition)
-        => condition.Replace("&&", " and ", StringComparison.Ordinal)
-            .Replace("||", " or ", StringComparison.Ordinal)
-            .Replace("!", "not ", StringComparison.Ordinal)
-            .Replace("  ", " ", StringComparison.Ordinal).Trim();
+        => CanonicalCSharpExpression(condition) ?? "";
 
     private static void CollectDslNamedCutscenes(IEnumerable<DslStatement> statements, string path, List<NamedCutsceneFingerprint> result)
     {
