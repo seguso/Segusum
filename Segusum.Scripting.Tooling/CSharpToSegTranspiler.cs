@@ -1628,6 +1628,7 @@ public static class CSharpToSegTranspiler
             BinaryExpressionSyntax x when TryEmitRandomModulo(x, out var random) => random,
             BinaryExpressionSyntax x => Expression(x.Left) + " " + BinaryOperator(x.Kind()) + " " + Expression(x.Right),
             InvocationExpressionSyntax x when TryEmitListComprehension(x, out var comprehension) => comprehension,
+            InvocationExpressionSyntax x when TryEmitCollectionBuilder(x, out var collection) => collection,
             MemberAccessExpressionSyntax x => Expression(x.Expression) + "." + x.Name.Identifier.ValueText,
             InvocationExpressionSyntax x => EmitCallExpression(x),
             CollectionExpressionSyntax x => "[" + string.Join(", ", x.Elements.Select(EmitCollectionElement)) + "]",
@@ -1669,6 +1670,39 @@ public static class CSharpToSegTranspiler
 
         var item = predicateLambda.Parameter.Identifier.ValueText;
         result = "[from " + Expression(collection) + " " + item + " where " + Expression(predicate) + " select " + item + "]";
+        return true;
+    }
+
+    // A number of older gameplay sources use the small C# collection-builder
+    // extension `and`: x.and(y).and(z).  It is not a runtime dependency of
+    // the generated SEG; its semantics are simply ordered collection
+    // construction.  Lower the ordinary C# call shape to the existing SEG
+    // collection literal, without introducing a DSL keyword or lambda form.
+    private static bool TryEmitCollectionBuilder(InvocationExpressionSyntax invocation, out string result)
+    {
+        result = "";
+        if (invocation.Expression is not MemberAccessExpressionSyntax member
+            || member.Name.Identifier.ValueText != "and"
+            || invocation.ArgumentList.Arguments.Count != 1)
+            return false;
+
+        var receiver = member.Expression;
+        var items = new List<string>();
+        if (receiver is InvocationExpressionSyntax nested && TryEmitCollectionBuilder(nested, out var nestedCollection))
+        {
+            var inner = nestedCollection.Trim();
+            if (inner.Length >= 2 && inner[0] == '[' && inner[^1] == ']')
+                items.AddRange(inner[1..^1].Split(", ", StringSplitOptions.RemoveEmptyEntries));
+            else
+                items.Add(inner);
+        }
+        else
+        {
+            items.Add(Expression(receiver));
+        }
+
+        items.Add(Expression(invocation.ArgumentList.Arguments[0].Expression));
+        result = "[" + string.Join(", ", items) + "]";
         return true;
     }
 

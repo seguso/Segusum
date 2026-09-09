@@ -724,6 +724,16 @@ public sealed class CSharpToSegTranspilerTests
     }
 
     [Fact]
+    public void HistoricalCollectionBuilderChainEmitsExistingCollectionLiteral()
+    {
+        const string source = "class W { void M() { addHandlerUseHere(a, handler: i => { var values = first.and(second).and(third); use(values); }); } }";
+        var result = CSharpToSegTranspiler.Transpile("collection-builder.cs", source, emitPartial: true);
+
+        Assert.Contains("var values = [first, second, third]", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("C2SEG-MANUAL-BEGIN", result.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AfterActionExecutedLifecycleIsSemanticallyCertified()
     {
         const string source = "class W { void after_action_executed(CutScene cs, ActionContext actionContext) { if (actionContext.IsMove) { dial(camilla, \"Test\"); } } }";
