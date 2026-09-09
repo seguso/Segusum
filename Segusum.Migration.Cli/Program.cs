@@ -109,7 +109,8 @@ if (string.Equals(args[0], "audit-ownership", StringComparison.OrdinalIgnoreCase
     if (runtimeRoot == null || history == null) { Console.Error.WriteLine("Both --runtime-root and --history are required."); return 2; }
     var runtimeFiles = Directory.EnumerateFiles(runtimeRoot, "*.cs", SearchOption.AllDirectories)
         .Where(x => !x.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
-            && !x.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
+            && !x.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            && !x.Contains(Path.DirectorySeparatorChar + "docs" + Path.DirectorySeparatorChar + "migration-inputs" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
     var report = SegOwnership.Analyze(segPath, runtimeFiles, history);
     Console.WriteLine("OWNED BY SEG -> REMOVE FROM C#:"); foreach (var x in report.RemoveFromCSharp) Console.WriteLine("  " + x);
     Console.WriteLine("REFERENCED BY SEG BUT OWNED BY C# -> KEEP:"); foreach (var x in report.KeepInCSharp) Console.WriteLine("  " + x);
