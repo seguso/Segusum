@@ -1213,7 +1213,8 @@ public sealed class CSharpToSegTranspilerTests
 
         Assert.True(result.CommentsPreserved);
         Assert.Equal(result.SourceComments.Count, result.GeneratedComments.Count);
-        Assert.Equal(4, result.SourceComments.Count);
+        Assert.Equal(3, result.SourceComments.Count);
+        Assert.Equal(4, result.AllSourceComments.Count);
     }
 
     [Fact]
@@ -1249,5 +1250,113 @@ public sealed class CSharpToSegTranspilerTests
         Assert.Contains("[from things o where olivia.hasObject o select o].Count", result.Text, StringComparison.Ordinal);
         Assert.DoesNotContain("=>", result.Text, StringComparison.Ordinal);
         Assert.DoesNotContain(result.Units, x => x.Status == MigrationUnitStatus.Unsupported);
+    }
+
+    [Fact]
+    public void SelectedMethodClosureOwnsOnlyItsRoslynTrivia()
+    {
+        const string source = """
+            class W
+            {
+                // commento field A
+                int a;
+
+                // commento helper A
+                private bool HelperA()
+                {
+                    // commento interno A
+                    return true;
+                }
+
+                // commento field B
+                int b;
+
+                // commento metodo NON migrato
+                private void Other()
+                {
+                    // commento interno Other
+                }
+
+                // commento helper B
+                private bool HelperB()
+                {
+                    return HelperA();
+                }
+            }
+            """;
+
+        var result = CSharpToSegTranspiler.Transpile("ownership.cs", source, methodName: "HelperB");
+
+        Assert.Contains("def HelperA", result.Text, StringComparison.Ordinal);
+        Assert.Contains("def HelperB", result.Text, StringComparison.Ordinal);
+        Assert.Contains("// commento helper A", result.SourceComments);
+        Assert.Contains("// commento interno A", result.SourceComments);
+        Assert.Contains("// commento helper B", result.SourceComments);
+        Assert.DoesNotContain("// commento field A", result.SourceComments);
+        Assert.DoesNotContain("// commento field B", result.SourceComments);
+        Assert.DoesNotContain("// commento metodo NON migrato", result.SourceComments);
+        Assert.DoesNotContain("// commento interno Other", result.SourceComments);
+        Assert.DoesNotContain("commento field A", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("commento field B", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("commento interno Other", result.Text, StringComparison.Ordinal);
+        Assert.Equal(result.SourceComments, result.GeneratedComments);
+        Assert.NotEqual(result.SourceComments.Count, result.AllSourceComments.Count);
+    }
+
+    [Fact]
+    public void InterMemberCommentBelongsToFollowingSelectedMethod()
+    {
+        const string source = """
+            class W
+            {
+                private bool A()
+                {
+                    return true;
+                }
+
+                // commento che descrive B
+                private bool B()
+                {
+                    return true;
+                }
+            }
+            """;
+
+        var onlyB = CSharpToSegTranspiler.Transpile("between.cs", source, methodName: "B");
+        Assert.Contains("commento che descrive B", onlyB.Text, StringComparison.Ordinal);
+
+        var onlyA = CSharpToSegTranspiler.Transpile("between.cs", source, methodName: "A");
+        Assert.DoesNotContain("commento che descrive B", onlyA.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SelectedMethodKeepsInlineDisabledAndBlockCommentsButNotRemoteCommentedCode()
+    {
+        const string source = """
+            class W
+            {
+                private bool A()
+                {
+                    /* block rationale */
+                    //foo();
+                    return true; // inline A
+                }
+
+                // void OldMethod()
+                // {
+                //     ...
+                // }
+                private bool B()
+                {
+                    return true;
+                }
+            }
+            """;
+
+        var result = CSharpToSegTranspiler.Transpile("disabled.cs", source, methodName: "A");
+        Assert.Contains("block rationale", result.Text, StringComparison.Ordinal);
+        Assert.Contains("//foo();", result.Text, StringComparison.Ordinal);
+        Assert.Contains("inline A", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("OldMethod", result.Text, StringComparison.Ordinal);
     }
 }

@@ -18,6 +18,7 @@ public sealed record MigrationOutput(string Text, IReadOnlyList<MigrationDiagnos
 {
     public IReadOnlyList<MigrationUnit> Units { get; init; } = Array.Empty<MigrationUnit>();
     public IReadOnlyList<string> SourceComments { get; init; } = Array.Empty<string>();
+    public IReadOnlyList<string> AllSourceComments { get; init; } = Array.Empty<string>();
     public IReadOnlyList<string> GeneratedComments { get; init; } = Array.Empty<string>();
     public bool CommentsPreserved => SourceComments.OrderBy(x => x, StringComparer.Ordinal)
         .SequenceEqual(GeneratedComments.OrderBy(x => x, StringComparer.Ordinal), StringComparer.Ordinal);
@@ -101,13 +102,12 @@ public static class CSharpToSegTranspiler
             var captures = BuildLocalFunctionCaptures(method);
             return new SelectedMethod(RewriteLocalFunctionCalls(method, captures), captures);
         }).ToArray();
-        foreach (var trivia in root.DescendantTrivia().Where(x => x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.SingleLineCommentTrivia) || x.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.MultiLineCommentTrivia)))
-            if (trivia.Token.Parent?.AncestorsAndSelf().OfType<MethodDeclarationSyntax>().Any() != true)
-                sb.AppendLine("// " + trivia.ToString().TrimStart('/').Trim());
-
-        foreach (var invocation in root.DescendantNodes().OfType<InvocationExpressionSyntax>().Where(x => RegistrationKind(x) != null))
+        var selectedInvocations = root.DescendantNodes().OfType<InvocationExpressionSyntax>()
+            .Where(x => RegistrationKind(x) != null)
+            .Where(x => methodName == null || x.Ancestors().OfType<MethodDeclarationSyntax>().Any(m => m.Identifier.ValueText == methodName))
+            .ToArray();
+        foreach (var invocation in selectedInvocations)
         {
-            if (methodName != null && !invocation.Ancestors().OfType<MethodDeclarationSyntax>().Any(x => x.Identifier.ValueText == methodName)) continue;
             EnsureExactlyOneBlankLine(sb);
             EmitHandler(invocation, sb, diagnostics, emitPartial, contextRoot);
         }
@@ -186,11 +186,13 @@ public static class CSharpToSegTranspiler
                     EmitLocalFunction(localFunction, sb, diagnostics, emitPartial, contextRoot,
                         methodContext.LocalFunctionCaptures.TryGetValue(localFunction.Identifier.ValueText, out var captures) ? captures : Array.Empty<LocalFunctionCapture>());
         }
-        // Comments are preserved mechanically.  If a trivia item was not
-        // attached to an emitted construct, retain it at the nearest safe
-        // document location instead of turning that fact into a semantic
-        // translation failure.
-        var generated = EnsureComments(root, sb.ToString());
+        // Comment preservation is scoped to the actual migration units.  The
+        // source file is only the Roslyn container; comments belonging to
+        // unrelated members must never become generated document trivia.
+        var selectedCommentNodes = selectedInvocations.Cast<SyntaxNode>()
+            .Concat(selectedMethods.Where(x => IsEmittedMethod(x, reachableHelpers, semanticContext)))
+            .ToArray();
+        var generated = EnsureComments(selectedCommentNodes, sb.ToString());
         var parsed = DslParser.Parse(new Segusum.Scripting.Core.DslSource(path + ".generated.seg", generated));
         Mark("seg-parse");
         foreach (var diagnostic in parsed.Diagnostics)
@@ -215,7 +217,8 @@ public static class CSharpToSegTranspiler
         var output = new MigrationOutput(generated, diagnostics)
         {
             Units = units,
-            SourceComments = CommentInventory(root),
+            SourceComments = CommentInventory(selectedCommentNodes),
+            AllSourceComments = CommentInventory(root),
             GeneratedComments = CommentInventory(generated),
             ContextFileCount = contextRoots.Count,
             ContextParseMilliseconds = contextLoad.ParseMilliseconds,
@@ -440,7 +443,7 @@ public static class CSharpToSegTranspiler
         var diagnostics = new List<MigrationDiagnostic>();
         var sb = new StringBuilder("world game\n");
         EmitHandler(invocation, sb, diagnostics, false);
-        var text = EnsureComments(invocation, sb.ToString());
+        var text = EnsureComments(new[] { (SyntaxNode)invocation }, sb.ToString());
         VerifyIsolated(path, invocation, text, diagnostics, true);
         return new(text, diagnostics);
     }
@@ -508,7 +511,7 @@ public static class CSharpToSegTranspiler
             EmitTriviaComments(method.Body.CloseBraceToken.TrailingTrivia, sb, 1);
             sb.AppendLine("end");
         }
-        var text = EnsureComments(method, sb.ToString());
+        var text = EnsureComments(new[] { (SyntaxNode)method }, sb.ToString());
         if (lifecycle != LifecycleKind.UnmappedOverride)
             VerifyIsolated(path, method, text, diagnostics, false);
         return new(text, diagnostics);
@@ -728,8 +731,17 @@ public static class CSharpToSegTranspiler
 
     private static int StartLine(SyntaxNode node) => node.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
 
-    private static IReadOnlyList<string> CommentInventory(SyntaxNode node)
-        => CommentsForNode(node).Select(x => NormalizeComment(x.ToString())).ToArray();
+    private static IReadOnlyList<string> CommentInventory(IEnumerable<SyntaxNode> nodes)
+        => nodes.SelectMany(CommentsForNode)
+            .GroupBy(x => x.SpanStart)
+            .Select(x => x.First())
+            .OrderBy(x => x.SpanStart)
+            .Select(x => NormalizeComment(x.ToString()))
+            .ToArray();
+
+    private static bool IsEmittedMethod(MethodDeclarationSyntax method, IReadOnlySet<MethodDeclarationSyntax> reachableHelpers, SemanticContext semanticContext)
+        => LifecycleFor(method, semanticContext) != null
+            || (method.Identifier.ValueText is not "Configure" && method.Body != null && reachableHelpers.Contains(method));
 
     private static IReadOnlyList<string> CommentInventory(string generated)
         => ExtractGeneratedComments(generated).Select(NormalizeComment).ToArray();
@@ -773,9 +785,14 @@ public static class CSharpToSegTranspiler
         }
     }
 
-    private static string EnsureComments(SyntaxNode source, string generated)
+    private static string EnsureComments(IEnumerable<SyntaxNode> sources, string generated)
     {
-        var expected = CommentsForNode(source).Select(x => NormalizeComment(x.ToString())).ToArray();
+        var expected = sources.SelectMany(CommentsForNode)
+            .GroupBy(x => x.SpanStart)
+            .Select(x => x.First())
+            .OrderBy(x => x.SpanStart)
+            .Select(x => NormalizeComment(x.ToString()))
+            .ToArray();
         var actual = CommentInventory(generated).ToList();
         var missing = new List<string>();
         foreach (var comment in expected)
@@ -801,12 +818,41 @@ public static class CSharpToSegTranspiler
 
     private static IEnumerable<SyntaxTrivia> CommentsForNode(SyntaxNode node)
     {
-        var trivia = node.GetLeadingTrivia().Concat(node.DescendantTrivia()).Concat(node.GetTrailingTrivia());
-        // Leading/trailing trivia can belong to the previous/next sibling when
-        // Roslyn computes FullSpan.  Only trivia structurally inside this node
-        // belongs to its unit; adjacent header trivia is emitted separately.
-        return trivia.Where(IsComment)
+        var comments = node.DescendantTrivia()
+            .Where(IsComment)
             .Where(x => x.SpanStart >= node.SpanStart && x.Span.End <= node.Span.End)
+            .ToList();
+        comments.AddRange(node.GetLeadingTrivia().Where(IsComment));
+        if (node is InvocationExpressionSyntax)
+        {
+            var statement = node.AncestorsAndSelf().OfType<ExpressionStatementSyntax>().FirstOrDefault();
+            comments.AddRange(statement?.GetLeadingTrivia().Where(IsComment) ?? Enumerable.Empty<SyntaxTrivia>());
+            comments.AddRange(AdjacentStatementTrivia(statement).Where(IsComment));
+        }
+
+        // In a member list Roslyn can attach the header trivia to the
+        // previous declaration's last token (not to the next node's leading
+        // trivia).  Read that one token-owned trivia edge explicitly.
+        var previousNode = node.Parent?.ChildNodes()
+            .Where(x => x.Span.End <= node.SpanStart)
+            .LastOrDefault();
+        if (previousNode != null)
+            comments.AddRange(previousNode.GetLastToken().TrailingTrivia.Where(IsComment));
+
+        // A comment between two members is owned by the following member.
+        // Roslyn may expose it as trailing trivia of the previous sibling, so
+        // recover that exact trivia only through the immediate sibling edge;
+        // never by taking a textual interval from the previous declaration.
+        comments.AddRange(AdjacentLeadingComments(node));
+
+        // If this is the final member, its same-line trailing comment has no
+        // following declaration to own it and remains attached to this unit.
+        var siblings = node.Parent?.ChildNodes().ToArray() ?? Array.Empty<SyntaxNode>();
+        var index = Array.IndexOf(siblings, node);
+        if (index < 0 || index == siblings.Length - 1)
+            comments.AddRange(node.GetTrailingTrivia().Where(IsComment));
+
+        return comments.Where(IsComment)
             .GroupBy(x => x.SpanStart).Select(x => x.First()).OrderBy(x => x.SpanStart);
     }
 
