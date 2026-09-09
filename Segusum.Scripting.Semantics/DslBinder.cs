@@ -232,6 +232,8 @@ public sealed class DslBinder
                 case NextCycleDeclaration n: Require(BindExpression(n.Cycle, new()), cycle, n.Cycle.Span, "next requires a Cycle."); break;
                 case BeforeRoomChangeDeclaration b: profile.MeasureAction("BindBeforeRoomChange", () => BindBeforeRoomChange(b)); break;
                 case AfterActionExecutedDeclaration a: profile.MeasureAction("BindAfterActionExecuted", () => BindAfterActionExecuted(a)); break;
+                case BeforeActionExecutedDeclaration b: profile.MeasureAction("BindBeforeActionExecuted", () => BindBeforeActionExecuted(b)); break;
+                case StartGameDeclaration s: profile.MeasureAction("BindStartGame", () => BindStartGame(s)); break;
             }
         }
         profile.AddPhase("Bind declarations total", Stopwatch.GetTimestamp() - phase);
@@ -241,6 +243,8 @@ public sealed class DslBinder
         profile.MeasureAction("CheckCSharpRoomChangedDuplicates", () => CheckCSharpRoomChangedDuplicates(declarations));
         profile.MeasureAction("CheckDuplicateBeforeRoomChange", () => CheckDuplicateBeforeRoomChange(declarations));
         profile.MeasureAction("CheckDuplicateAfterActionExecuted", () => CheckDuplicateAfterActionExecuted(declarations));
+        profile.MeasureAction("CheckDuplicateBeforeActionExecuted", () => CheckDuplicateBeforeActionExecuted(declarations));
+        profile.MeasureAction("CheckDuplicateStartGame", () => CheckDuplicateStartGame(declarations));
     }
 
     private static IReadOnlyList<DslStatement> DeclarationBody(DslDeclaration declaration) => declaration switch
@@ -249,6 +253,8 @@ public sealed class DslBinder
         HandlerDeclaration h => h.Body,
         BeforeRoomChangeDeclaration b => b.Body,
         AfterActionExecutedDeclaration a => a.Body,
+        BeforeActionExecutedDeclaration b => b.Body,
+        StartGameDeclaration s => s.Body,
         _ => Array.Empty<DslStatement>()
     };
 
@@ -309,6 +315,37 @@ public sealed class DslBinder
         var oldInput = inputType; var oldAllowed = inputContextAllowed;
         inputType = null; inputContextAllowed = false;
         BindStatements(declaration.Body, scope, null);
+        inputType = oldInput; inputContextAllowed = oldAllowed;
+        activeDslSymbols.Clear(); foreach (var item in previous) activeDslSymbols[item.Key] = item.Value;
+    }
+    private void BindBeforeActionExecuted(BeforeActionExecutedDeclaration declaration)
+    {
+        var previous = new Dictionary<string, DslSymbolIdentity>(activeDslSymbols, StringComparer.Ordinal);
+        activeDslSymbols.Clear();
+        var scope = new Dictionary<string, ITypeSymbol>(StringComparer.Ordinal)
+        {
+            [NormalizeKey("lo")] = logicObj!,
+            [NormalizeKey("obj")] = objective!,
+            [NormalizeKey("ro")] = room!,
+            [NormalizeKey("cancel")] = compilation.GetSpecialType(SpecialType.System_Boolean)
+        };
+        AddLocalIdentity("lo", "contextual", declaration.Span);
+        AddLocalIdentity("obj", "contextual", declaration.Span);
+        AddLocalIdentity("ro", "contextual", declaration.Span);
+        AddLocalIdentity("cancel", "contextual", declaration.Span);
+        var oldInput = inputType; var oldAllowed = inputContextAllowed;
+        inputType = null; inputContextAllowed = false;
+        BindStatements(declaration.Body, scope, null);
+        inputType = oldInput; inputContextAllowed = oldAllowed;
+        activeDslSymbols.Clear(); foreach (var item in previous) activeDslSymbols[item.Key] = item.Value;
+    }
+    private void BindStartGame(StartGameDeclaration declaration)
+    {
+        var previous = new Dictionary<string, DslSymbolIdentity>(activeDslSymbols, StringComparer.Ordinal);
+        activeDslSymbols.Clear();
+        var oldInput = inputType; var oldAllowed = inputContextAllowed;
+        inputType = null; inputContextAllowed = false;
+        BindStatements(declaration.Body, new Dictionary<string, ITypeSymbol>(StringComparer.Ordinal), null);
         inputType = oldInput; inputContextAllowed = oldAllowed;
         activeDslSymbols.Clear(); foreach (var item in previous) activeDslSymbols[item.Key] = item.Value;
     }
@@ -1292,6 +1329,10 @@ public sealed class DslBinder
     { foreach (var item in declarations.OfType<BeforeRoomChangeDeclaration>().Skip(1)) Report("SEGDSL334", "Duplicate before-room-change declaration for the same world.", item.Span); }
     private void CheckDuplicateAfterActionExecuted(IEnumerable<DslDeclaration> declarations)
     { foreach (var item in declarations.OfType<AfterActionExecutedDeclaration>().Skip(1)) Report("SEGDSL335", "Duplicate after-action-executed declaration for the same world.", item.Span); }
+    private void CheckDuplicateBeforeActionExecuted(IEnumerable<DslDeclaration> declarations)
+    { foreach (var item in declarations.OfType<BeforeActionExecutedDeclaration>().Skip(1)) Report("SEGDSL336", "Duplicate before-action-executed declaration for the same world.", item.Span); }
+    private void CheckDuplicateStartGame(IEnumerable<DslDeclaration> declarations)
+    { foreach (var item in declarations.OfType<StartGameDeclaration>().Skip(1)) Report("SEGDSL337", "Duplicate start-game declaration for the same world.", item.Span); }
     private void CheckDuplicateRoomChanged(IEnumerable<DslDeclaration> declarations) { foreach (var group in declarations.OfType<HandlerDeclaration>().Where(x => x.Kind == "room-changed").GroupBy(x => NormalizeKey(x.First))) foreach (var item in group.Skip(1)) Report("SEGDSL319", "Duplicate room-changed handler for the same Room.", item.Span); }
     private void CheckDuplicateUnaryHandlers(IEnumerable<DslDeclaration> declarations)
     {

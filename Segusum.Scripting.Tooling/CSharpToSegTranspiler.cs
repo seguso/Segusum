@@ -50,6 +50,8 @@ public static class CSharpToSegTranspiler
     {
         AfterActionExecuted,
         BeforeRoomChange,
+        BeforeActionExecuted,
+        StartGame,
         UnmappedOverride
     }
     private sealed record ContextLoadResult(IReadOnlyList<CompilationUnitSyntax> Roots, long ParseMilliseconds, long ManagedMemoryBytes);
@@ -136,6 +138,26 @@ public static class CSharpToSegTranspiler
                 EmitTriviaComments(method.Body?.CloseBraceToken.TrailingTrivia ?? default, sb, 1);
                 sb.AppendLine("end");
             }
+            else if (lifecycle == LifecycleKind.BeforeActionExecuted)
+            {
+                EmitTriviaComments(method.GetLeadingTrivia(), sb, 0);
+                sb.AppendLine("before-action-executed:");
+                EmitTriviaComments(method.Body?.OpenBraceToken.TrailingTrivia ?? default, sb, 1);
+                EmitStatements(method.Body?.Statements ?? default, sb, diagnostics, 1, emitPartial, true, contextRoot);
+                EmitTriviaComments(method.Body?.CloseBraceToken.LeadingTrivia ?? default, sb, 1);
+                EmitTriviaComments(method.Body?.CloseBraceToken.TrailingTrivia ?? default, sb, 1);
+                sb.AppendLine("end");
+            }
+            else if (lifecycle == LifecycleKind.StartGame)
+            {
+                EmitTriviaComments(method.GetLeadingTrivia(), sb, 0);
+                sb.AppendLine("start-game:");
+                EmitTriviaComments(method.Body?.OpenBraceToken.TrailingTrivia ?? default, sb, 1);
+                EmitStatements(method.Body?.Statements ?? default, sb, diagnostics, 1, emitPartial, true, contextRoot);
+                EmitTriviaComments(method.Body?.CloseBraceToken.LeadingTrivia ?? default, sb, 1);
+                EmitTriviaComments(method.Body?.CloseBraceToken.TrailingTrivia ?? default, sb, 1);
+                sb.AppendLine("end");
+            }
             else if (lifecycle == LifecycleKind.UnmappedOverride)
             {
                 EmitUnsupportedLifecycle(method, diagnostics, emitPartial, sb, 0);
@@ -176,6 +198,12 @@ public static class CSharpToSegTranspiler
         foreach (var invocation in root.DescendantNodes().OfType<InvocationExpressionSyntax>())
         {
             if (ResolveSourceMethod(invocation, semanticContext) != null) continue;
+            if (semanticContext.Models.TryGetValue(invocation.SyntaxTree, out var invocationModel)
+                && invocationModel.GetSymbolInfo(invocation).Symbol != null) continue;
+            // A member invocation is resolved by the receiver type and must
+            // remain an ordinary runtime call even when context-root source
+            // files happen to contain extension methods with the same name.
+            if (invocation.Expression is MemberAccessExpressionSyntax) continue;
             var name = CallName(invocation);
             if (name.Length == 0 || !semanticContext.MethodsByName.TryGetValue(name, out var candidates) || candidates.Count < 2) continue;
             var line = invocation.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
@@ -444,6 +472,26 @@ public static class CSharpToSegTranspiler
             EmitTriviaComments(method.Body.CloseBraceToken.TrailingTrivia, sb, 1);
             sb.AppendLine("end");
         }
+        else if (lifecycle == LifecycleKind.BeforeActionExecuted)
+        {
+            EmitTriviaComments(method.GetLeadingTrivia(), sb, 0);
+            sb.AppendLine("before-action-executed:");
+            EmitTriviaComments(method.Body!.OpenBraceToken.TrailingTrivia, sb, 1);
+            EmitStatements(method.Body.Statements, sb, diagnostics, 1, false, true, contextRoot);
+            EmitTriviaComments(method.Body.CloseBraceToken.LeadingTrivia, sb, 1);
+            EmitTriviaComments(method.Body.CloseBraceToken.TrailingTrivia, sb, 1);
+            sb.AppendLine("end");
+        }
+        else if (lifecycle == LifecycleKind.StartGame)
+        {
+            EmitTriviaComments(method.GetLeadingTrivia(), sb, 0);
+            sb.AppendLine("start-game:");
+            EmitTriviaComments(method.Body!.OpenBraceToken.TrailingTrivia, sb, 1);
+            EmitStatements(method.Body.Statements, sb, diagnostics, 1, false, true, contextRoot);
+            EmitTriviaComments(method.Body.CloseBraceToken.LeadingTrivia, sb, 1);
+            EmitTriviaComments(method.Body.CloseBraceToken.TrailingTrivia, sb, 1);
+            sb.AppendLine("end");
+        }
         else if (lifecycle == LifecycleKind.UnmappedOverride)
         {
             EmitUnsupportedLifecycle(method, diagnostics, false, sb, 0);
@@ -642,7 +690,21 @@ public static class CSharpToSegTranspiler
                         diagnostics.Add(new(MigrationUnitStatus.Unsupported, path, StartLine(method), "before-room-change semantic round-trip mismatch: " + comparison.Detail));
                 }
             }
-            if (method.Identifier.ValueText is not ("after_action_executed" or "afterActionExecutedCSharp" or "beforeRoomChangeManual" or "beforeRoomChangeSegusum"))
+            if (method.Identifier.ValueText == "beforeActionExecuted")
+            {
+                var comparison = MigrationVerifier.CompareBeforeActionExecuted(method, new DslSource(path + ".generated.seg", generated));
+                if (comparison.Status != EquivalenceStatus.Pass)
+                    diagnostics.Add(new(MigrationUnitStatus.Unsupported, path, StartLine(method),
+                        "before-action-executed semantic round-trip mismatch: " + comparison.Detail));
+            }
+            if (method.Identifier.ValueText == "startGameCutScene")
+            {
+                var comparison = MigrationVerifier.CompareStartGame(method, new DslSource(path + ".generated.seg", generated));
+                if (comparison.Status != EquivalenceStatus.Pass)
+                    diagnostics.Add(new(MigrationUnitStatus.Unsupported, path, StartLine(method),
+                        "start-game semantic round-trip mismatch: " + comparison.Detail));
+            }
+            if (method.Identifier.ValueText is not ("after_action_executed" or "afterActionExecutedCSharp" or "beforeRoomChangeManual" or "beforeRoomChangeSegusum" or "beforeActionExecuted" or "startGameCutScene"))
             {
                 var helperCheck = MigrationVerifier.CompareHelperMethod(method, new DslSource(path + ".generated.seg", generated));
                 if (helperCheck.Status != EquivalenceStatus.Pass)
@@ -781,6 +843,8 @@ public static class CSharpToSegTranspiler
     {
         "after_action_executed" or "afterActionExecutedCSharp" => LifecycleKind.AfterActionExecuted,
         "beforeRoomChangeManual" or "beforeRoomChangeSegusum" => LifecycleKind.BeforeRoomChange,
+        "beforeActionExecuted" => LifecycleKind.BeforeActionExecuted,
+        "startGameCutScene" => LifecycleKind.StartGame,
         _ => null
     };
 
@@ -807,7 +871,11 @@ public static class CSharpToSegTranspiler
                 ? cached
                 : methodInvocations[method] = method.Body!.DescendantNodes().OfType<InvocationExpressionSyntax>().ToArray();
         var methods = allMethods
-            .Where(x => IsHelperCandidate(x) && !Invocations(x).Any(y => RegistrationKind(y) != null))
+            // Every method in the input file is a valid standalone candidate,
+            // regardless of visibility. Context-root methods remain reachable
+            // helpers only when selected from an input-file root.
+            .Where(x => (x.SyntaxTree == root.SyntaxTree || IsHelperCandidate(x))
+                && !Invocations(x).Any(y => RegistrationKind(y) != null))
             .ToHashSet();
         MethodDeclarationSyntax? ResolvedMethod(InvocationExpressionSyntax invocation)
             => ResolveSourceMethod(invocation, semanticContext);
@@ -1329,6 +1397,8 @@ public static class CSharpToSegTranspiler
             FunctionDeclaration function => FindNamedCutscenes(function.Body),
             BeforeRoomChangeDeclaration before => FindNamedCutscenes(before.Body),
             AfterActionExecutedDeclaration after => FindNamedCutscenes(after.Body),
+            BeforeActionExecutedDeclaration beforeAction => FindNamedCutscenes(beforeAction.Body),
+            StartGameDeclaration startGame => FindNamedCutscenes(startGame.Body),
             CycleElementDeclaration cycle => FindNamedCutscenes(cycle.Body),
             _ => Enumerable.Empty<NamedCutsceneStatement>()
         });
@@ -1574,6 +1644,15 @@ public static class CSharpToSegTranspiler
     {
         result = "";
         InvocationExpressionSyntax source = invocation;
+        if (CallName(source) == "Count" && source.ArgumentList.Arguments.Count == 1
+            && source.Expression is MemberAccessExpressionSyntax countMember
+            && source.ArgumentList.Arguments[0].Expression is SimpleLambdaExpressionSyntax countPredicate
+            && countPredicate.Body is ExpressionSyntax countBody)
+        {
+            result = "[from " + Expression(countMember.Expression) + " " + countPredicate.Parameter.Identifier.ValueText
+                + " where " + Expression(countBody) + " select " + countPredicate.Parameter.Identifier.ValueText + "].Count";
+            return true;
+        }
         if ((CallName(source) == "ToList" || CallName(source) == "ToArray") && source.ArgumentList.Arguments.Count == 0
             && source.Expression is MemberAccessExpressionSyntax toListMember
             && toListMember.Expression is InvocationExpressionSyntax nested)
@@ -1681,7 +1760,9 @@ public static class CSharpToSegTranspiler
         // the parser consume a malformed expression indefinitely, besides
         // losing the actual SEG call structure.
         var receiver = invocation.Expression is MemberAccessExpressionSyntax memberAccess
-            ? Expression(memberAccess.Expression) + "." + memberAccess.Name.Identifier.ValueText
+            ? (memberAccess.Expression is InvocationExpressionSyntax or ConditionalExpressionSyntax
+                ? "(" + Expression(memberAccess.Expression) + ")"
+                : Expression(memberAccess.Expression)) + "." + memberAccess.Name.Identifier.ValueText
             : name;
         var callArguments = invocation.ArgumentList.Arguments.Select(ExpressionForCallArgument).ToList();
         return callArguments.Count == 0

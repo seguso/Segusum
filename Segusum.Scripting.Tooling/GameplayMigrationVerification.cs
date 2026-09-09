@@ -88,6 +88,8 @@ public static class GameplayMigrationVerifier
         var dslBody = declaration switch
         {
             AfterActionExecutedDeclaration after => after.Body,
+            BeforeActionExecutedDeclaration beforeAction => beforeAction.Body,
+            StartGameDeclaration startGame => startGame.Body,
             HandlerDeclaration handler => handler.Body,
             _ => null
         };

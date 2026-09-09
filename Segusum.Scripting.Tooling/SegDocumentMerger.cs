@@ -117,7 +117,8 @@ public static class SegDocumentMerger
         {
             var parsed = DslParser.Parse(new DslSource(addition.Path, addition.Text));
             AddParserDiagnostics(parsed, diagnostics);
-            var functionDeclarations = parsed.Document.Declarations.OfType<FunctionDeclaration>().ToArray();
+            var allDeclarations = parsed.Document.Declarations.OrderBy(x => x.Span.Start).ToArray();
+            var functionDeclarations = allDeclarations.OfType<FunctionDeclaration>().ToArray();
             var keys = new HashSet<string>(StringComparer.Ordinal);
             var newDeclarations = new List<FunctionDeclaration>();
             foreach (var declaration in functionDeclarations)
@@ -126,15 +127,16 @@ public static class SegDocumentMerger
                 if (!keys.Add(key)) diagnostics.Add($"duplicate generated SEG declaration: {key} ({addition.Path})");
                 if (baseFunctions.TryGetValue(key, out var existing))
                 {
-                    if (!string.Equals(DeclarationText(baseText, existing, baseFunctionList), DeclarationText(addition.Text, declaration, functionDeclarations), StringComparison.Ordinal))
+                    if (!string.Equals(Canonical(existing), Canonical(declaration), StringComparison.Ordinal))
                         diagnostics.Add($"generated SEG declaration collides with a different existing declaration: {key} ({addition.Path})");
                 }
                 else newDeclarations.Add(declaration);
             }
-            if (newDeclarations.Count != 0 && newDeclarations.Count != functionDeclarations.Length)
-                diagnostics.Add($"addition mixes existing and new declarations; refusing unsafe merge ({addition.Path})");
-            if (newDeclarations.Count == functionDeclarations.Length && parsed.Document.Declarations.Count != 0)
-                additionSegments.Add(TopLevelSegments(addition.Text, parsed.Document.Declarations));
+            if (newDeclarations.Count != 0)
+            {
+                var newKeys = newDeclarations.Select(FunctionKey).ToHashSet(StringComparer.Ordinal);
+                additionSegments.Add(DeclarationSegments(addition.Text, allDeclarations, newKeys));
+            }
             baseKeys.UnionWith(keys);
             foreach (var declaration in newDeclarations)
                 baseFunctions[FunctionKey(declaration)] = declaration;
@@ -176,6 +178,21 @@ public static class SegDocumentMerger
         return text[start..].Trim('\r', '\n');
     }
 
+    private static string DeclarationSegments(string text, IReadOnlyList<DslDeclaration> declarations, IReadOnlySet<string> newKeys)
+    {
+        if (newKeys.Count == 0) return "";
+        var ordered = declarations.OrderBy(x => x.Span.Start).ToArray();
+        var leadingStarts = LeadingTriviaStarts(text, ordered);
+        var segments = new List<string>();
+        for (var i = 0; i < ordered.Length; i++)
+        {
+            if (ordered[i] is not FunctionDeclaration function || !newKeys.Contains(FunctionKey(function))) continue;
+            var end = i + 1 < ordered.Length ? leadingStarts[i + 1] : text.Length;
+            segments.Add(text[leadingStarts[i]..end].Trim('\r', '\n'));
+        }
+        return string.Join("\r\n\r\n", segments);
+    }
+
     private static void AddParserDiagnostics((DslDocument Document, IReadOnlyList<DslDiagnostic> Diagnostics) parsed, List<string> diagnostics)
     {
         foreach (var diagnostic in parsed.Diagnostics)
@@ -194,6 +211,8 @@ public static class SegDocumentMerger
             case CycleElementDeclaration element: key = "add:" + element.Cycle + ":" + element.Id; break;
             case BeforeRoomChangeDeclaration: key = "before-room-change"; break;
             case AfterActionExecutedDeclaration: key = "after-action-executed"; break;
+            case BeforeActionExecutedDeclaration: key = "before-action-executed"; break;
+            case StartGameDeclaration: key = "start-game"; break;
             case HandlerDeclaration handler: key = handler.Kind + ":" + handler.First + ":" + handler.Second + ":" + handler.Target; break;
             default:
                 key = "";

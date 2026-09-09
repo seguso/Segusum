@@ -149,6 +149,8 @@ public static class DslParser
                     case "room-changed": result.Add(profile.Measure("ParseDeclaration.handler.room-changed", () => ParseHandler("room-changed", span))); break;
                     case "before-room-change": result.Add(profile.Measure("ParseDeclaration.before-room-change", () => new BeforeRoomChangeDeclaration(ParseBody(true), span))); break;
                     case "after-action-executed": result.Add(profile.Measure("ParseDeclaration.after-action-executed", () => new AfterActionExecutedDeclaration(ParseBody(true), span))); break;
+                    case "before-action-executed": result.Add(profile.Measure("ParseDeclaration.before-action-executed", () => new BeforeActionExecutedDeclaration(ParseBody(true), span))); break;
+                    case "start-game": result.Add(profile.Measure("ParseDeclaration.start-game", () => new StartGameDeclaration(ParseBody(true), span))); break;
                     case "add": result.Add(profile.Measure("ParseDeclaration.add", () => ParseCycleElement(span))); break;
                     case "var": { var token = WordToken(); Need("="); Need("new-cycle"); result.Add(profile.Measure("ParseDeclaration.var", () => new CycleDeclaration(token.Text, span) { VariableSpan = token.Span })); break; }
                     case "next": result.Add(profile.Measure("ParseDeclaration.next", () => new NextCycleDeclaration(Expression(), span))); break;
@@ -514,9 +516,23 @@ public static class DslParser
                 parsingCallArgument = false;
                 try
                 {
-                    var parenthesized = Expression();
+                    DslExpression parenthesized = Expression();
                     Need(")");
-                    return new ParenthesizedExpression(parenthesized, span);
+                    parenthesized = new ParenthesizedExpression(parenthesized, span);
+                    while (Is("."))
+                    {
+                        Take();
+                        var memberToken = WordToken();
+                        if (!parsingCallArgument && CanStartArgument())
+                        {
+                            var args = new List<DslArgument>();
+                            while (CanStartArgument()) args.Add(ParseArgument());
+                            parenthesized = new CallExpression(memberToken.Text, args, span) { Receiver = parenthesized, NameSpan = memberToken.Span };
+                        }
+                        else
+                            parenthesized = new MemberAccessExpression(parenthesized, memberToken.Text, span) { MemberSpan = memberToken.Span };
+                    }
+                    return parenthesized;
                 }
                 finally { parsingCallArgument = previous; }
             }
@@ -524,7 +540,24 @@ public static class DslParser
             {
                 profile.Count("list-literals");
                 Take(); SkipTerminators();
-                if (Is("from")) return ParseListComprehension(span);
+                if (Is("from"))
+                {
+                    DslExpression comprehension = ParseListComprehension(span);
+                    while (Is("."))
+                    {
+                        Take();
+                        var memberToken = WordToken();
+                        if (!parsingCallArgument && CanStartArgument())
+                        {
+                            var args = new List<DslArgument>();
+                            while (CanStartArgument()) args.Add(ParseArgument());
+                            comprehension = new CallExpression(memberToken.Text, args, span) { Receiver = comprehension, NameSpan = memberToken.Span };
+                        }
+                        else
+                            comprehension = new MemberAccessExpression(comprehension, memberToken.Text, span) { MemberSpan = memberToken.Span };
+                    }
+                    return comprehension;
+                }
                 var elements = new List<DslExpression>();
                 while (!Is("]") && Current.Kind != DslTokenKind.EndOfFile)
                 {

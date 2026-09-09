@@ -79,6 +79,8 @@ public sealed class SegusumGenerator : IIncrementalGenerator
         foreach (var function in declarations.OfType<FunctionDeclaration>()) EmitFunction(sb, function, binder.Model);
         foreach (var before in declarations.OfType<BeforeRoomChangeDeclaration>().Take(1)) EmitBeforeRoomChange(sb, before, binder.Model);
         foreach (var after in declarations.OfType<AfterActionExecutedDeclaration>().Take(1)) EmitAfterActionExecuted(sb, after, binder.Model);
+        foreach (var before in declarations.OfType<BeforeActionExecutedDeclaration>().Take(1)) EmitBeforeActionExecuted(sb, before, binder.Model);
+        foreach (var start in declarations.OfType<StartGameDeclaration>().Take(1)) EmitStartGame(sb, start, binder.Model);
         sb.AppendLine("#line hidden\n protected override void configureGeneratedActionHandlers()\n {");
         foreach (var handler in declarations.OfType<HandlerDeclaration>()) EmitHandler(sb, handler, sp, binder.Model);
         foreach (var element in declarations.OfType<CycleElementDeclaration>()) EmitCycleElement(sb, element, sp, "  ", binder.Model);
@@ -113,6 +115,23 @@ public sealed class SegusumGenerator : IIncrementalGenerator
     {
         EmitLine(sb, declaration.Span);
         sb.AppendLine(" public override void after_action_executed(CutScene cs, ActionContext actionContext)");
+        sb.AppendLine(" {"); EmitDefaultLine(sb);
+        foreach (var statement in declaration.Body) EmitStatement(sb, statement, "  ", null, model);
+        sb.AppendLine(" #line hidden\n }"); EmitDefaultLine(sb);
+    }
+    private static void EmitBeforeActionExecuted(StringBuilder sb, BeforeActionExecutedDeclaration declaration, BoundModel model)
+    {
+        EmitLine(sb, declaration.Span);
+        sb.AppendLine(" public override void beforeActionExecuted(LogicObj lo, Objective obj, Room ro, out bool cancel)");
+        sb.AppendLine(" {"); EmitDefaultLine(sb);
+        sb.AppendLine("  cancel = false;");
+        foreach (var statement in declaration.Body) EmitStatement(sb, statement, "  ", null, model);
+        sb.AppendLine(" #line hidden\n }"); EmitDefaultLine(sb);
+    }
+    private static void EmitStartGame(StringBuilder sb, StartGameDeclaration declaration, BoundModel model)
+    {
+        EmitLine(sb, declaration.Span);
+        sb.AppendLine(" public override void startGameCutScene()");
         sb.AppendLine(" {"); EmitDefaultLine(sb);
         foreach (var statement in declaration.Body) EmitStatement(sb, statement, "  ", null, model);
         sb.AppendLine(" #line hidden\n }"); EmitDefaultLine(sb);
@@ -313,6 +332,8 @@ public sealed class SegusumGenerator : IIncrementalGenerator
         FunctionDeclaration f => FindNested(f.Body),
         BeforeRoomChangeDeclaration b => FindNested(b.Body),
         AfterActionExecutedDeclaration a => FindNested(a.Body),
+        BeforeActionExecutedDeclaration b => FindNested(b.Body),
+        StartGameDeclaration s => FindNested(s.Body),
         _ => Enumerable.Empty<CycleElementDeclaration>()
     };
     private static IEnumerable<CycleElementDeclaration> FindNested(IEnumerable<DslStatement> statements) => statements.SelectMany(s => s switch
@@ -329,6 +350,8 @@ public sealed class SegusumGenerator : IIncrementalGenerator
         CycleElementDeclaration c => FindNamedCutscenes(c.Body),
         BeforeRoomChangeDeclaration b => FindNamedCutscenes(b.Body),
         AfterActionExecutedDeclaration a => FindNamedCutscenes(a.Body),
+        BeforeActionExecutedDeclaration b => FindNamedCutscenes(b.Body),
+        StartGameDeclaration s => FindNamedCutscenes(s.Body),
         _ => Enumerable.Empty<NamedCutsceneStatement>()
     };
     private static IEnumerable<NamedCutsceneStatement> FindNamedCutscenes(IEnumerable<DslStatement> statements) => statements.SelectMany(s => s switch

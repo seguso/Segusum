@@ -42,6 +42,8 @@ public sealed record HandlerDeclaration(string Kind,string First,string? Second,
 }
 public sealed record BeforeRoomChangeDeclaration(IReadOnlyList<DslStatement> Body,SourceSpan Span) : DslDeclaration(Span);
 public sealed record AfterActionExecutedDeclaration(IReadOnlyList<DslStatement> Body,SourceSpan Span) : DslDeclaration(Span);
+public sealed record BeforeActionExecutedDeclaration(IReadOnlyList<DslStatement> Body,SourceSpan Span) : DslDeclaration(Span);
+public sealed record StartGameDeclaration(IReadOnlyList<DslStatement> Body,SourceSpan Span) : DslDeclaration(Span);
 public sealed record CycleDeclaration(string Variable,SourceSpan Span) : DslDeclaration(Span)
 {
     public SourceSpan VariableSpan { get; init; } = Span;

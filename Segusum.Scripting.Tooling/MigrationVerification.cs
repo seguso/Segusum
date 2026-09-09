@@ -350,6 +350,43 @@ public static class MigrationVerifier
         return SequenceCheck("after-action-executed body", csharpEffects, dslEffects);
     }
 
+    public static VerificationCheck CompareBeforeActionExecuted(MethodDeclarationSyntax method, DslSource dslSource)
+    {
+        var declaration = DslParser.Parse(dslSource).Document.Declarations
+            .OfType<BeforeActionExecutedDeclaration>().SingleOrDefault();
+        if (declaration is null)
+            return new("before-action-executed", EquivalenceStatus.Fail, "generated before-action-executed declaration is missing");
+        if (method.Body is null)
+            return new("before-action-executed", EquivalenceStatus.Inconclusive, "lifecycle has no block body");
+        var parameters = method.ParameterList.Parameters;
+        if (parameters.Count != 4
+            || parameters[0].Type?.ToString() != "LogicObj"
+            || parameters[1].Type?.ToString() != "Objective"
+            || parameters[2].Type?.ToString() != "Room"
+            || parameters[3].Identifier.ValueText != "cancel")
+            return new("before-action-executed context", EquivalenceStatus.Fail, "expected LogicObj, Objective, Room and out cancel lifecycle parameters");
+        var csharpEffects = new List<string>();
+        CollectCSharpHandlerEffects(method.Body.Statements, csharpEffects);
+        var dslEffects = ExtractDslHandlerEffects(declaration.Body);
+        return SequenceCheck("before-action-executed body", csharpEffects, dslEffects);
+    }
+
+    public static VerificationCheck CompareStartGame(MethodDeclarationSyntax method, DslSource dslSource)
+    {
+        var declaration = DslParser.Parse(dslSource).Document.Declarations
+            .OfType<StartGameDeclaration>().SingleOrDefault();
+        if (declaration is null)
+            return new("start-game", EquivalenceStatus.Fail, "generated start-game declaration is missing");
+        if (method.Body is null)
+            return new("start-game", EquivalenceStatus.Inconclusive, "lifecycle has no block body");
+        if (method.ParameterList.Parameters.Count != 0)
+            return new("start-game context", EquivalenceStatus.Fail, "start-game must not expose parameters");
+        var csharpEffects = new List<string>();
+        CollectCSharpHandlerEffects(method.Body.Statements, csharpEffects);
+        var dslEffects = ExtractDslHandlerEffects(declaration.Body);
+        return SequenceCheck("start-game body", csharpEffects, dslEffects);
+    }
+
     public static IReadOnlyList<MarkHappenedOnceFingerprint> ExtractCSharpMarkHappenedOnce(string path, string text)
     {
         var tree = CSharpSyntaxTree.ParseText(text, path: path);
@@ -486,6 +523,9 @@ public static class MigrationVerifier
             if (declaration is HandlerDeclaration h) Walk(h.Body, result);
             if (declaration is FunctionDeclaration f) Walk(f.Body, result);
             if (declaration is BeforeRoomChangeDeclaration b) Walk(b.Body, result);
+            if (declaration is AfterActionExecutedDeclaration a) Walk(a.Body, result);
+            if (declaration is BeforeActionExecutedDeclaration ba) Walk(ba.Body, result);
+            if (declaration is StartGameDeclaration sg) Walk(sg.Body, result);
         }
         return result;
     }
@@ -710,6 +750,8 @@ public static class MigrationVerifier
             HandlerDeclaration x => new[] { x.Body },
             BeforeRoomChangeDeclaration x => new[] { x.Body },
             AfterActionExecutedDeclaration x => new[] { x.Body },
+            BeforeActionExecutedDeclaration x => new[] { x.Body },
+            StartGameDeclaration x => new[] { x.Body },
             CycleElementDeclaration x => new[] { x.Body },
             _ => Array.Empty<IEnumerable<DslStatement>>()
         };
@@ -1033,7 +1075,15 @@ public static class MigrationVerifier
             => "[from " + CanonicalCSharpSyntax(member.Expression) + " " + lambda.Parameter.Identifier.ValueText
                 + " where " + (CanonicalCSharpExpression(lambda.Body.ToString()) ?? lambda.Body.ToString())
                 + " select " + lambda.Parameter.Identifier.ValueText + "]",
+        InvocationExpressionSyntax call when call.Expression is MemberAccessExpressionSyntax member
+            && member.Name.Identifier.ValueText == "Count"
+            && call.ArgumentList.Arguments.Count == 1
+            && call.ArgumentList.Arguments[0].Expression is SimpleLambdaExpressionSyntax countLambda
+            => "[from " + CanonicalCSharpSyntax(member.Expression) + " " + countLambda.Parameter.Identifier.ValueText
+                + " where " + (CanonicalCSharpExpression(countLambda.Body.ToString()) ?? countLambda.Body.ToString())
+                + " select " + countLambda.Parameter.Identifier.ValueText + "].Count",
         InvocationExpressionSyntax call when call.Expression is MemberAccessExpressionSyntax member && member.Name.Identifier.ValueText == "ToArray" && call.ArgumentList.Arguments.Count == 0 => CanonicalCSharpSyntax(member.Expression),
+        InvocationExpressionSyntax call when call.Expression is MemberAccessExpressionSyntax member && member.Name.Identifier.ValueText == "translatable" && call.ArgumentList.Arguments.Count == 0 => CanonicalCSharpSyntax(member.Expression),
         InvocationExpressionSyntax call => CanonicalCSharpSyntax(call.Expression) + "(" + string.Join(",", call.ArgumentList.Arguments.Select(x => CanonicalCSharpSyntax(x.Expression))) + ")",
         MemberAccessExpressionSyntax member => CanonicalCSharpSyntax(member.Expression) + "." + member.Name.Identifier.ValueText,
         _ => expression.WithoutTrivia().ToFullString()

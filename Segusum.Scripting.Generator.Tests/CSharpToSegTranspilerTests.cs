@@ -787,9 +787,9 @@ public sealed class CSharpToSegTranspilerTests
     [Fact]
     public void UnsupportedHelperParameterTypeIsReportedWithoutDroppingTheType()
     {
-        const string source = "class W { void M() { addHandlerUseHere(a, handler: i => { Helper(default); }); } private void Helper(List<int> value) { foo(); } }";
+        const string source = "class W { void M() { addHandlerUseHere(a, handler: i => { Helper(default); }); } private void Helper((int, int) value) { foo(); } }";
         var result = CSharpToSegTranspiler.Transpile("x.cs", source, true, null, "game");
-        Assert.Contains("def Helper value: List<int>:", result.Text, StringComparison.Ordinal);
+        Assert.Contains("def Helper value: (int, int):", result.Text, StringComparison.Ordinal);
         Assert.Contains(result.Diagnostics, x => x.Reason.Contains("parameter type", StringComparison.Ordinal));
     }
 
@@ -1204,5 +1204,40 @@ public sealed class CSharpToSegTranspilerTests
         Assert.True(result.CommentsPreserved);
         Assert.Equal(result.SourceComments.Count, result.GeneratedComments.Count);
         Assert.Equal(4, result.SourceComments.Count);
+    }
+
+    [Fact]
+    public void BeforeActionExecutedMapsToLifecycleAndPreservesCancelContext()
+    {
+        const string source = "class W { public override void beforeActionExecuted(LogicObj lo, Objective obj, Room ro, out bool cancel) { if (lo != null) { cancel = true; } else { cancel = false; } } }";
+        var result = CSharpToSegTranspiler.Transpile("before-action.cs", source);
+
+        Assert.Contains("before-action-executed:", result.Text, StringComparison.Ordinal);
+        Assert.Contains("cancel = true", result.Text, StringComparison.Ordinal);
+        Assert.Contains("cancel = false", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(result.Units, x => x.Status == MigrationUnitStatus.Unsupported);
+    }
+
+    [Fact]
+    public void StartGameMapsToLifecycleAndKeepsNamedCutsceneHelperAsDef()
+    {
+        const string source = "class W { NamedCutSceneId ncs = new NamedCutSceneId { titleUntranslated = \"Intro\" }; public override void startGameCutScene() { using (namedCutScene(ncs, roomA, mamma)) { scenaIntro(); } } private void scenaIntro() { narText(\"intro\"); } }";
+        var result = CSharpToSegTranspiler.Transpile("start-game.cs", source);
+
+        Assert.Contains("start-game:", result.Text, StringComparison.Ordinal);
+        Assert.Contains("named-cutscene ncs", result.Text, StringComparison.Ordinal);
+        Assert.Contains("def scenaIntro", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(result.Units, x => x.Status == MigrationUnitStatus.Unsupported);
+    }
+
+    [Fact]
+    public void CountPredicateUsesComprehensionWithoutEmittingLambdaSyntax()
+    {
+        const string source = "class W { private int CountThings() { var things = denteDoro.and(lacrimeInv).and(nichelFuoriCorso); return things.Count(o => olivia.hasObject(o)); } }";
+        var result = CSharpToSegTranspiler.Transpile("count.cs", source);
+
+        Assert.Contains("[from things o where olivia.hasObject o select o].Count", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("=>", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(result.Units, x => x.Status == MigrationUnitStatus.Unsupported);
     }
 }

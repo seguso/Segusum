@@ -782,6 +782,22 @@ public sealed class GeneratorTests
     }
 
     [Fact]
+    public void BeforeActionExecutedIsUnique()
+    {
+        var result = Run("before-action-executed:\nend\nbefore-action-executed:\nend");
+        Assert.Contains(result.Diagnostics, d => d.GetMessage().Contains("Duplicate before-action-executed", StringComparison.Ordinal));
+        Assert.Empty(result.GeneratedSources);
+    }
+
+    [Fact]
+    public void StartGameIsUnique()
+    {
+        var result = Run("start-game:\nend\nstart-game:\nend");
+        Assert.Contains(result.Diagnostics, d => d.GetMessage().Contains("Duplicate start-game", StringComparison.Ordinal));
+        Assert.Empty(result.GeneratedSources);
+    }
+
+    [Fact]
     public void BeforeRoomChangeIsUniqueAndPreventIsContextual()
     {
         var duplicate = Run("before-room-change:\nend\nbefore-room-change:\nend");

@@ -36,6 +36,21 @@ public sealed class SegDocumentMergerTests
     }
 
     [Fact]
+    public void MixedAlreadyPresentAndNewAdditionIntegratesOnlyTheNewDeclaration()
+    {
+        const string baseText = "world game\n\ndef existing ret bool:\n    ret true\nend\n";
+        const string addition = "world game\n\n// already present\ndef existing ret bool:\n    ret true\nend\n\n// new\ndef helper ret bool:\n    ret false\nend\n";
+
+        var result = SegDocumentMerger.Merge("base.seg", baseText, new[] { ("addition.seg", addition) });
+
+        Assert.True(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        Assert.Equal(1, result.Text.Split("def existing", StringSplitOptions.None).Length - 1);
+        Assert.Equal(1, result.Text.Split("def helper", StringSplitOptions.None).Length - 1);
+        Assert.Contains("// new", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("// already present", result.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void SameKindFunctionsUseSignatureIdentityInsteadOfClrKindFallback()
     {
         const string generated = "world game\n\ndef first ret bool:\n    ret true\nend\n\ndef second ret bool:\n    ret false\nend\n";

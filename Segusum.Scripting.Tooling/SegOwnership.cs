@@ -161,6 +161,10 @@ public static class SegOwnership
             ? new[] { "beforeRoomChangeManual", "beforeRoomChangeSegusum" }
             : declarations.Any(x => x is AfterActionExecutedDeclaration)
                 ? new[] { "after_action_executed", "afterActionExecutedCSharp" }
+                : declarations.Any(x => x is BeforeActionExecutedDeclaration)
+                    ? new[] { "beforeActionExecuted" }
+                    : declarations.Any(x => x is StartGameDeclaration)
+                        ? new[] { "startGameCutScene" }
                 : Array.Empty<string>();
         foreach (var name in specialNames)
         {
@@ -484,6 +488,8 @@ public static class SegOwnership
                 WalkStatements(handler.Body, cycles, scenes, refs); break;
             case BeforeRoomChangeDeclaration before: WalkStatements(before.Body, cycles, scenes, refs); break;
             case AfterActionExecutedDeclaration after: WalkStatements(after.Body, cycles, scenes, refs); break;
+            case BeforeActionExecutedDeclaration beforeAction: WalkStatements(beforeAction.Body, cycles, scenes, refs); break;
+            case StartGameDeclaration startGame: WalkStatements(startGame.Body, cycles, scenes, refs); break;
             case NextCycleDeclaration next: AddExpression(next.Cycle, refs); break;
             case StateDeclaration state: Add(refs, state.Name); AddExpression(state.Initializer, refs); break;
         }
