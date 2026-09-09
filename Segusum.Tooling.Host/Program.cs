@@ -14,6 +14,7 @@ internal sealed class ToolingHost
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     private readonly ConcurrentDictionary<int, CancellationTokenSource> requests = new();
     private readonly SemaphoreSlim outputLock = new(1, 1);
+    private readonly SemaphoreSlim rpcGate = new(1, 1);
     private readonly SemaphoreSlim lifecycleGate = new(1, 1);
     private MsBuildWorkspaceContext? context;
     private string? projectPath;
@@ -53,14 +54,24 @@ internal sealed class ToolingHost
         using var cts = new CancellationTokenSource();
         requests[request.Id] = cts;
         Console.Error.WriteLine($"RPC start #{request.Id} {request.Method} pending={requests.Count}");
+        var enteredExecution = false;
         try
         {
+            await rpcGate.WaitAsync(cts.Token).ConfigureAwait(false);
+            enteredExecution = true;
+            await WriteAsync(new HostResponse(request.Id, null, null, true));
+            Console.Error.WriteLine($"RPC execute #{request.Id} {request.Method} queueWait={Stopwatch.GetElapsedTime(receivedAt).TotalMilliseconds:0}ms");
             var result = await ExecuteAsync(request, cts.Token, receivedAt);
             await WriteAsync(new HostResponse(request.Id, result, null));
         }
         catch (OperationCanceledException) { await WriteAsync(new HostResponse(request.Id, null, new HostError("cancelled", "Operation cancelled."))); }
         catch (Exception ex) { await WriteAsync(new HostResponse(request.Id, null, new HostError("host", ex.Message))); }
-        finally { requests.TryRemove(request.Id, out _); Console.Error.WriteLine($"RPC end #{request.Id} {request.Method} pending={requests.Count}"); }
+        finally
+        {
+            requests.TryRemove(request.Id, out _);
+            if (enteredExecution) rpcGate.Release();
+            Console.Error.WriteLine($"RPC end #{request.Id} {request.Method} pending={requests.Count}");
+        }
     }
 
     private void Cancel(int? id) { if (id.HasValue && requests.TryGetValue(id.Value, out var cts)) { Console.Error.WriteLine($"RPC cancel #{id.Value} pending={requests.Count}"); cts.Cancel(); } }
@@ -188,6 +199,7 @@ internal sealed class ToolingHost
                          !SymbolEqualityComparer.Default.Equals(target, overlayTarget))
                     {
                         var overlayStarted = Stopwatch.StartNew();
+                        Console.Error.WriteLine($"semanticOverlay parse-start path={overlayPathValue} overlay=true chars={overlayTextValue.Length} sha256={HashText(overlayTextValue)}");
                         var overlay = sources.Select(x => string.Equals(x.Path, overlayPathValue, StringComparison.OrdinalIgnoreCase) ? new DslSource(x.Path, overlayTextValue) : x).ToArray();
                         var candidate = new DslSemanticWorkspace(context, target, overlay, parseCache, overlayPathValue);
                         cancellationToken.ThrowIfCancellationRequested();
@@ -195,7 +207,7 @@ internal sealed class ToolingHost
                         overlayPath = overlayPathValue;
                         overlayText = overlayTextValue;
                         overlayTarget = target;
-                        Console.Error.WriteLine($"semanticOverlay project={projectPath} world={target.ToDisplayString()} elapsed={overlayStarted.Elapsed.TotalMilliseconds:0}ms path={overlayPathValue} textLength={overlayTextValue.Length}");
+                        Console.Error.WriteLine($"semanticOverlay parse-complete project={projectPath} world={target.ToDisplayString()} elapsed={overlayStarted.Elapsed.TotalMilliseconds:0}ms path={overlayPathValue} textLength={overlayTextValue.Length} sha256={HashText(overlayTextValue)} declarations={candidate.DeclarationCount} diagnostics={candidate.Diagnostics.Count}");
                         return overlaySemantic;
                     }
                     return overlaySemantic!;
@@ -342,6 +354,11 @@ internal sealed class ToolingHost
     }
 
     private static string NormalizePath(string? path) => path == null ? "" : Path.GetFullPath(path);
+    private static string HashText(string text)
+    {
+        using var sha = System.Security.Cryptography.SHA256.Create();
+        return Convert.ToHexString(sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(text)));
+    }
     private static string? ExtractWorldId(string text)
     {
         using var reader = new StringReader(text);
@@ -365,5 +382,5 @@ internal sealed class ToolingHost
 
 internal sealed record HostRequest(int Id, string Method, HostParams? Params);
 internal sealed record HostParams(string? Path = null, int? Line = null, int? Column = null, string? NewName = null, string? ProjectPath = null, int? RequestId = null, string? Text = null);
-internal sealed record HostResponse(int? Id, object? Result, HostError? Error);
+internal sealed record HostResponse(int? Id, object? Result, HostError? Error, bool Started = false);
 internal sealed record HostError(string Code, string Message);

@@ -7,7 +7,7 @@ import { InvalidationScheduler, isGeneratedPath } from './invalidation';
 import { semanticDocumentSnapshot } from './semanticRequest';
 import { getOrStartClient } from './hostLifecycle';
 
-type RpcResponse = { id: number; result?: any; error?: { code: string; message: string } };
+type RpcResponse = { id: number; result?: any; error?: { code: string; message: string }; started?: boolean };
 const BUILD_ID = 'extension build = host-start-race-fix-0.1.4-2026-09-08';
 const INTERACTIVE_RPC_TIMEOUT_MS = 15_000;
 const interactiveMethods = new Set(['definition', 'completion', 'references', 'rename']);
@@ -49,7 +49,7 @@ class HostClient {
     this.child.on('close', (code, signal) => this.markDead(new Error(`Tooling host closed (code=${code ?? 'null'}, signal=${signal ?? 'null'})`)));
     log(`host process spawned project=${this.projectPath} elapsed=${Date.now() - started}ms`);
     let buffer = '';
-    this.child.stdout.on('data', data => { buffer += data.toString(); let end: number; while ((end = buffer.indexOf('\n')) >= 0) { const line = buffer.slice(0, end); buffer = buffer.slice(end + 1); if (!line.trim()) continue; try { const response = JSON.parse(line) as RpcResponse; const settled = response.error ? this.pending.reject(response.id, new Error(response.error.message)) : this.pending.resolve(response.id, response.result); if (!settled) log(`RPC response ignored #${response.id} (late) pending=${this.pendingCount}`); } catch (e) { log(`Invalid host response: ${e}`); } } });
+    this.child.stdout.on('data', data => { buffer += data.toString(); let end: number; while ((end = buffer.indexOf('\n')) >= 0) { const line = buffer.slice(0, end); buffer = buffer.slice(end + 1); if (!line.trim()) continue; try { const response = JSON.parse(line) as RpcResponse; if (response.started) { const started = this.pending.start(response.id); if (!started) log(`RPC start ignored #${response.id} (late) pending=${this.pendingCount}`); continue; } const settled = response.error ? this.pending.reject(response.id, new Error(response.error.message)) : this.pending.resolve(response.id, response.result); if (!settled) log(`RPC response ignored #${response.id} (late) pending=${this.pendingCount}`); } catch (e) { log(`Invalid host response: ${e}`); } } });
     this.child.stderr.on('data', data => log(`host stderr: ${data.toString().trim()}`));
     const initialized = await this.request('initialize', { projectPath: this.projectPath });
     if (this.dead) throw new Error('Tooling host stopped during initialization.');
@@ -67,24 +67,26 @@ class HostClient {
       this.pending.add(id, {
         resolve: value => { log(`RPC end #${id} ${method} pending=${this.pendingCount}`); resolve(value); },
         reject: error => { log(`RPC error #${id} ${method}: ${error} pending=${this.pendingCount}`); reject(error); },
+        started: () => {
+          if (!interactiveMethods.has(method)) return;
+          timer = setTimeout(() => {
+            if (this.pending.has(id)) {
+              log(`RPC timeout #${id} ${method}; cancelling request without poisoning host pending=${this.pendingCount}`);
+              this.cancel(id, new Error(`RPC '${method}' timed out after ${INTERACTIVE_RPC_TIMEOUT_MS}ms`));
+            }
+          }, INTERACTIVE_RPC_TIMEOUT_MS);
+          log(`RPC execute #${id} ${method} pending=${this.pendingCount}`);
+        },
         dispose: () => { subscription?.dispose(); if (timer) clearTimeout(timer); },
       });
       subscription = token?.onCancellationRequested(() => this.cancel(id));
       if (!this.pending.has(id)) return;
       if (token?.isCancellationRequested) { this.cancel(id); return; }
-      if (interactiveMethods.has(method)) {
-        timer = setTimeout(() => {
-          if (this.pending.reject(id, new Error(`RPC '${method}' timed out after ${INTERACTIVE_RPC_TIMEOUT_MS}ms`))) {
-            log(`RPC timeout #${id} ${method}; host marked unhealthy pending=${this.pendingCount}`);
-            this.markDead(new Error(`RPC '${method}' timed out`));
-          }
-        }, INTERACTIVE_RPC_TIMEOUT_MS);
-      }
       try { this.child.stdin.write(JSON.stringify({ id, method, params }) + '\n'); }
       catch (error) { this.pending.reject(id, error); this.markDead(error instanceof Error ? error : new Error(String(error))); }
     });
   }
-  cancel(id: number): void { const cancelled = this.pending.reject(id, new Error('Request cancelled')); if (cancelled) log(`RPC cancelled locally #${id} pending=${this.pendingCount}`); try { if (!this.dead) this.child?.stdin.write(JSON.stringify({ id: this.next++, method: 'cancel', params: { requestId: id } }) + '\n'); } catch (e) { log(`RPC cancel send failed #${id}: ${e}`); } }
+  cancel(id: number, reason: Error = new Error('Request cancelled')): void { const cancelled = this.pending.reject(id, reason); if (cancelled) log(`RPC cancelled locally #${id} pending=${this.pendingCount}`); try { if (!this.dead) this.child?.stdin.write(JSON.stringify({ id: this.next++, method: 'cancel', params: { requestId: id } }) + '\n'); } catch (e) { log(`RPC cancel send failed #${id}: ${e}`); } }
   invalidate(): void { this.invalidation.request(); }
   private markDead(error: Error): void {
     if (this.dead) return;

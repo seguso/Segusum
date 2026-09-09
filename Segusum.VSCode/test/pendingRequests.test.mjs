@@ -63,6 +63,17 @@ for (let iteration = 0; iteration < 50; iteration++) {
 
 {
   const registry = new PendingRequestRegistry();
+  let started = 0;
+  const request = new Promise((resolve, reject) => registry.add(7, { resolve, reject, started: () => started++ }));
+  assert.equal(registry.start(7), true);
+  assert.equal(started, 1);
+  registry.resolve(7, 'executed');
+  assert.equal(await timeout(request), 'executed');
+  assert.equal(registry.start(7), false);
+}
+
+{
+  const registry = new PendingRequestRegistry();
   const first = new Promise((resolve, reject) => registry.add(5, { resolve, reject }));
   const second = new Promise((resolve, reject) => registry.add(6, { resolve, reject }));
   registry.clear(new Error('host exited'));

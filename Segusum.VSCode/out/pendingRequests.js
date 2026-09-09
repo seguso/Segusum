@@ -24,6 +24,13 @@ class PendingRequestRegistry {
         entry.reject(error);
         return true;
     }
+    start(id) {
+        const entry = this.entries.get(id);
+        if (!entry)
+            return false;
+        entry.started?.();
+        return true;
+    }
     clear(error) {
         for (const id of this.entries.keys())
             this.reject(id, error);

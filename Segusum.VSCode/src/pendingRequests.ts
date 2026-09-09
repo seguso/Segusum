@@ -1,6 +1,7 @@
 export type PendingRequest<T> = {
   resolve: (value: T) => void;
   reject: (error: unknown) => void;
+  started?: () => void;
   dispose?: () => void;
 };
 
@@ -28,6 +29,13 @@ export class PendingRequestRegistry<T> {
     this.entries.delete(id);
     entry.dispose?.();
     entry.reject(error);
+    return true;
+  }
+
+  start(id: number): boolean {
+    const entry = this.entries.get(id);
+    if (!entry) return false;
+    entry.started?.();
     return true;
   }
 

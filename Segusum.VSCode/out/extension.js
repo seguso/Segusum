@@ -99,6 +99,12 @@ class HostClient {
                 continue;
             try {
                 const response = JSON.parse(line);
+                if (response.started) {
+                    const started = this.pending.start(response.id);
+                    if (!started)
+                        log(`RPC start ignored #${response.id} (late) pending=${this.pendingCount}`);
+                    continue;
+                }
                 const settled = response.error ? this.pending.reject(response.id, new Error(response.error.message)) : this.pending.resolve(response.id, response.result);
                 if (!settled)
                     log(`RPC response ignored #${response.id} (late) pending=${this.pendingCount}`);
@@ -132,6 +138,17 @@ class HostClient {
             this.pending.add(id, {
                 resolve: value => { log(`RPC end #${id} ${method} pending=${this.pendingCount}`); resolve(value); },
                 reject: error => { log(`RPC error #${id} ${method}: ${error} pending=${this.pendingCount}`); reject(error); },
+                started: () => {
+                    if (!interactiveMethods.has(method))
+                        return;
+                    timer = setTimeout(() => {
+                        if (this.pending.has(id)) {
+                            log(`RPC timeout #${id} ${method}; cancelling request without poisoning host pending=${this.pendingCount}`);
+                            this.cancel(id, new Error(`RPC '${method}' timed out after ${INTERACTIVE_RPC_TIMEOUT_MS}ms`));
+                        }
+                    }, INTERACTIVE_RPC_TIMEOUT_MS);
+                    log(`RPC execute #${id} ${method} pending=${this.pendingCount}`);
+                },
                 dispose: () => { subscription?.dispose(); if (timer)
                     clearTimeout(timer); },
             });
@@ -142,14 +159,6 @@ class HostClient {
                 this.cancel(id);
                 return;
             }
-            if (interactiveMethods.has(method)) {
-                timer = setTimeout(() => {
-                    if (this.pending.reject(id, new Error(`RPC '${method}' timed out after ${INTERACTIVE_RPC_TIMEOUT_MS}ms`))) {
-                        log(`RPC timeout #${id} ${method}; host marked unhealthy pending=${this.pendingCount}`);
-                        this.markDead(new Error(`RPC '${method}' timed out`));
-                    }
-                }, INTERACTIVE_RPC_TIMEOUT_MS);
-            }
             try {
                 this.child.stdin.write(JSON.stringify({ id, method, params }) + '\n');
             }
@@ -159,7 +168,7 @@ class HostClient {
             }
         });
     }
-    cancel(id) { const cancelled = this.pending.reject(id, new Error('Request cancelled')); if (cancelled)
+    cancel(id, reason = new Error('Request cancelled')) { const cancelled = this.pending.reject(id, reason); if (cancelled)
         log(`RPC cancelled locally #${id} pending=${this.pendingCount}`); try {
         if (!this.dead)
             this.child?.stdin.write(JSON.stringify({ id: this.next++, method: 'cancel', params: { requestId: id } }) + '\n');
