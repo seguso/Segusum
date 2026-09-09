@@ -83,6 +83,17 @@ public sealed class GeneratorTests
     }
 
     [Fact]
+    public void RenameValidationHonorsCancellationForLargeDslSnapshot()
+    {
+        var body = string.Concat(Enumerable.Repeat("    nar: filler\n", 20_000));
+        var text = $"world game\ndef helper ret bool:\n{body}    ret true\nend\n";
+        var workspace = CreateSemanticWorkspace(text, "");
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        Assert.Throws<OperationCanceledException>(() => workspace.RenameSymbol("Gameplay/Dirty.seg", 2, 5, "helperRenamed", cancellation.Token));
+    }
+
+    [Fact]
     public void ConsecutiveAddsMayOmitOnlyTheIntermediateEnd()
     {
         var parsed = DslParser.Parse(new DslSource("consecutive-adds.seg", "world game\ndef main:\n    var cyc = new-cycle\n    add cyc first\n    foo\n    add cyc second\n    bar\n    end\nend\n"));

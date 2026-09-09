@@ -263,7 +263,7 @@ internal sealed class ToolingHost
 
     private object Rename(HostParams? p, CancellationToken ct)
     {
-        var result = Workspace(p, ct).RenameSymbol(p?.Path ?? "", p?.Line ?? 1, p?.Column ?? 1, p?.NewName ?? "");
+        var result = Workspace(p, ct).RenameSymbol(p?.Path ?? "", p?.Line ?? 1, p?.Column ?? 1, p?.NewName ?? "", ct);
         return new { succeeded = result.Succeeded, edits = result.Edits.Select(x => new { path = x.Path, line = x.Span.Line, column = x.Span.Column, start = x.Span.Start, length = x.Span.Length, newText = x.NewText }), diagnostics = result.Diagnostics.Select(x => new { id = x.Id, message = x.Message, path = x.Span.Path, line = x.Span.Line, column = x.Span.Column }) };
     }
 

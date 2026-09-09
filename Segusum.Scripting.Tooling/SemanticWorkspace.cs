@@ -291,13 +291,15 @@ public sealed class DslSemanticWorkspace
             : Finish(new SemanticDefinition(symbol.Name, ToLocation(symbol.Locations.FirstOrDefault() ?? Location.None), symbol, null), "csharp-tree");
     }
 
-    public RenameResult RenameSymbol(string path, int line, int column, string newName)
+    public RenameResult RenameSymbol(string path, int line, int column, string newName, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var renameTimer = Stopwatch.StartNew();
         var definitionTimer = Stopwatch.StartNew();
         if (string.IsNullOrWhiteSpace(newName) || !Microsoft.CodeAnalysis.CSharp.SyntaxFacts.IsValidIdentifier(newName))
             return new RenameResult(Array.Empty<WorkspaceTextEdit>(), new[] { new DslDiagnostic("SEGTOOL001", "The new name is not a valid identifier.", new SourceSpan(path, 0, 0, line, column)) });
         var definition = GetDefinition(path, line, column);
+        cancellationToken.ThrowIfCancellationRequested();
         definitionTimer.Stop();
         if (definition == null)
             return new RenameResult(Array.Empty<WorkspaceTextEdit>(), new[] { new DslDiagnostic("SEGTOOL002", "No symbol found at the requested location.", new SourceSpan(path, 0, 0, line, column)) });
@@ -376,7 +378,7 @@ public sealed class DslSemanticWorkspace
             edits.Add(new WorkspaceTextEdit(reference.Location.Path, reference.Location.Span, newName));
         var finalEdits = edits.DistinctBy(x => (x.Path, x.Span.Start)).ToArray();
         var validationTimer = Stopwatch.StartNew();
-        var validation = ValidateRename(definition, finalEdits, renamedSolution, newName);
+        var validation = ValidateRename(definition, finalEdits, renamedSolution, newName, cancellationToken);
         validationTimer.Stop();
         Console.Error.WriteLine($"rename validation symbol={definition.DisplayName} finalValidation={validationTimer.Elapsed.TotalMilliseconds:0}ms total={renameTimer.Elapsed.TotalMilliseconds:0}ms succeeded={validation.Count == 0}");
         return validation.Count == 0
@@ -511,8 +513,9 @@ public sealed class DslSemanticWorkspace
         return node == null || semanticModel == null ? null : semanticModel.GetSymbolInfo(node).Symbol ?? GetDeclaredSymbol(semanticModel, node);
     }
 
-    private IReadOnlyList<DslDiagnostic> ValidateRename(SemanticDefinition definition, IReadOnlyList<WorkspaceTextEdit> edits, Solution? renamedSolution, string newName)
+    private IReadOnlyList<DslDiagnostic> ValidateRename(SemanticDefinition definition, IReadOnlyList<WorkspaceTextEdit> edits, Solution? renamedSolution, string newName, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (renamedSolution != null)
         {
             // A workspace can contain several projects. Validate the project that
@@ -545,10 +548,10 @@ public sealed class DslSemanticWorkspace
             var renamedWorld = renamedCompilation.GetTypeByMetadataName(worldName);
             if (renamedWorld == null)
                 return new[] { new DslDiagnostic("SEGTOOL004", "The renamed C# World could not be resolved.", definition.Location.Span) };
-            return ValidateDslSources(renamedCompilation, renamedWorld, edits);
+            return ValidateDslSources(renamedCompilation, renamedWorld, edits, cancellationToken);
         }
 
-        return ValidateDslSources(compilation, world, edits);
+        return ValidateDslSources(compilation, world, edits, cancellationToken);
     }
 
     private Compilation RebuildGeneratedValidationCompilation(Compilation renamedCompilation, ISymbol renamedSymbol, string replacement)
@@ -663,10 +666,16 @@ public sealed class DslSemanticWorkspace
         }
     }
 
-    private IReadOnlyList<DslDiagnostic> ValidateDslSources(Compilation targetCompilation, INamedTypeSymbol targetWorld, IReadOnlyList<WorkspaceTextEdit> edits)
+    private IReadOnlyList<DslDiagnostic> ValidateDslSources(Compilation targetCompilation, INamedTypeSymbol targetWorld, IReadOnlyList<WorkspaceTextEdit> edits, CancellationToken cancellationToken = default)
     {
         var updatedSources = sources.Select(source => new DslSource(source.Path, ApplyEdits(source.Text, edits.Where(x => string.Equals(x.Path, source.Path, StringComparison.OrdinalIgnoreCase))))).ToArray();
-        var parseResults = updatedSources.Select(source => DslParser.Parse(source)).ToArray();
+        var parseResults = new List<DslParseResult>(updatedSources.Length);
+        foreach (var source in updatedSources)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var parsed = DslParser.Parse(source, cancellationToken);
+            parseResults.Add(new DslParseResult(parsed.Document, parsed.Diagnostics));
+        }
         var result = parseResults.SelectMany(x => x.Diagnostics).ToList();
         if (result.Count != 0) return result;
         var declarations = parseResults.Select(x => x.Document).SelectMany(x => x.Declarations).ToArray();
