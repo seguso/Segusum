@@ -33,7 +33,25 @@ builder.Services.AddSegusum(options =>
         Separator = "img/my-game/separator.png",
         Play = "img/my-game/play.png",
         PlayDisabled = "img/my-game/play-disabled.png",
-        InventoryObjectIconsPath = "img/my-game/objects"
+        InventoryObjectIconsPath = "img/my-game/objects",
+        Favicons = new SegusumFaviconAssets
+        {
+            Apple57 = "img/my-game/favicon/apple-57.png",
+            Apple60 = "img/my-game/favicon/apple-60.png",
+            Apple72 = "img/my-game/favicon/apple-72.png",
+            Apple76 = "img/my-game/favicon/apple-76.png",
+            Apple114 = "img/my-game/favicon/apple-114.png",
+            Apple120 = "img/my-game/favicon/apple-120.png",
+            Apple144 = "img/my-game/favicon/apple-144.png",
+            Apple152 = "img/my-game/favicon/apple-152.png",
+            Apple180 = "img/my-game/favicon/apple-180.png",
+            Android192 = "img/my-game/favicon/android-192.png",
+            Favicon32 = "img/my-game/favicon/favicon-32.png",
+            Favicon96 = "img/my-game/favicon/favicon-96.png",
+            Favicon16 = "img/my-game/favicon/favicon-16.png",
+            MsTile144 = "img/my-game/favicon/ms-tile-144.png",
+            Manifest = "img/my-game/favicon/manifest.json"
+        }
     };
 });
 builder.Services.AddSegusumStorage(options => options.UseFile("data/game.json"));

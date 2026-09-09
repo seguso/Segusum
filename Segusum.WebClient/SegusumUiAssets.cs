@@ -2,6 +2,7 @@ namespace Segusum.WebClient;
 
 public sealed class SegusumUiAssets
 {
+    public required SegusumFaviconAssets Favicons { get; init; }
     public required string Hand { get; init; }
     public required string Feet { get; init; }
     public required string Eyes { get; init; }
@@ -23,8 +24,12 @@ public sealed class SegusumUiAssets
     {
         var missing = typeof(SegusumUiAssets)
             .GetProperties()
+            .Where(property => property.PropertyType == typeof(string))
             .Where(property => string.IsNullOrWhiteSpace((string?)property.GetValue(this)))
             .Select(property => property.Name)
+            .Concat(Favicons is null
+                ? new[] { "Favicons" }
+                : Favicons.MissingProperties())
             .ToArray();
 
         if (missing.Length > 0)
