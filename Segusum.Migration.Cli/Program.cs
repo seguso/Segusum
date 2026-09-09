@@ -6,8 +6,8 @@ if (args.Length == 0 || args[0] is "--help" or "-h")
     Console.WriteLine("segusum migrate-csharp <file.cs> --world WORLD [--output FILE] [--audit] [--emit-partial] [--method NAME] [--context-root DIR] [--dry-run]");
     Console.WriteLine("segusum audit-ownership <file.seg> --runtime-root DIR --history FILE [--apply]");
     Console.WriteLine("segusum parse-seg <file.seg>");
-    Console.WriteLine("segusum audit-seg-declarations <generated.seg> --runtime-root DIR");
-    Console.WriteLine("segusum extract-new-seg-declarations <generated.seg> --runtime-root DIR --output FILE");
+    Console.WriteLine("segusum audit-seg-declarations <generated.seg> --runtime-root DIR [--exclude FILE]...");
+    Console.WriteLine("segusum extract-new-seg-declarations <generated.seg> --runtime-root DIR --output FILE [--exclude FILE]...");
     Console.WriteLine("segusum merge-seg <base.seg> <addition.seg>... --output FILE");
     return 0;
 }
@@ -28,16 +28,18 @@ if (string.Equals(args[0], "parse-seg", StringComparison.OrdinalIgnoreCase))
 }
 if (string.Equals(args[0], "audit-seg-declarations", StringComparison.OrdinalIgnoreCase))
 {
-    if (args.Length < 2) { Console.Error.WriteLine("Usage: audit-seg-declarations <generated.seg> --runtime-root DIR"); return 2; }
-    var generatedPath = Path.GetFullPath(args[1]); string? runtimeRoot = null;
+    if (args.Length < 2) { Console.Error.WriteLine("Usage: audit-seg-declarations <generated.seg> --runtime-root DIR [--exclude FILE]..."); return 2; }
+    var generatedPath = Path.GetFullPath(args[1]); string? runtimeRoot = null; var excluded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     for (var i = 2; i < args.Length; i++)
     {
         if (args[i] == "--runtime-root") runtimeRoot = Path.GetFullPath(args[++i]);
+        else if (args[i] == "--exclude") excluded.Add(Path.GetFullPath(args[++i]));
         else { Console.Error.WriteLine($"Unknown option: {args[i]}"); return 2; }
     }
     if (runtimeRoot == null) { Console.Error.WriteLine("--runtime-root is required."); return 2; }
     var runtimeFiles = Directory.EnumerateFiles(runtimeRoot, "*.seg", SearchOption.AllDirectories)
-        .Where(x => !x.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+        .Where(x => !excluded.Contains(Path.GetFullPath(x))
+            && !x.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
             && !x.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
         .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
         .Select(x => (x, File.ReadAllText(x)));
@@ -52,17 +54,19 @@ if (string.Equals(args[0], "audit-seg-declarations", StringComparison.OrdinalIgn
 }
 if (string.Equals(args[0], "extract-new-seg-declarations", StringComparison.OrdinalIgnoreCase))
 {
-    if (args.Length < 2) { Console.Error.WriteLine("Usage: extract-new-seg-declarations <generated.seg> --runtime-root DIR --output FILE"); return 2; }
-    var generatedPath = Path.GetFullPath(args[1]); string? runtimeRoot = null; string? extractOutput = null;
+    if (args.Length < 2) { Console.Error.WriteLine("Usage: extract-new-seg-declarations <generated.seg> --runtime-root DIR --output FILE [--exclude FILE]..."); return 2; }
+    var generatedPath = Path.GetFullPath(args[1]); string? runtimeRoot = null; string? extractOutput = null; var excluded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     for (var i = 2; i < args.Length; i++)
     {
         if (args[i] == "--runtime-root") runtimeRoot = Path.GetFullPath(args[++i]);
         else if (args[i] == "--output") extractOutput = Path.GetFullPath(args[++i]);
+        else if (args[i] == "--exclude") excluded.Add(Path.GetFullPath(args[++i]));
         else { Console.Error.WriteLine($"Unknown option: {args[i]}"); return 2; }
     }
     if (runtimeRoot == null || extractOutput == null) { Console.Error.WriteLine("--runtime-root and --output are required."); return 2; }
     var runtimeFiles = Directory.EnumerateFiles(runtimeRoot, "*.seg", SearchOption.AllDirectories)
-        .Where(x => !x.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+        .Where(x => !excluded.Contains(Path.GetFullPath(x))
+            && !x.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
             && !x.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
         .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
         .Select(x => (x, File.ReadAllText(x)));
