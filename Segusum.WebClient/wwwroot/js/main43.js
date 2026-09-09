@@ -1,5 +1,5 @@
 let thisVersion = "54"; // 52 = sushi, tasse , yrface , milan, someone, etc. 54: matt
-const gClientScriptVersion = "91";
+const gClientScriptVersion = "92";
 
 // The page bootstrap is the sole runtime source for generic client UI text.
 // Keep the lookup here with the gameplay runtime so there is no separate
@@ -11376,6 +11376,16 @@ $(function () {
         e.stopPropagation();
     });
 
+    $(".eyeIcon").click(e => {
+        if (gFrozenMouse || $(e.currentTarget).hasClass("disabled") || $(e.currentTarget).hasClass("tempDisabled")) {
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+        }
+
+        flashVisibleTargetsOnce();
+    });
+
     if (is_touch_device1()) {
         $(".scrollanteConPulsanti").css("overflow-y", "scroll");
     }
@@ -11459,6 +11469,18 @@ $(function () {
 
     }
 
+
+    function flashVisibleTargetsOnce() {
+        const targets = $(".imgTarget, .imgTargetExit, .imgTargetExitDown").filter(function () {
+            return $(this).css("display") !== "none";
+        });
+
+        if (targets.length === 0) {
+            return;
+        }
+
+        targets.stop(true, true).show().css("opacity", 1).fadeOut(150).fadeIn(150);
+    }
 
     function mostraHotspot() {
         $(".btnOggettoInRoomHotspot").remove();
