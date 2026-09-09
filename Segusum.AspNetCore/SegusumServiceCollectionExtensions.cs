@@ -13,13 +13,11 @@ public sealed class SegusumOptions
 {
     public Func<string, bool, WorldBase>? WorldFactory { get; set; }
     public string GameTitle { get; set; } = "Segusum game";
-    public string InventoryIconsPath { get; set; } = "_content/Segusum.WebClient/assets/icons";
     /// <summary>
-    /// Client path of the game-specific portrait shown while choosing an
-    /// explanation (the "Ho un'idea" dialog). There is deliberately no
-    /// engine fallback: every game must provide its own character image.
+    /// All visual runtime assets required by the web client. These belong to
+    /// the game's visual identity; Segusum deliberately provides no defaults.
     /// </summary>
-    public string? ThinkingImagePath { get; set; }
+    public SegusumUiAssets? UiAssets { get; set; }
     public string GameAssetPrefix { get; set; } = "";
     public string Credits { get; set; } = "A game made with Segusum.";
     private readonly Dictionary<string, string> clientStringOverrides = new(StringComparer.Ordinal);
@@ -84,11 +82,10 @@ public static class SegusumServiceCollectionExtensions
                 "Segusum richiede una WorldFactory. Configurala in Program.cs con il World del gioco.");
         }
 
-        if (string.IsNullOrWhiteSpace(options.ThinkingImagePath))
-        {
-            throw new InvalidOperationException(
-                "Segusum richiede ThinkingImagePath: il gioco deve fornire il path client dell'immagine thinking del dialog Ho un'idea.");
-        }
+        if (options.UiAssets is null)
+            throw new InvalidOperationException("Segusum richiede UiAssets: il gioco deve configurare tutti gli asset UI runtime.");
+
+        options.UiAssets.Validate();
 
         services.AddSingleton<ISegusumWorldFactory>(
             new ConfiguredSegusumWorldFactory(options.WorldFactory));

@@ -10,6 +10,7 @@
     <ProjectReference Include="..\..\Segusum.AspNetCore\Segusum.AspNetCore.csproj" />
     <ProjectReference Include="..\..\Segusum.Scripting.Generator\Segusum.Scripting.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\Segusum.Scripting.Core\Segusum.Scripting.Core.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\Segusum.Scripting.Semantics\Segusum.Scripting.Semantics.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
     <AdditionalFiles Include="Scripts\**\*.seg" />
   </ItemGroup>
 </Project>

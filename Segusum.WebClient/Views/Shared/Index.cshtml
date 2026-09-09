@@ -7,7 +7,25 @@
         {
             language = Model.Language,
             strings = Model.ClientStrings,
-            assets = new { thinkingImagePath = Model.ThinkingImagePath }
+            assets = new
+            {
+                hand = Model.UiAssets.Hand,
+                feet = Model.UiAssets.Feet,
+                eyes = Model.UiAssets.Eyes,
+                options = Model.UiAssets.Options,
+                talk = Model.UiAssets.Talk,
+                talkAvailable = Model.UiAssets.TalkAvailable,
+                objectives = Model.UiAssets.Objectives,
+                objectivesAvailable = Model.UiAssets.ObjectivesAvailable,
+                thinking = Model.UiAssets.Thinking,
+                target = Model.UiAssets.Target,
+                exit = Model.UiAssets.Exit,
+                exitDown = Model.UiAssets.ExitDown,
+                separator = Model.UiAssets.Separator,
+                play = Model.UiAssets.Play,
+                playDisabled = Model.UiAssets.PlayDisabled,
+                inventoryObjectIconsPath = Model.UiAssets.InventoryObjectIconsPath
+            }
         });
 }
 <!DOCTYPE html>
@@ -38,7 +56,7 @@
         var gGameIdStr = "@Model.GameId";
 
 
-        var gInvIconsFolder = "@Model.InventoryIconsPath";
+        var gInvIconsFolder;
 
         // request.querystring in javascript https://stackoverflow.com/questions/901115/how-can-i-get-query-string-values-in-javascript
         function getParameterByName(name, url)
@@ -57,7 +75,7 @@
     </script>
 
     <script type="application/json" id="segusum-bootstrap">@Html.Raw(bootstrapJson)</script>
-    <script src="~/_content/Segusum.WebClient/js/main43.js?ver=90"></script>
+    <script src="~/_content/Segusum.WebClient/js/main43.js?ver=91"></script>
 
     <link href="~/_content/Segusum.WebClient/css/segusum.css" rel="stylesheet" />
 
@@ -281,36 +299,36 @@
 
 
                 <div class="walkIcon invIcon btnMap invIconNotObject">
-                    <div class="imgInvOuterGen"><img src="~/@(Model.InventoryIconsPath)/feet.png" class="invImg" /></div>
+                    <div class="imgInvOuterGen"><img src="@Model.UiAssets.Feet" class="invImg" /></div>
                     <div class="selectorIcon" style="display:none"></div>
                     <div class="invObjectTesto fisso" my_transl="walkUpper">Testo bla bla bla blabla bla blabla bla blabla bla bla ....</div>
                 </div>
 
                 <div class="talkIcon invIcon invIconNotObject">
-                    <div class="imgInvOuterGen"><img src="~/@(Model.InventoryIconsPath)/talk.png" class="invImg" /></div>
+                    <div class="imgInvOuterGen"><img src="@Model.UiAssets.Talk" class="invImg" /></div>
                     <div class="selectorIcon" style="display:none"></div>
                     <div class="invObjectTesto fisso" my_transl="talkUpper">Testo bla bla bla blabla bla blabla bla blabla bla bla ....</div>
 
                 </div>
 
                 <div class="eyeIcon invIcon invIconNotObject">
-                    <div class="imgInvOuterGen"><img src="~/@(Model.InventoryIconsPath)/eyes.png" class="invImg" /></div>
+                    <div class="imgInvOuterGen"><img src="@Model.UiAssets.Eyes" class="invImg" /></div>
                     <div class="selectorIcon" style="display:none"></div>
                     <div class="invObjectTesto fisso" my_transl="lookatUpper">Testo bla bla bla blabla bla blabla bla blabla bla bla ....</div>
                 </div>
 
                 @*<div class="pickUpIcon invIcon invIconNotObject">
-                        <div class="imgInvOuterGen"><img src="~/@(Model.InventoryIconsPath)/hand.png" class="invImg" /></div>
+                        <div class="imgInvOuterGen"><img src="@Model.UiAssets.Hand" class="invImg" /></div>
                         <div class="selectorIcon" style="display:none"></div>
                         <div class="invObjectTesto fisso" my_transl="raccogliPuntini">Testo ....</div>
                     </div>*@
                 @*<div class="optionsIcon invIcon invIconNotObject useIcon">
-                        <div class="imgInvOuterGen"><img src="~/@(Model.InventoryIconsPath)/gear.png" class="invImg" /></div>
+                        <div class="imgInvOuterGen"><img src="@Model.UiAssets.Options" class="invImg" /></div>
                         <div class="selectorIcon" style="display:none"></div>
                         <div class="invObjectTesto fisso" my_transl="useUpper">Testo ....</div>
                     </div>*@
                 @*<div class="deduceIcon invIcon invIconNotObject">
-                        <img src="~/@(Model.InventoryIconsPath)/sherlockhat.png" class="invImg" />
+                        <img src="~/@(Model.UiAssets.InventoryObjectIconsPath)/sherlockhat.png" class="invImg" />
                         <div class="selectorIcon" style="display:none"></div>
                         <div class="invObjectTesto fisso" my_transl="deduceUpper">Testo bla bla bla blabla bla blabla bla blabla bla bla ....</div>
                     </div>*@
@@ -328,9 +346,9 @@
                 <div class="invScroll invIcon scrollButtonMio scrollLeft"><i class="fas fa-caret-left"></i></div>
                 <div class="invContenitoreOggettiInner">
 
-                    <img src="~/@(Model.InventoryIconsPath)/bersaglio.png" class="imgTarget" />
-                    <img src="~/@(Model.InventoryIconsPath)/exit-icon.png" class="imgTargetExit" />
-                    <img src="~/@(Model.InventoryIconsPath)/exit-icon-down.png" class="imgTargetExitDown" />
+                    <img src="@Model.UiAssets.Target" class="imgTarget" />
+                    <img src="@Model.UiAssets.Exit" class="imgTargetExit" />
+                    <img src="@Model.UiAssets.ExitDown" class="imgTargetExitDown" />
 
                     <div class="invObjTemplate invIcon scrollingItem ">
                         <img class="imginv" />
@@ -348,12 +366,12 @@
 
             <div class="containerFixedVerbs secondo">
                 <div class="objectivesIcon invIcon invIconNotObject">
-                    <div class="imgInvOuterGen"><img src="~/@(Model.InventoryIconsPath)/notes.png" class="invImg" /></div>
+                    <div class="imgInvOuterGen"><img src="@Model.UiAssets.Objectives" class="invImg" /></div>
 
                     <div class="invObjectTesto fisso" my_transl="diaryUpper">Testo ....</div>
                 </div>
                 <div class="optionsIcon invIcon invIconNotObject">
-                    <div class="imgInvOuterGen"><img src="~/@(Model.InventoryIconsPath)/gear.png" class="invImg" /></div>
+                    <div class="imgInvOuterGen"><img src="@Model.UiAssets.Options" class="invImg" /></div>
 
                     <div class="invObjectTesto fisso" my_transl="options">Testo ....</div>
                 </div>
@@ -573,7 +591,7 @@
                             </div>
                         </div>
                         <div class="composerMiddle">
-                            <img src="~/@(Model.InventoryIconsPath)/horizLine.png" class="horizline" />
+                            <img src="@Model.UiAssets.Separator" class="horizline" />
                         </div>
 
 
@@ -645,7 +663,7 @@
                         </div>
 
                         <div class="composerMiddle">
-                            <img src="~/@(Model.InventoryIconsPath)/horizLine.png" class="horizline" />
+                            <img src="@Model.UiAssets.Separator" class="horizline" />
                         </div>
 
 
@@ -731,7 +749,7 @@
                         </div>
 
                         <div class="composerMiddle">
-                            <img src="~/@(Model.InventoryIconsPath)/horizLine.png" class="horizline" />
+                            <img src="@Model.UiAssets.Separator" class="horizline" />
                         </div>
 
 
@@ -803,7 +821,7 @@
                             </div>
                         </div>
                         <div class="composerMiddle">
-                            <img src="~/@(Model.InventoryIconsPath)/horizLine.png" class="horizline" />
+                            <img src="@Model.UiAssets.Separator" class="horizline" />
                         </div>
 
 
@@ -957,7 +975,7 @@
                             </div>
                         </div>
                         <div class="composerMiddle">
-                            <img src="~/@(Model.InventoryIconsPath)/horizLine.png" class="horizline" />
+                            <img src="@Model.UiAssets.Separator" class="horizline" />
                         </div>
                         <div class="composerUpperOUter">
                             <div class="composerUpper">
@@ -983,7 +1001,7 @@
                                 </div>
                             </div>
 
-                            <div class="btn btn-primary btnComposerAvanti"><img src="@Model.GameAssetPrefix/img/play-icon.png" class="playIconImg" /><img src="@Model.GameAssetPrefix/img/play-icon-disabled.png" class="playIconImgDisabled" /></div>
+                            <div class="btn btn-primary btnComposerAvanti"><img src="@Model.UiAssets.Play" class="playIconImg" /><img src="@Model.UiAssets.PlayDisabled" class="playIconImgDisabled" /></div>
                         </div>
 
 

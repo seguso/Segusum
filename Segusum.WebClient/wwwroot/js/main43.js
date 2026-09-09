@@ -1,5 +1,5 @@
 let thisVersion = "54"; // 52 = sushi, tasse , yrface , milan, someone, etc. 54: matt
-const gClientScriptVersion = "90";
+const gClientScriptVersion = "91";
 
 // The page bootstrap is the sole runtime source for generic client UI text.
 // Keep the lookup here with the gameplay runtime so there is no separate
@@ -16,10 +16,11 @@ const gClientScriptVersion = "90";
     window.segusumBootstrap = bootstrap;
     window.segusumClientStrings = bootstrap.strings || {};
     window.segusumClientAssets = bootstrap.assets || {};
+    gInvIconsFolder = window.segusumClientAssets.inventoryObjectIconsPath;
 })();
 
 function initializeThinkingImage() {
-    const path = window.segusumClientAssets && window.segusumClientAssets.thinkingImagePath;
+    const path = window.segusumClientAssets && window.segusumClientAssets.thinking;
     if (!path) {
         console.error("Segusum game did not provide the required thinking image path");
         return;
@@ -865,10 +866,10 @@ function updateToolbar(roomDesc = null) {
 
 
     if (roomDesc.grrObjectives.any(o => !o.obcWasSeen)) {
-        $(".objectivesIcon .invImg").attr('src', prefissoWebApi + `/${gInvIconsFolder}/notes-yellow.png`);
+        $(".objectivesIcon .invImg").attr('src', window.segusumClientAssets.objectivesAvailable);
     }
     else {
-        $(".objectivesIcon .invImg").attr('src', prefissoWebApi + `/${gInvIconsFolder}/notes-normal.png`);
+        $(".objectivesIcon .invImg").attr('src', window.segusumClientAssets.objectives);
     }
 
 
@@ -7353,12 +7354,12 @@ async function rebuildInv() {
 
     if (g_last_room_desc.grrTalkNow) {
         $(".talkIcon img").css('opacity', 1);
-        $(".talkIcon img").attr('src', prefissoWebApi + `/${gInvIconsFolder}/talkHalo.png`);
+        $(".talkIcon img").attr('src', window.segusumClientAssets.talkAvailable);
         $(".talkIcon").css('cursor', "default");
     }
     else {
         $(".talkIcon img").css('opacity', 0.26);
-        $(".talkIcon img").attr('src', prefissoWebApi + `/${gInvIconsFolder}/talk.png`);
+        $(".talkIcon img").attr('src', window.segusumClientAssets.talk);
 
         $(".talkIcon").css('cursor', "not-allowed");
     }
