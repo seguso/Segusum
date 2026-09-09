@@ -27,6 +27,7 @@ public sealed class SegusumGameplayController : Controller
             ApiPrefix = prefix,
             Language = lang,
             InventoryIconsPath = options.InventoryIconsPath,
+            ThinkingImagePath = options.ThinkingImagePath!,
             GameAssetPrefix = options.GameAssetPrefix,
             Title = options.GameTitle,
             Credits = options.Credits,

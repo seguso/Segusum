@@ -17,6 +17,7 @@
   <ItemGroup>
     <ProjectReference Include="../Segusum/Segusum.csproj" />
     <ProjectReference Include="../Segusum.WebClient/Segusum.WebClient.csproj" />
+    <ProjectReference Include="../Segusum.AspNetCore/Segusum.AspNetCore.csproj" />
   </ItemGroup>
 
   <ItemGroup>

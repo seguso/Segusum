@@ -1,5 +1,5 @@
 let thisVersion = "54"; // 52 = sushi, tasse , yrface , milan, someone, etc. 54: matt
-const gClientScriptVersion = "89";
+const gClientScriptVersion = "90";
 
 // The page bootstrap is the sole runtime source for generic client UI text.
 // Keep the lookup here with the gameplay runtime so there is no separate
@@ -15,7 +15,23 @@ const gClientScriptVersion = "89";
     }
     window.segusumBootstrap = bootstrap;
     window.segusumClientStrings = bootstrap.strings || {};
+    window.segusumClientAssets = bootstrap.assets || {};
 })();
+
+function initializeThinkingImage() {
+    const path = window.segusumClientAssets && window.segusumClientAssets.thinkingImagePath;
+    if (!path) {
+        console.error("Segusum game did not provide the required thinking image path");
+        return;
+    }
+    document.querySelectorAll(".imgThink").forEach(image => image.setAttribute("src", path));
+}
+
+if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initializeThinkingImage, { once: true });
+} else {
+    initializeThinkingImage();
+}
 
 function segusumTranslate(key) {
     const value = window.segusumClientStrings?.[key];

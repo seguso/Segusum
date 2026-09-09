@@ -3,7 +3,12 @@
 @{
     Layout = null;
     var bootstrapJson = System.Text.Json.JsonSerializer.Serialize(
-        new { language = Model.Language, strings = Model.ClientStrings });
+        new
+        {
+            language = Model.Language,
+            strings = Model.ClientStrings,
+            assets = new { thinkingImagePath = Model.ThinkingImagePath }
+        });
 }
 <!DOCTYPE html>
 <html>
@@ -52,7 +57,7 @@
     </script>
 
     <script type="application/json" id="segusum-bootstrap">@Html.Raw(bootstrapJson)</script>
-    <script src="~/_content/Segusum.WebClient/js/main43.js?ver=89"></script>
+    <script src="~/_content/Segusum.WebClient/js/main43.js?ver=90"></script>
 
     <link href="~/_content/Segusum.WebClient/css/segusum.css" rel="stylesheet" />
 

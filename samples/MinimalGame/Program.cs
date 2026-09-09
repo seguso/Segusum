@@ -6,6 +6,7 @@ builder.Services.AddSegusum(options =>
 {
     options.WorldFactory = (language, tutorialMode) => new MinimalGame.World(language);
     options.GameTitle = "Minimal Segusum Game";
+    options.ThinkingImagePath = "sample.svg";
     options.OverrideClientString("saveGame", "Store progress");
 });
 builder.Services.AddSegusumStorage(options => options.UseInMemory("minimal-game"));
