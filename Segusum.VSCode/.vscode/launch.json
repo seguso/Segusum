@@ -8,6 +8,13 @@
       "args": ["--extensionDevelopmentPath=${workspaceFolder}"],
       "outFiles": ["${workspaceFolder}/out/**/*.js"],
       "preLaunchTask": "Compile Segusum VS Code extension"
+    },
+    {
+      "name": "Build & Install Segusum VSIX",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run package:install",
+      "cwd": "${workspaceFolder}"
     }
   ]
 }

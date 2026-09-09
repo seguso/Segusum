@@ -7,6 +7,13 @@
       "command": "npm run compile",
       "problemMatcher": "$tsc",
       "group": "build"
+    },
+    {
+      "label": "Build and install Segusum VSIX",
+      "type": "shell",
+      "command": "npm run package:install",
+      "problemMatcher": [],
+      "group": "build"
     }
   ]
 }
