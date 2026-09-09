@@ -47,7 +47,7 @@ public sealed class DslParseCache
         get { lock (gate) return (parsedCount, reusedCount); }
     }
 
-    public DslParseResult Get(DslSource source, bool overlay, out bool reused)
+    public DslParseResult Get(DslSource source, bool overlay, out bool reused, CancellationToken cancellationToken = default)
     {
         var key = NormalizePath(source.Path);
         lock (gate)
@@ -61,7 +61,7 @@ public sealed class DslParseCache
                 return new DslParseResult(current.Document, current.Diagnostics);
             }
 
-            var parsed = DslParser.Parse(source);
+            var parsed = DslParser.Parse(source, cancellationToken);
             var next = new Entry(source.Text, parsed.Document, parsed.Diagnostics);
             if (overlay) pathEntries.Overlay = next; else pathEntries.Disk = next;
             parsedCount++;
@@ -106,7 +106,7 @@ public sealed class DslSemanticWorkspace
     {
     }
 
-    public DslSemanticWorkspace(ICSharpWorkspaceContext workspaceContext, INamedTypeSymbol world, IEnumerable<DslSource> sources, DslParseCache parseCache, string? overlayPath)
+    public DslSemanticWorkspace(ICSharpWorkspaceContext workspaceContext, INamedTypeSymbol world, IEnumerable<DslSource> sources, DslParseCache parseCache, string? overlayPath, CancellationToken cancellationToken = default)
     {
         var totalTimer = Stopwatch.StartNew();
         var memoryBefore = GC.GetTotalMemory(false);
@@ -128,9 +128,10 @@ public sealed class DslSemanticWorkspace
         var reusedChars = 0L;
         foreach (var source in this.sources)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var fileTimer = Stopwatch.StartNew();
             var isOverlay = overlayPath != null && string.Equals(NormalizePath(source.Path), NormalizePath(overlayPath), StringComparison.OrdinalIgnoreCase);
-            var parsed = parseCache.Get(source, isOverlay, out var reused);
+            var parsed = parseCache.Get(source, isOverlay, out var reused, cancellationToken);
             fileTimer.Stop();
             parsedSources.Add((source, parsed.Document, parsed.Diagnostics));
             diagnostics.AddRange(parsed.Diagnostics);
@@ -665,7 +666,7 @@ public sealed class DslSemanticWorkspace
     private IReadOnlyList<DslDiagnostic> ValidateDslSources(Compilation targetCompilation, INamedTypeSymbol targetWorld, IReadOnlyList<WorkspaceTextEdit> edits)
     {
         var updatedSources = sources.Select(source => new DslSource(source.Path, ApplyEdits(source.Text, edits.Where(x => string.Equals(x.Path, source.Path, StringComparison.OrdinalIgnoreCase))))).ToArray();
-        var parseResults = updatedSources.Select(DslParser.Parse).ToArray();
+        var parseResults = updatedSources.Select(source => DslParser.Parse(source)).ToArray();
         var result = parseResults.SelectMany(x => x.Diagnostics).ToList();
         if (result.Count != 0) return result;
         var declarations = parseResults.Select(x => x.Document).SelectMany(x => x.Declarations).ToArray();

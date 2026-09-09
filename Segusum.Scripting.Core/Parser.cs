@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Threading;
 
 namespace Segusum.Scripting.Core;
 
@@ -54,7 +55,7 @@ public static class DslParser
     [ThreadStatic]
     internal static DslParserProfile? ActiveProfile;
 
-    public static (DslDocument Document, IReadOnlyList<DslDiagnostic> Diagnostics) Parse(DslSource source)
+    public static (DslDocument Document, IReadOnlyList<DslDiagnostic> Diagnostics) Parse(DslSource source, CancellationToken cancellationToken = default)
     {
         var profile = new DslParserProfile();
         var allocatedBefore = GC.GetTotalMemory(false);
@@ -63,10 +64,10 @@ public static class DslParser
         try
         {
             var lexerTimer = Stopwatch.StartNew();
-            var tokens = DslLexer.Lex(source, diagnostics);
+            var tokens = DslLexer.Lex(source, diagnostics, cancellationToken);
             lexerTimer.Stop();
             profile.AddPhase("lexer+token-list", lexerTimer.ElapsedTicks, tokens.Count);
-            var parser = new Parser(tokens, diagnostics, source.Text, profile);
+            var parser = new Parser(tokens, diagnostics, source.Text, profile, cancellationToken);
             var document = profile.Measure("ParseDocument", parser.ParseDocument);
             var allocated = GC.GetTotalMemory(false) - allocatedBefore;
             if (string.Equals(Environment.GetEnvironmentVariable("SEGUSUM_DSL_PROFILE"), "1", StringComparison.Ordinal))
@@ -85,12 +86,14 @@ public static class DslParser
         private readonly string sourceText;
         private readonly DslParserProfile profile;
         private readonly int[] lineStarts;
+        private readonly CancellationToken cancellationToken;
+        private int consumedSinceCancellationCheck;
         private int position;
         private bool parsingCallArgument;
         private bool parsingListComprehensionClause;
-        public Parser(IReadOnlyList<DslToken> tokens, List<DslDiagnostic> diagnostics, string sourceText, DslParserProfile profile)
+        public Parser(IReadOnlyList<DslToken> tokens, List<DslDiagnostic> diagnostics, string sourceText, DslParserProfile profile, CancellationToken cancellationToken)
         {
-            this.tokens = tokens; this.diagnostics = diagnostics; this.sourceText = sourceText; this.profile = profile;
+            this.tokens = tokens; this.diagnostics = diagnostics; this.sourceText = sourceText; this.profile = profile; this.cancellationToken = cancellationToken;
             lineStarts = BuildLineStarts(sourceText);
         }
         private static int[] BuildLineStarts(string text)
@@ -111,12 +114,14 @@ public static class DslParser
         private bool Is(DslTokenKind kind) { profile.Count("IsKind"); return Current.Kind == kind; }
         private DslToken Take()
         {
-            profile.Count("Take"); return tokens[position++];
+            profile.Count("Take");
+            if (++consumedSinceCancellationCheck >= 256) { cancellationToken.ThrowIfCancellationRequested(); consumedSinceCancellationCheck = 0; }
+            return tokens[position++];
         }
         private void SkipTerminators() { while (Current.Kind is DslTokenKind.NewLine or DslTokenKind.Semicolon) Take(); }
         private void Need(string text) { if (Is(text)) Take(); else Error($"Expected '{text}'."); }
         private string Word() => WordToken().Text;
-        private DslToken WordToken() { profile.Count("WordToken"); if (Current.Kind != DslTokenKind.Identifier) { Error("Expected identifier."); return Current; } return Take(); }
+        private DslToken WordToken() { profile.Count("WordToken"); if (Current.Kind != DslTokenKind.Identifier) { Error("Expected identifier."); return Current.Kind == DslTokenKind.EndOfFile ? Current : Take(); } return Take(); }
         private void Error(string message) { profile.Count("diagnostics"); diagnostics.Add(new DslDiagnostic("SEGDSL101", message, Current.Span)); }
         private void RecoverLine() { profile.Count("error-recovery"); while (Current.Kind is not (DslTokenKind.NewLine or DslTokenKind.Semicolon or DslTokenKind.EndOfFile)) Take(); }
 

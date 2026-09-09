@@ -199,9 +199,22 @@ internal sealed class ToolingHost
                          !SymbolEqualityComparer.Default.Equals(target, overlayTarget))
                     {
                         var overlayStarted = Stopwatch.StartNew();
+                        using var overlayWatchdog = new CancellationTokenSource();
+                        var overlayCompleted = false;
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                await Task.Delay(TimeSpan.FromSeconds(2), overlayWatchdog.Token);
+                                if (!overlayCompleted) SaveOverlayDiagnostic(overlayPathValue, overlayTextValue);
+                            }
+                            catch (OperationCanceledException) { }
+                        });
                         Console.Error.WriteLine($"semanticOverlay parse-start path={overlayPathValue} overlay=true chars={overlayTextValue.Length} sha256={HashText(overlayTextValue)}");
                         var overlay = sources.Select(x => string.Equals(x.Path, overlayPathValue, StringComparison.OrdinalIgnoreCase) ? new DslSource(x.Path, overlayTextValue) : x).ToArray();
-                        var candidate = new DslSemanticWorkspace(context, target, overlay, parseCache, overlayPathValue);
+                        DslSemanticWorkspace candidate;
+                        try { candidate = new DslSemanticWorkspace(context, target, overlay, parseCache, overlayPathValue, cancellationToken); }
+                        finally { overlayCompleted = true; overlayWatchdog.Cancel(); }
                         cancellationToken.ThrowIfCancellationRequested();
                         overlaySemantic = candidate;
                         overlayPath = overlayPathValue;
@@ -358,6 +371,14 @@ internal sealed class ToolingHost
     {
         using var sha = System.Security.Cryptography.SHA256.Create();
         return Convert.ToHexString(sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(text)));
+    }
+    private static void SaveOverlayDiagnostic(string path, string text)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "Segusum", "overlay-diagnostics");
+        Directory.CreateDirectory(directory);
+        var file = Path.Combine(directory, $"{DateTime.UtcNow:yyyyMMddTHHmmssfffZ}-{Path.GetFileName(path)}");
+        File.WriteAllText(file, text);
+        Console.Error.WriteLine($"semanticOverlay diagnostic-saved path={file} source={path} chars={text.Length} sha256={HashText(text)}");
     }
     private static string? ExtractWorldId(string text)
     {

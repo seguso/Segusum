@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using System.IO;
+using System.Threading;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Text;
@@ -63,6 +64,22 @@ public sealed class GeneratorTests
     {
         var parsed = DslParser.Parse(new DslSource("missing-add-end.seg", "world game\nvar cyc = new-cycle\nadd cyc first\nfoo\n"));
         Assert.Contains(parsed.Diagnostics, d => d.Id == "SEGDSL101" && d.Message.Contains("end", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void MalformedNamedCutsceneArgumentAlwaysMakesParserProgress()
+    {
+        var parsed = DslParser.Parse(new DslSource("malformed-named-cutscene.seg", "world game\ndef main:\n    named-cutscene ncs \"title\" ( :\n    end\nend\n"));
+        Assert.NotEmpty(parsed.Diagnostics);
+    }
+
+    [Fact]
+    public void ParserHonorsCancellationDuringLargeInput()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var text = "world game\n" + string.Concat(Enumerable.Repeat("def helper:\n    foo\nend\n", 10_000));
+        Assert.Throws<OperationCanceledException>(() => DslParser.Parse(new DslSource("cancelled.seg", text), cancellation.Token));
     }
 
     [Fact]

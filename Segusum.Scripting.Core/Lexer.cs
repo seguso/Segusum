@@ -1,16 +1,17 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 namespace Segusum.Scripting.Core;
 public enum DslTokenKind { Identifier, Number, String, NewLine, Semicolon, Colon, Comma, LParen, RParen, LBracket, RBracket, Operator, EndOfFile }
 public readonly record struct DslToken(DslTokenKind Kind, string Text, SourceSpan Span);
 public static class DslLexer
 {
- public static IReadOnlyList<DslToken> Lex(DslSource source, List<DslDiagnostic> diagnostics)
+ public static IReadOnlyList<DslToken> Lex(DslSource source, List<DslDiagnostic> diagnostics, CancellationToken cancellationToken = default)
  {
   var r=new List<DslToken>();var t=source.Text;var i=0;var line=1;var column=1;
   var profile = DslParser.ActiveProfile;
   var loopStarted = profile == null ? 0 : System.Diagnostics.Stopwatch.GetTimestamp();
-  while(i<t.Length){var s=i;var c=t[i];
+  while(i<t.Length){ if ((i & 0x3ff) == 0) cancellationToken.ThrowIfCancellationRequested(); var s=i;var c=t[i];
    var tokenLine=line;var tokenColumn=column;
    if(c==' '||c=='\t'||c=='\r'){Advance(c);continue;}
    if(c=='#'||(c=='/'&&i+1<t.Length&&t[i+1]=='/')){while(i<t.Length&&t[i]!='\n')Advance(t[i]);continue;}
