@@ -94,7 +94,8 @@ I favicon/manifest sono anch'essi game assets obbligatori, non convenzioni dell'
 - `GetRoomRes.grrIsTextMode` continua a guidare il frontend (`.roomTextMode` oppure scena grafica). `narImg` e `narRoom` leggono il contesto della richiesta.
 - `user.canPlayGraphicsMode` e le mappe di `FilePersistence` restano per conservare i record legacy; il campo non viene più letto per autenticazione/rendering né inizializzato sui nuovi account.
 - Il gameplay SEG non è stato modificato: le sue condizioni testuali/grafiche restano nel runtime e vedono il contesto corrente durante la richiesta.
-- La pagina Razor carica `main43.js?ver=93` dal package `Segusum.WebClient`; dopo il prossimo package DEV verificare HTTP sia il riferimento versione sia il contenuto statico servito.
+- La pagina Razor carica `main43.js?ver=93` dal package `Segusum.WebClient`. Verificato con package DEV `0.1.37-dev.0dc8c320c190`, prodotto dal commit Segusum `0dc8c320c190c736313a22c7a16dd80ad76fff70`: Litgir ha risolto la stessa versione in `project.assets.json` e lo smoke HTTP ha ricevuto la pagina e l'asset statico aggiornato.
+- La verifica `TextModePresentationTests.GameplayState` in Litgir esclude posizioni/elementi di una lista di oggetti di presentazione dal confronto; non dimostra identita completa del World serializzato. Il cambio modalita con save/load va completato con prova manuale in gioco.
 
 ### Ultimo task UX noto
 
