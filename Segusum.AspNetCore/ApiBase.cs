@@ -99,7 +99,7 @@ namespace Seg
                     return Ok(new ApiReturnVal { errore = "noauth" });
                 }
 
-                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid, out string[] saveNames, i.lang, isTextMode);
+                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid, out string[] saveNames, i.lang);
 
                 if (i.curTime != w.cur_time)
                 {
@@ -171,7 +171,7 @@ namespace Seg
                     return Ok(new ApiReturnVal { errore = "noauth" });
                 }
 
-                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid, out string[] saveNames, i.lang, isTextMode);
+                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid, out string[] saveNames, i.lang);
                 if (i.curTime != w.cur_time)
                 {
                     // l'utente sta cercando di giocare su una finestra che è rimasta indietro come tempo... deve fare take over
@@ -265,7 +265,7 @@ namespace Seg
                     return Ok(new ApiReturnVal { errore = "noauth" });
                 }
 
-                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid, out string[] saveNames, i.lang, isTextMode);
+                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid, out string[] saveNames, i.lang);
 
 
                 if (i.curTime != w.cur_time)
@@ -515,7 +515,7 @@ namespace Seg
                     return Ok(new ApiReturnVal { errore = "noauth" });
                 }
 
-                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid, out string[] saveNames, i.lang, isTextMode);
+                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid, out string[] saveNames, i.lang);
 
 
                 if (i.curTime != w.cur_time)
@@ -631,7 +631,7 @@ namespace Seg
                     return Ok(new ApiReturnVal { errore = "noauth" });
                 }
 
-                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid, out string[] saveNames, i.lang, isTextMode);
+                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid, out string[] saveNames, i.lang);
 
 
                 if (i.curTime != w.cur_time)
@@ -703,7 +703,7 @@ namespace Seg
                     return Ok(new ApiReturnVal { errore = "noauth" });
                 }
 
-                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid, out string[] saveNames, i.lang, isTextMode);
+                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid, out string[] saveNames, i.lang);
 
 
                 if (i.curTime != w.cur_time)
@@ -853,7 +853,7 @@ namespace Seg
                     return Ok(new ApiReturnVal { errore = "noauth" });
                 }
 
-                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid, out string[] saveNames, i.lang, isTextMode);
+                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid, out string[] saveNames, i.lang);
                 // loadgame fa eccezione! non deve controllare che il time sia diverso! 
                 //if (i.curTime != w.cur_time)
                 //{
@@ -999,7 +999,7 @@ namespace Seg
                 }
 
                 phaseStopwatch.Restart();
-                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid, out string[] saveNames, i.lang, isTextMode);
+                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid, out string[] saveNames, i.lang);
                 phaseStopwatch.Stop();
                 SegusumProfiler.Log($"getNextAr phase=restore elapsed_ms={phaseStopwatch.Elapsed.TotalMilliseconds:F1}");
                 if (i.curTime != w.cur_time)
@@ -1113,7 +1113,7 @@ namespace Seg
                     return Ok(new ApiReturnVal { errore = "noauth" });
                 }
 
-                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid, out string[] saveNames, i.lang, isTextMode);
+                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid, out string[] saveNames, i.lang);
                 if (i.curTime != w.cur_time)
                 {
                     // l'utente sta cercando di giocare su una finestra che è rimasta indietro come tempo... deve fare take over
@@ -1202,7 +1202,7 @@ namespace Seg
                     return Ok(new ApiReturnVal { errore = "noauth" });
                 }
 
-                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid, out string[] saveNames, i.lang, isTextMode);
+                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid, out string[] saveNames, i.lang);
                 if (i.curTime != w.cur_time)
                 {
                     // l'utente sta cercando di giocare su una finestra che è rimasta indietro come tempo... deve fare take over
@@ -1375,7 +1375,7 @@ namespace Seg
                     return Ok(new ApiReturnVal { errore = "noauth" });
                 }
 
-                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid, out string[] saveNames, i.lang, isTextMode);
+                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid, out string[] saveNames, i.lang);
                 if (i.curTime != w.cur_time)
                 {
                     // l'utente sta cercando di giocare su una finestra che è rimasta indietro come tempo... deve fare take over
@@ -1446,7 +1446,7 @@ namespace Seg
                     return Ok(new ApiReturnVal { errore = "noauth" });
                 }
 
-                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid, out string[] saveNames, i.lang, isTextMode);
+                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid, out string[] saveNames, i.lang);
                 if (i.curTime != w.cur_time)
                 {
                     // l'utente sta cercando di giocare su una finestra che è rimasta indietro come tempo... deve fare take over
@@ -1531,7 +1531,7 @@ namespace Seg
                     return Ok(new ApiReturnVal { errore = "noauth" });
                 }
 
-                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid, out string[] saveNames, i.lang, isTextMode);
+                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid, out string[] saveNames, i.lang);
                 if (i.curTime != w.cur_time)
                 {
                     // l'utente sta cercando di giocare su una finestra che è rimasta indietro come tempo... deve fare take over
@@ -1616,7 +1616,7 @@ namespace Seg
                     return Ok(new ApiReturnVal { errore = "noauth" });
                 }
 
-                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid, out string[] saveNames, i.lang, isTextMode);
+                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid, out string[] saveNames, i.lang);
                 if (i.curTime != w.cur_time)
                 {
                     // l'utente sta cercando di giocare su una finestra che è rimasta indietro come tempo... deve fare take over
@@ -1691,7 +1691,7 @@ namespace Seg
                     return Ok(new ApiReturnVal { errore = "noauth" });
                 }
 
-                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid, out string[] saveNames, i.lang, isTextMode);
+                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid, out string[] saveNames, i.lang);
                 if (i.curTime != w.cur_time)
                 {
                     // l'utente sta cercando di giocare su una finestra che è rimasta indietro come tempo... deve fare take over
@@ -2251,7 +2251,7 @@ namespace Seg
                     return Ok(new ApiReturnVal { errore = "noauth" });
                 }
 
-                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid, out string[] saveNames, i.lang, isTextMode);
+                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid, out string[] saveNames, i.lang);
 
                 if (i.curTime != w.cur_time)
                 {
@@ -2317,7 +2317,7 @@ namespace Seg
                     return Ok(new ApiReturnVal { errore = "noauth" });
                 }
 
-                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid, out string[] saveNames, i.lang, isTextMode);
+                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid, out string[] saveNames, i.lang);
                 if (i.curTime != w.cur_time)
                 {
                     // l'utente sta cercando di giocare su una finestra che è rimasta indietro come tempo... deve fare take over
@@ -2377,7 +2377,7 @@ namespace Seg
                     return Ok(new ApiReturnVal { errore = "noauth" });
                 }
 
-                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid, out string[] saveNames, i.lang, isTextMode);
+                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid, out string[] saveNames, i.lang);
                 if (i.curTime != w.cur_time)
                 {
                     // l'utente sta cercando di giocare su una finestra che è rimasta indietro come tempo... deve fare take over
@@ -2572,7 +2572,7 @@ namespace Seg
                 }
 
                 // carico in memoria ciò che voglio salvare con un certo nome.
-                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid, out string[] saveNames, i.lang, isTextMode);
+                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid, out string[] saveNames, i.lang);
 
                 if (i.curTime != w.cur_time)
                 {
@@ -2698,7 +2698,7 @@ namespace Seg
                 }
 
                 // carico in memoria ciò che voglio salvare con un certo nome.
-                var w = restoreWorldFromDisk(user.id, db, i.savegameName, out var savegameInvalid, i.lang, isTextMode);
+                var w = restoreWorldFromDisk(user.id, db, i.savegameName, out var savegameInvalid, i.lang);
 
 
                 if (w != null)
@@ -2830,15 +2830,11 @@ namespace Seg
                             pwd = i.pwd1,
                             dateCreated = now,
                             dateLastAccess = now,
-                            tempToken = "n.a."  // non piu usato
-
-
-                                ,
-                            // New users start in graphical mode regardless of
-                            // the persistence provider. Existing users keep
-                            // their persisted canPlayGraphicsMode value.
-                            canPlayGraphicsMode = true
-                                ,
+                            tempToken = "n.a.", // non piu usato
+                            // STORICO: new accounts used to initialize the legacy
+                            // canPlayGraphicsMode field to true. The field is kept
+                            // for old rows; the current request header now controls
+                            // presentation and this value is no longer written here.
                             gameId = i.gameId,
                             isCasualMode = false
                         };
@@ -2863,7 +2859,7 @@ namespace Seg
 
                 var actionRes = startNewGame(user, db, i.lang, w, saveNames: new string[] { } /* usati solo per precalcolare subito la room dopo la cutscene, non servono*/
 
-                , isTextMode: false
+                , isTextMode: PresentationModeContext.IsTextMode
 
                 );
 
@@ -2874,7 +2870,7 @@ namespace Seg
                 // devo salvare il nuovo mondo in memoria, se no al prossimo actionres c'è una discordanza di curtime tra client e server
                 autosave(db, user, w);
                 var sessionCreateStopwatch = Stopwatch.StartNew();
-                var sessionToken = sessionStore.Create(user.id, user.uname, false, false, user.gameId);
+                var sessionToken = sessionStore.Create(user.id, user.uname, false, user.gameId);
                 sessionCreateStopwatch.Stop();
                 SegusumProfiler.Log($"phase=session-create elapsed_ms={sessionCreateStopwatch.Elapsed.TotalMilliseconds:F1}");
                 Response.Headers["X-Segusum-Session-Token"] = sessionToken;
@@ -2898,6 +2894,7 @@ namespace Seg
 
         protected IActionResult createUserAndStartGameImpl(InputCreateUserAndStartGame2 i)
         {
+            resolveRequestPresentationMode();
             var ipAddr = Request?.HttpContext?.Connection?.RemoteIpAddress?.ToString();
             return Ok(createUserAndStartGameCore(i, ipAddr));
         }
@@ -2969,7 +2966,7 @@ namespace Seg
                 var authorization = Request?.Headers.Authorization.ToString();
                 if (authorization?.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) == true)
                     sessionStore.UpdateCasualMode(authorization.Substring("Bearer ".Length).Trim(), i.casualMode);
-                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var invalid, out var names, i.lang, isTextMode);
+                var w = restoreWorldFromMemoryOrDisk(user.id, db, out var invalid, out var names, i.lang);
                 if (invalid || w == null) return Ok(new ApiReturnVal { errore = "savegame-invalid" });
                 w.IsCasualMode = i.casualMode;
                 return Ok(new ApiReturnVal { ret = new SegActionRes(w.cur_time) { room = eng.creaRoomDaDareAlClient(w, names, isTextMode) } });
@@ -3226,7 +3223,7 @@ namespace Seg
         /// <param name="db"></param>
         /// <param name="savegame_invalid"></param>
         /// <returns></returns>
-        protected WorldBase restoreWorldFromMemoryOrDisk(int idUser, segusumDb db, out bool savegameInvalid, out string[] saveNames, string lang, bool isTextMode)
+        protected WorldBase restoreWorldFromMemoryOrDisk(int idUser, segusumDb db, out bool savegameInvalid, out string[] saveNames, string lang)
         {
             SegusumProfiler.Log($"phase=restore-start user_id={idUser}");
 
@@ -3240,7 +3237,9 @@ namespace Seg
 
             if (exists)
             {
-                wo.IsTextMode = isTextMode; // lo copio nel mondo perchè serve a narRoom
+                // STORICO: la modalità veniva copiata sul World per narImg/narRoom.
+                // Ora IsTextMode legge il contesto AsyncLocal della richiesta, così
+                // richieste concorrenti non si sovrascrivono sul World condiviso.
                 wo.IsCasualMode = userModeIsCasual(idUser, db);
 
                 var invariantStopwatch = Stopwatch.StartNew();
@@ -3270,7 +3269,7 @@ namespace Seg
                 // chiama automaticamente anche reparse_coord_file.
 
                 // non giocava da troppo tempo. il suo mondo è stato salvato nel db
-                var restored = restoreWorldFromDisk(idUser, db, savegameTitle: "", savegameInvalid: out savegameInvalid, lang: lang, isTextMode: isTextMode);
+                var restored = restoreWorldFromDisk(idUser, db, savegameTitle: "", savegameInvalid: out savegameInvalid, lang: lang);
 
                 if (savegameInvalid)
                 {
@@ -3343,7 +3342,7 @@ namespace Seg
             return saveNames;
         }
 
-        protected WorldBase restoreWorldFromDisk(int idUser, segusumDb db, string savegameTitle, out bool savegameInvalid, string lang, bool isTextMode)
+        protected WorldBase restoreWorldFromDisk(int idUser, segusumDb db, string savegameTitle, out bool savegameInvalid, string lang)
         {
             var restoreStopwatch = Stopwatch.StartNew();
 
@@ -3375,7 +3374,8 @@ namespace Seg
 
                 var w = buildEmptyWorld(lang, currentTutorialMode.Value); // l'engine non conosce il tipo world
 
-                w.IsTextMode = isTextMode; // lo metto nel mondo perché serve a narRoom
+                // STORICO: la modalità veniva copiata sul World per narImg/narRoom.
+                // Ora il contesto di presentazione resta transitorio per richiesta.
                 w.IsTutorialMode = currentTutorialMode.Value;
                 w.IsCasualMode = userModeIsCasual(idUser, db);
 
@@ -3775,10 +3775,19 @@ namespace Seg
 
         }
 
+        private bool resolveRequestPresentationMode()
+        {
+            var isTextMode = PresentationModeContext.ResolveRequestHeader(
+                Request?.Headers[PresentationModeContext.RequestHeaderName].ToString());
+            PresentationModeContext.IsTextMode = isTextMode;
+            return isTextMode;
+        }
+
         protected user auth(Credentials cr, segusumDb db, out bool isTextMode)
         {
             var authStopwatch = Stopwatch.StartNew();
             SegusumProfiler.Log("phase=controller-entered");
+            isTextMode = resolveRequestPresentationMode();
             currentTutorialMode.Value = cr.tutorialMode;
             var bearer = Request?.Headers.Authorization.ToString();
             if (bearer?.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) == true)
@@ -3791,13 +3800,11 @@ namespace Seg
                     {
                         lookupStopwatch.Stop();
                         currentSession.Value = null;
-                        isTextMode = true;
                         SegusumProfiler.Log($"phase=session-lookup elapsed_ms={lookupStopwatch.Elapsed.TotalMilliseconds:F1} session_hit=0 reason=game-mismatch");
                         return null;
                     }
                     lookupStopwatch.Stop();
                     currentSession.Value = session;
-                    isTextMode = session.IsTextMode;
                     SegusumProfiler.Log($"phase=session-resolved elapsed_ms=0.0 user_id={session.UserId}");
                     SegusumProfiler.Log($"phase=session-lookup elapsed_ms={lookupStopwatch.Elapsed.TotalMilliseconds:F1} session_hit=1 user_id={session.UserId}");
                     authStopwatch.Stop();
@@ -3806,7 +3813,6 @@ namespace Seg
                     {
                         id = session.UserId,
                         uname = session.Username,
-                        canPlayGraphicsMode = !session.IsTextMode,
                         isCasualMode = session.IsCasualMode,
                         gameId = session.GameId
                     };
@@ -3817,7 +3823,6 @@ namespace Seg
                 currentSession.Value = null;
                 if (!isCredentialBootstrapRequest())
                 {
-                    isTextMode = true;
                     authStopwatch.Stop();
                     SegusumProfiler.Log($"phase=auth-total elapsed_ms={authStopwatch.Elapsed.TotalMilliseconds:F1} authenticated=0 session=0");
                     return null;
@@ -3856,9 +3861,8 @@ namespace Seg
                             int? credGameId = cr.cred_gameId;
                             if (gameId.GetValueOrDefault() == credGameId.GetValueOrDefault() & gameId.HasValue == credGameId.HasValue)
                             {
-                                isTextMode = !user.canPlayGraphicsMode.Value;
                                 var sessionCreateStopwatch = Stopwatch.StartNew();
-                                var sessionToken = sessionStore.Create(user.id, user.uname, isTextMode,
+                                var sessionToken = sessionStore.Create(user.id, user.uname,
                                     user.isCasualMode == true, user.gameId);
                                 sessionCreateStopwatch.Stop();
                                 SegusumProfiler.Log($"phase=session-create elapsed_ms={sessionCreateStopwatch.Elapsed.TotalMilliseconds:F1}");
@@ -3874,23 +3878,24 @@ namespace Seg
                                 accessWriteStopwatch.Stop();
                                 SegusumProfiler.Log($"phase=auth-savechanges elapsed_ms={accessWriteStopwatch.Elapsed.TotalMilliseconds:F1} session_created=1 persisted={ (persistAccess ? 1 : 0) }");
                                 currentSession.Value = new SegusumSessionStore.SessionData(sessionToken, user.id, user.uname,
-                                    DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, isTextMode, user.isCasualMode == true, user.gameId);
+                                    DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, user.isCasualMode == true, user.gameId);
                             }
                             else
                             {
-                                isTextMode = !user.canPlayGraphicsMode.Value;
                                 authStopwatch.Stop();
                                 SegusumProfiler.Log($"phase=auth-total elapsed_ms={authStopwatch.Elapsed.TotalMilliseconds:F1} authenticated=0");
                                 return (user)null;
                             }
 
-                            //isTextMode = ! user.canPlayGraphicsMode.Value ;
+                            // STORICO: la modalità veniva letta da canPlayGraphicsMode.
+                            // Oggi la richiesta usa X-Segusum-Text-Mode.
                             //user.dateLastAccess = DateTime.Now;
                             //db.SaveChanges();
                         }
                         else
                         {
-                            isTextMode = true;
+                            // A missing account does not change the request's
+                            // presentation preference; the response is still noauth.
                         }
                     }
                     //else if (cr.token.is_not_null_or_white())
@@ -3911,7 +3916,6 @@ namespace Seg
                     else
                     {
                         user = null;
-                        isTextMode = true;
                     }
 
                     tr.Complete();
@@ -4067,7 +4071,7 @@ namespace Seg
                     return Ok(new ApiReturnVal { errore = "noauth" });
 
                 var w = restoreWorldFromMemoryOrDisk(user.id, db, out var savegameInvalid,
-                    out string[] saveNames, i.lang, isTextMode);
+                    out string[] saveNames, i.lang);
                 if (savegameInvalid)
                     return Ok(new ApiReturnVal { ret = new SegActionRes(w.cur_time) { savegame_invalid = true } });
 

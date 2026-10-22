@@ -21,13 +21,13 @@ public sealed class SegusumSessionStore
             : TimeSpan.FromHours(1));
     }
 
-    public string Create(int userId, string username, bool isTextMode, bool isCasualMode, int? gameId)
+    public string Create(int userId, string username, bool isCasualMode, int? gameId)
     {
         Span<byte> bytes = stackalloc byte[32];
         RandomNumberGenerator.Fill(bytes);
         var token = Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
         var now = DateTimeOffset.UtcNow;
-        sessions[token] = new SessionData(token, userId, username, now, now, isTextMode, isCasualMode, gameId);
+        sessions[token] = new SessionData(token, userId, username, now, now, isCasualMode, gameId);
         return token;
     }
 
@@ -82,7 +82,6 @@ public sealed class SegusumSessionStore
         string Username,
         DateTimeOffset CreatedUtc,
         DateTimeOffset LastUsedUtc,
-        bool IsTextMode,
         bool IsCasualMode,
         int? GameId);
 }

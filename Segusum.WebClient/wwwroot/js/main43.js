@@ -279,6 +279,33 @@ function getLang() {
     return gLang;
 }
 
+const textModePreferenceKey = "segusum_textmode";
+
+function resolveTextModePreference() {
+    const requested = new URLSearchParams(window.location.search || "").get("textmode");
+    if (requested === "1" || requested === "0") {
+        const isTextMode = requested === "1";
+        try { localStorage.setItem(textModePreferenceKey, requested); } catch (_) { }
+        return isTextMode;
+    }
+
+    try {
+        return localStorage.getItem(textModePreferenceKey) === "1";
+    }
+    catch (_) {
+        return false;
+    }
+}
+
+function rememberTextModePreference(isTextMode) {
+    gIsTextMode = isTextMode === true;
+    try { localStorage.setItem(textModePreferenceKey, gIsTextMode ? "1" : "0"); } catch (_) { }
+}
+
+// URL override > browser preference > graphics. The URL value is copied to
+// localStorage so subsequent API requests and reloads use one client choice.
+var gIsTextMode = resolveTextModePreference();
+
 
 var gGameId;
 
@@ -1662,14 +1689,20 @@ async function doPost(url, inp, options = {}) {
     }
     console.log(`facendo post a ${url}`, inp);
     //try { // non funziona... deve fare try il chiamante
-    const useSession = options.useSession !== false && !isCredentialBootstrapUrl(url);
+    const useSession = options.useSession !== false
+        && (!isCredentialBootstrapUrl(url) || options.useSession === true);
     const sessionToken = useSession ? sessionStorage.getItem(sessionTokenId) : null;
+    const headers = { "X-Segusum-Text-Mode": gIsTextMode ? "1" : "0" };
+    if (sessionToken) headers.Authorization = `Bearer ${sessionToken}`;
     var ret = $.ajax({
         type: "POST", url: url, data: JSON.stringify(inp), contentType: "application/json",
-        headers: sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}
+        headers
     }).then(function (data, textStatus, xhr) {
         const newToken = xhr.getResponseHeader("X-Segusum-Session-Token");
         if (newToken) sessionStorage.setItem(sessionTokenId, newToken);
+        const room = data?.ret?.room || data?.ret?.res?.room;
+        if (room && typeof room.grrIsTextMode === "boolean")
+            rememberTextModePreference(room.grrIsTextMode);
         return data;
     });
     //debugger;
@@ -9770,7 +9803,7 @@ $(function () {
 
         mostraPleaseWait();
 
-        let data = await doPostTry(`${prefissoWebApi}/api/loadGame`, i, { useSession: false });
+        let data = await doPostTry(`${prefissoWebApi}/api/loadGame`, i, { useSession: true });
         ////let err1;
         //try
         //{

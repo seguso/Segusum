@@ -1,4 +1,5 @@
 using Segusum.AspNetCore;
+using Seg;
 using Xunit;
 
 namespace Segusum.Admin.Tests;
@@ -9,8 +10,8 @@ public sealed class SegusumSessionStoreTests
     public void CreatesOpaqueHighEntropyTokenAndFindsSession()
     {
         var store = new SegusumSessionStore();
-        var first = store.Create(7, "mau", false, true, 42);
-        var second = store.Create(7, "mau", false, true, 42);
+        var first = store.Create(7, "mau", true, 42);
+        var second = store.Create(7, "mau", true, 42);
 
         Assert.NotEqual(first, second);
         Assert.True(first.Length >= 43);
@@ -18,13 +19,15 @@ public sealed class SegusumSessionStoreTests
         Assert.Equal(7, session.UserId);
         Assert.Equal("mau", session.Username);
         Assert.True(session.IsCasualMode);
+        Assert.Equal(42, session.GameId);
+        Assert.DoesNotContain(typeof(SegusumSessionStore.SessionData).GetProperties(), property => property.Name == "IsTextMode");
     }
 
     [Fact]
     public async Task ConcurrentLookupAndRemovalAreSafe()
     {
         var store = new SegusumSessionStore();
-        var tokens = Enumerable.Range(1, 100).Select(i => store.Create(i, $"u{i}", false, false, null)).ToArray();
+        var tokens = Enumerable.Range(1, 100).Select(i => store.Create(i, $"u{i}", false, null)).ToArray();
         await Task.WhenAll(tokens.Select(token => Task.Run(() =>
         {
             for (var i = 0; i < 100; i++) store.TryGet(token, out _);
@@ -37,7 +40,7 @@ public sealed class SegusumSessionStoreTests
     public void ExpiredSessionIsRejected()
     {
         var store = new SegusumSessionStore(TimeSpan.Zero);
-        var token = store.Create(1, "u", false, false, null);
+        var token = store.Create(1, "u", false, null);
         Assert.False(store.TryGet(token, out _));
     }
 
@@ -45,15 +48,15 @@ public sealed class SegusumSessionStoreTests
     public void TokenFromPreviousProcessIsNotAcceptedByFreshStore()
     {
         var oldStore = new SegusumSessionStore();
-        var oldToken = oldStore.Create(7, "mau", false, false, 42);
+        var oldToken = oldStore.Create(7, "mau", false, 42);
         var restartedStore = new SegusumSessionStore();
 
         Assert.False(restartedStore.TryGet(oldToken, out _));
 
-        var newToken = restartedStore.Create(7, "mau", false, false, 42);
+        var newToken = restartedStore.Create(7, "mau", false, 42);
         Assert.NotEqual(oldToken, newToken);
         Assert.True(restartedStore.TryGet(newToken, out var session));
-        Assert.False(session.IsTextMode);
+        Assert.Equal(42, session.GameId);
     }
 
     [Fact]
@@ -65,5 +68,33 @@ public sealed class SegusumSessionStoreTests
         Assert.False(store.ShouldPersistAccess(7, first.AddSeconds(59)));
         Assert.True(store.ShouldPersistAccess(7, first.AddSeconds(60)));
         Assert.True(store.ShouldPersistAccess(8, first.AddSeconds(1)));
+    }
+
+    [Fact]
+    public void MissingOrInvalidRequestModeDefaultsToGraphics()
+    {
+        Assert.False(PresentationModeContext.ResolveRequestHeader(null));
+        Assert.False(PresentationModeContext.ResolveRequestHeader(""));
+        Assert.False(PresentationModeContext.ResolveRequestHeader("invalid"));
+        Assert.False(PresentationModeContext.ResolveRequestHeader("0"));
+        Assert.True(PresentationModeContext.ResolveRequestHeader("1"));
+    }
+
+    [Fact]
+    public async Task PresentationModeIsIsolatedAcrossConcurrentRequests()
+    {
+        async Task<bool> ReadAfterYield(bool isTextMode)
+        {
+            using var scope = PresentationModeContext.Push(isTextMode);
+            await Task.Yield();
+            return PresentationModeContext.IsTextMode;
+        }
+
+        var results = await Task.WhenAll(
+            Task.Run(() => ReadAfterYield(true)),
+            Task.Run(() => ReadAfterYield(false)));
+
+        Assert.Equal(new[] { true, false }, results);
+        Assert.False(PresentationModeContext.IsTextMode);
     }
 }

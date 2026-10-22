@@ -84,6 +84,18 @@ Mancanze/null/vuoti devono fallire a startup con errore esplicito. Non reintrodu
 
 I favicon/manifest sono anch'essi game assets obbligatori, non convenzioni dell'engine.
 
+### Modalità grafica/testuale del client
+
+- La preferenza viene risolta nel browser: `?textmode=1/0` prevale su `localStorage`; senza parametro si ripristina la preferenza browser, con default grafico.
+- `main43.js` invia la modalità corrente con `X-Segusum-Text-Mode` dal wrapper centralizzato `doPost`. La risposta aggiorna il flag client in coerenza con `grrIsTextMode`.
+- `ApiBase.auth` risolve l'header per ogni richiesta; il bootstrap `createUserAndStartGame` usa lo stesso resolver perché non passa da `auth`. Modalità assente o non valida significa grafica.
+- `SegusumSessionStore.SessionData` contiene solo autenticazione/game mode casuale/game ID; non contiene più `IsTextMode`. `loadGame` può riusare il bearer durante un reload.
+- `WorldBase.IsTextMode` legge `PresentationModeContext`, un `AsyncLocal` transitorio. Il valore non è una proprietà del World condiviso, non è serializzato e non viene passato ai metodi di restore.
+- `GetRoomRes.grrIsTextMode` continua a guidare il frontend (`.roomTextMode` oppure scena grafica). `narImg` e `narRoom` leggono il contesto della richiesta.
+- `user.canPlayGraphicsMode` e le mappe di `FilePersistence` restano per conservare i record legacy; il campo non viene più letto per autenticazione/rendering né inizializzato sui nuovi account.
+- Il gameplay SEG non è stato modificato: le sue condizioni testuali/grafiche restano nel runtime e vedono il contesto corrente durante la richiesta.
+- La pagina Razor carica `main43.js?ver=93` dal package `Segusum.WebClient`; dopo il prossimo package DEV verificare HTTP sia il riferimento versione sia il contenuto statico servito.
+
 ### Ultimo task UX noto
 
 Il click sull'icona occhio/Guarda ora fa lampeggiare una volta gli hotspot già visibili con fade-out -> fade-in. Commit di riferimento su main: `1b37a74d68d170187caa6d497419fc2b1b2fd62c` (`Flash visible hotspots on eye click`).

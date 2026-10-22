@@ -54,9 +54,17 @@ namespace Seg
 
 
         /// <summary>
-        /// normalmente questo non sarebbe una proprietà del mondo ma dell'utente, così come i savegame names. Ma lo copio nel mondo perche' l'engine lo deve sapere ma l'utente dell'engine non lo può passare sempre all'engine.
+        /// STORICO: la preferenza veniva copiata dal client sul World perché alcuni
+        /// helper dell'engine non ricevevano il parametro di presentazione. Oggi il
+        /// valore è request-scoped e il World resta condivisibile tra richieste.
         /// </summary>
-        public bool IsTextMode { get; protected internal set; }
+        // Keep the property as the gameplay-facing compatibility surface; its value
+        // is supplied by PresentationModeContext's AsyncLocal request context.
+        public bool IsTextMode
+        {
+            get => PresentationModeContext.IsTextMode;
+            protected internal set => PresentationModeContext.IsTextMode = value;
+        }
 
         public bool IsCasualMode { get; protected internal set; }
         public bool IsTutorialMode { get; protected internal set; }

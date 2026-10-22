@@ -50,6 +50,18 @@ Tra i lifecycle gameplay supportati ci sono:
 
 Per `before-action-executed`, il contesto C# `LogicObj lo, Objective obj, Room ro, out bool cancel` deve mantenere `lo`, `obj`, `ro`, `cancel` come simboli contestuali; `cancel` è assegnabile con normale assignment.
 
+## Modalità grafica/testuale del client
+
+- La modalità grafica/testuale è una preferenza di presentazione del browser, non una proprietà della sessione di autenticazione o del salvataggio.
+- `?textmode=1` e `?textmode=0` prevalgono sulla preferenza `localStorage`; senza parametro si usa la preferenza browser, con default grafico.
+- Il client invia la scelta tramite l'header centralizzato `X-Segusum-Text-Mode`. Le richieste prive di header usano il default grafico, mai un valore storico di sessione o utente.
+- `PresentationModeContext` propaga il valore come contesto `AsyncLocal` per la richiesta. `WorldBase.IsTextMode` è soltanto la superficie di compatibilità per gameplay/helper esistenti e non conserva un campo nel World condiviso.
+- `restoreWorldFromMemoryOrDisk` e `restoreWorldFromDisk` non ricevono né assegnano la modalità. `GetRoomRes.grrIsTextMode` descrive la risposta effettiva e guida il layout del client.
+- `SegusumSessionStore.SessionData` non conserva la modalità. Il bearer autentica lo stesso giocatore quando cambia la preferenza.
+- `user.canPlayGraphicsMode` resta soltanto per round-trip dei record legacy; non va reintrodotto come fonte di rendering né rimosso con una migrazione distruttiva.
+- Non aggiungere parametri di modalità a ogni API: il punto di ingresso è il trasporto client centralizzato e la risoluzione in `ApiBase.auth` (più il bootstrap di creazione account, che non passa da `auth`).
+- Se cambia JavaScript, incrementare il cache-busting nella Razor page che carica l'asset e verificare il percorso static web asset effettivamente servito.
+
 ## Tooling semantic / VS Code
 
 - Definition, References e Rename devono usare la stessa identity semantica; niente fallback testuale.
