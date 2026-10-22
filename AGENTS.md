@@ -105,3 +105,38 @@ Quando un task produce modifiche valide e le verifiche concordate sono verdi:
 - riportare SHA e working tree status.
 
 Non lasciare modifiche valide soltanto nel working tree salvo istruzione esplicita di fermarsi prima del commit/push.
+
+## Coordinamento AI e handoff operativo
+
+Per continuità tra ChatGPT, Codex e lo sviluppatore usare questi documenti con ruoli distinti:
+
+- `docs/AI-HANDOFF.md`: **handoff corrente**. Deve descrivere lo stato presente del progetto, decisioni vincolanti, problemi aperti, workflow attivo e prossimo lavoro. È il primo documento da leggere quando si riprende il progetto in una nuova conversazione/sessione.
+- `docs/SEGUSUM-DSL-HANDOUT.md`: **handout tecnico/storico** della DSL, del transpiler, del tooling e delle migrazioni. Serve per il contesto profondo e la storia delle decisioni; non deve sostituire il handoff corrente.
+- `AGENTS.md`: regole operative e architetturali vincolanti.
+
+All'inizio di una nuova sessione:
+1. leggere `AGENTS.md`;
+2. leggere `docs/AI-HANDOFF.md`;
+3. se il task riguarda DSL/migrazione/tooling, leggere anche `docs/SEGUSUM-DSL-HANDOUT.md`;
+4. se coinvolge Litgir, leggere anche il suo `AGENTS.md`, `docs/AI-HANDOFF.md` e, quando rilevante, `docs/ENGINE-CONVENTIONS.md`.
+
+Dopo un task importante che cambia uno dei seguenti elementi:
+- stato di una migrazione;
+- decisione architetturale;
+- workflow build/package;
+- bug/tooling noto;
+- prossimo lavoro consigliato;
+- commit/SHA di riferimento operativo;
+
+aggiornare `docs/AI-HANDOFF.md` nello stesso task prima del report finale.
+
+Il handoff NON è un changelog completo: rimuovere o riscrivere informazioni superate e mantenere solo lo stato utile a riprendere il lavoro. Se il codice/HEAD corrente contraddice il handoff, verificare il codice, correggere il handoff e non perpetuare informazioni stale.
+
+Quando un task coinvolge entrambi i repo, aggiornare entrambi i handoff se lo stato condiviso cambia.
+
+Nel report finale riportare sempre:
+- SHA finali;
+- build/test eseguiti;
+- package provenance quando coinvolge Segusum -> Litgir;
+- working tree status;
+- eventuali punti lasciati aperti.
