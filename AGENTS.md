@@ -53,10 +53,11 @@ Per `before-action-executed`, il contesto C# `LogicObj lo, Objective obj, Room r
 ## Modalità grafica/testuale del client
 
 - La modalità grafica/testuale è una preferenza di presentazione del browser, non una proprietà della sessione di autenticazione o del salvataggio.
-- `?textmode=1` e `?textmode=0` prevalgono sulla preferenza `localStorage`; senza parametro si usa la preferenza browser, con default grafico.
-- Il client invia la scelta tramite l'header centralizzato `X-Segusum-Text-Mode`. Le richieste prive di header usano il default grafico, mai un valore storico di sessione o utente.
-- `PresentationModeContext` propaga il valore come contesto `AsyncLocal` per la richiesta. `WorldBase.IsTextMode` è soltanto la superficie di compatibilità per gameplay/helper esistenti e non conserva un campo nel World condiviso.
-- `restoreWorldFromMemoryOrDisk` e `restoreWorldFromDisk` non ricevono né assegnano la modalità. `GetRoomRes.grrIsTextMode` descrive la risposta effettiva e guida il layout del client.
+- `?textmode=0/1/2` prevale sulla preferenza `localStorage`; senza parametro si usa la preferenza browser, con default grafico. La modalità 2 è testuale con anteprima non interattiva del fondale corrente.
+- Il client invia il valore numerico tramite l'header centralizzato `X-Segusum-Text-Mode`. Le richieste prive o con valore non valido usano il default grafico, mai un valore storico di sessione o utente.
+- `PresentationModeContext` propaga l'enum tri-state come contesto `AsyncLocal`. `WorldBase.IsTextMode` è soltanto la vista booleana derivata (`mode != Graphics`) per gameplay/helper esistenti e non conserva un campo nel World condiviso.
+- `restoreWorldFromMemoryOrDisk` e `restoreWorldFromDisk` non ricevono né assegnano la modalità. `GetRoomRes.grrPresentationMode` descrive il valore effettivo; `grrIsTextMode` è la vista derivata che guida il layout testuale o grafico.
+- `GetRoomRes.grrTextModePreviewImg` è nullable e contiene il fondale configurato della stanza corrente senza fallback. Il client lo mostra soltanto in modalità 2, sopra il titolo, dentro `.roomTextMode`, con `pointer-events: none`.
 - `SegusumSessionStore.SessionData` non conserva la modalità. Il bearer autentica lo stesso giocatore quando cambia la preferenza.
 - `user.canPlayGraphicsMode` resta soltanto per round-trip dei record legacy; non va reintrodotto come fonte di rendering né rimosso con una migrazione distruttiva.
 - Non aggiungere parametri di modalità a ogni API: il punto di ingresso è il trasporto client centralizzato e la risoluzione in `ApiBase.auth` (più il bootstrap di creazione account, che non passa da `auth`).

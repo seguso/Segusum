@@ -3777,10 +3777,10 @@ namespace Seg
 
         private bool resolveRequestPresentationMode()
         {
-            var isTextMode = PresentationModeContext.ResolveRequestHeader(
+            var mode = PresentationModeContext.ResolveRequestHeader(
                 Request?.Headers[PresentationModeContext.RequestHeaderName].ToString());
-            PresentationModeContext.IsTextMode = isTextMode;
-            return isTextMode;
+            PresentationModeContext.Mode = mode;
+            return mode != PresentationMode.Graphics;
         }
 
         protected user auth(Credentials cr, segusumDb db, out bool isTextMode)

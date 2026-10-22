@@ -4948,13 +4948,15 @@ namespace Seg
             }
             var grrTalkNow = roomCycle != null && CycleMemory.wouldSaySomethingNewAndImportant(roomCycle, this);
 
+            var responsePresentationMode = PresentationModeContext.ForRoomResponse(isTextMode);
             var roomDesc = new GetRoomRes
             {
                 grrHideInsideLoId = loHideInside()?.loId,
                 grrClimbLoId = loClimb()?.loId,
                 grrTravestitiLoId = loDisguiseAs()?.loId,
                 grrExplanationsWithCont = grrExpCont,
-                grrIsTextMode = isTextMode,
+                grrIsTextMode = responsePresentationMode != PresentationMode.Graphics,
+                grrPresentationMode = (int)responsePresentationMode,
                 grrExplanationsToExcludeOfObjective = grrExplanationsToExcludeOfObj,
                 grrExplanationsToExcludeOfLo = grrExplanationsToExcludeOfLo,
                 grrExplanationsGlobal = grrExplanationsGlobal,
@@ -4984,6 +4986,7 @@ namespace Seg
                 grrTemplatesToExcludeOfObj = grrTemplatesToExcludeOfObj,
                 //grrPuzzleSolutions = grrPuzzleSolutions,
                 roomName = curRoom.dynamicNameForMapTranslated(xdocI).ToUpper(),
+                grrTextModePreviewImg = curRoom.imgPath(),
                 grrInvObjects = grrInvObjects,
                 //grrDynamicExclusions = dynamicExclusions(),
                 //grrInvConcepts = grrInvConcepts,

@@ -281,30 +281,57 @@ function getLang() {
 
 const textModePreferenceKey = "segusum_textmode";
 
-function resolveTextModePreference() {
+function parsePresentationMode(value) {
+    if (value === "0" || value === 0) return 0;
+    if (value === "1" || value === 1) return 1;
+    if (value === "2" || value === 2) return 2;
+    return null;
+}
+
+function resolvePresentationModePreference() {
     const requested = new URLSearchParams(window.location.search || "").get("textmode");
-    if (requested === "1" || requested === "0") {
-        const isTextMode = requested === "1";
-        try { localStorage.setItem(textModePreferenceKey, requested); } catch (_) { }
-        return isTextMode;
+    const requestedMode = parsePresentationMode(requested);
+    if (requestedMode !== null) {
+        try { localStorage.setItem(textModePreferenceKey, String(requestedMode)); } catch (_) { }
+        return requestedMode;
     }
 
     try {
-        return localStorage.getItem(textModePreferenceKey) === "1";
+        return parsePresentationMode(localStorage.getItem(textModePreferenceKey)) ?? 0;
     }
     catch (_) {
-        return false;
+        return 0;
     }
 }
 
-function rememberTextModePreference(isTextMode) {
-    gIsTextMode = isTextMode === true;
-    try { localStorage.setItem(textModePreferenceKey, gIsTextMode ? "1" : "0"); } catch (_) { }
+function rememberPresentationMode(mode) {
+    const parsedMode = parsePresentationMode(mode);
+    if (parsedMode === null) return;
+    gPresentationMode = parsedMode;
+    try { localStorage.setItem(textModePreferenceKey, String(gPresentationMode)); } catch (_) { }
+}
+
+function isTextMode() {
+    return gPresentationMode !== 0;
+}
+
+function updateTextModeRoomBackgroundPreview(roomDesc) {
+    const preview = $(".textModeRoomBackgroundPreview");
+    const image = preview.find("img");
+    const imagePath = roomDesc?.grrTextModePreviewImg;
+    if (gPresentationMode !== 2 || !imagePath) {
+        image.removeAttr("src");
+        preview.hide();
+        return;
+    }
+
+    image.attr("src", cacheBustGraphicsUrl(prefissoWebApi + "/" + imagePath));
+    preview.show();
 }
 
 // URL override > browser preference > graphics. The URL value is copied to
 // localStorage so subsequent API requests and reloads use one client choice.
-var gIsTextMode = resolveTextModePreference();
+var gPresentationMode = resolvePresentationModePreference();
 
 
 var gGameId;
@@ -1692,7 +1719,7 @@ async function doPost(url, inp, options = {}) {
     const useSession = options.useSession !== false
         && (!isCredentialBootstrapUrl(url) || options.useSession === true);
     const sessionToken = useSession ? sessionStorage.getItem(sessionTokenId) : null;
-    const headers = { "X-Segusum-Text-Mode": gIsTextMode ? "1" : "0" };
+    const headers = { "X-Segusum-Text-Mode": String(gPresentationMode) };
     if (sessionToken) headers.Authorization = `Bearer ${sessionToken}`;
     var ret = $.ajax({
         type: "POST", url: url, data: JSON.stringify(inp), contentType: "application/json",
@@ -1701,8 +1728,10 @@ async function doPost(url, inp, options = {}) {
         const newToken = xhr.getResponseHeader("X-Segusum-Session-Token");
         if (newToken) sessionStorage.setItem(sessionTokenId, newToken);
         const room = data?.ret?.room || data?.ret?.res?.room;
-        if (room && typeof room.grrIsTextMode === "boolean")
-            rememberTextModePreference(room.grrIsTextMode);
+        if (room && parsePresentationMode(room.grrPresentationMode) !== null)
+            rememberPresentationMode(room.grrPresentationMode);
+        else if (room && typeof room.grrIsTextMode === "boolean")
+            rememberPresentationMode(room.grrIsTextMode ? 1 : 0);
         return data;
     });
     //debugger;
@@ -6910,6 +6939,8 @@ async function rebuildGraphicsCore(reloadAssets) {
     else { // text mode
 
         //debugger;
+
+        updateTextModeRoomBackgroundPreview(g_last_room_desc);
 
         $(".dovesei").remove();
         $("<div class='dovesei'>").appendTo(".textModeLeftBar").text(lCurRoom.rfcNameTextMode);

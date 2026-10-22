@@ -41,6 +41,11 @@ namespace Seg
         public string grrCasualInterfaceSubtitle { get; set; }
 
         public bool grrIsTextMode { get; set; }
+        public int grrPresentationMode { get; set; }
+
+#nullable enable
+        public string? grrTextModePreviewImg { get; set; }
+#nullable restore
 
         //public bool grrCannotTalkNow;
 

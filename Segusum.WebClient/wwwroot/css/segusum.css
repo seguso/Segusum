@@ -2919,6 +2919,23 @@ div#dialogChooseExplanation .introHaiScelto {
     line-height: 23px;
 }
 
+.textModeRoomBackgroundPreview {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    margin: 0 0 12px;
+    pointer-events: none;
+}
+
+.textModeRoomBackgroundPreview img {
+    display: block;
+    max-width: 100%;
+    width: 100%;
+    height: auto;
+    pointer-events: none;
+    user-select: none;
+}
+
 
 .roomTextMode {
     display: flex;
